@@ -30,7 +30,7 @@ Not exercised natively: OpenCode nested approval IDs, `permission.replied`, and 
 
 ## Automated coverage
 
-`npm run verify` checks formatting, ESLint, strict types, 99 behavior and integration tests, Raycast validation, and build. Interaction tests cover sanitized event metadata, approval queues across flat, nested, invalidation, and `permission.replied` resolutions, advertised decisions, live-status gating, Waypoint's current-plan rules, question shape validation, exact answer serialization including OpenCode limits, HTTP outcome classification, storage validation, history watermarks, snapshot ordering across refreshes and the live feed, replaced and changed requests, unconfirmed and definitive outcomes, storage failure after acknowledgement, completion after closing, draft pruning, and coordination with Quick Chat, including clearing a checkpoint for Quick Chat's own conversation.
+`npm run verify` checks formatting, ESLint, strict types, 100 behavior and integration tests, Raycast validation, and build. Interaction tests cover sanitized event metadata, approval queues across flat, nested, invalidation, and `permission.replied` resolutions, advertised decisions, live-status gating, Waypoint's current-plan rules, question shape validation, exact answer serialization including OpenCode limits, HTTP outcome classification, storage validation, history watermarks, snapshot ordering across refreshes and the live feed, replaced and changed requests, unconfirmed and definitive outcomes, storage failure after acknowledgement, completion after closing, draft pruning, and coordination with Quick Chat, including clearing a checkpoint for Quick Chat's own conversation.
 
 ## Screenshots
 
