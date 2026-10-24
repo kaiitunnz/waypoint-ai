@@ -490,3 +490,52 @@ test("interaction checkpoints coordinate with Quick Chat without rebinding it", 
   assert.equal(f.server.posts.length, 1);
   await f.close();
 });
+
+test("clearing an own-session checkpoint unblocks Quick Chat, and another conversation's cannot be cleared here", async () => {
+  const f = await fixture();
+  const installation = (await f.store.load(connection.id)).installation;
+  f.server.sessions.chat = {
+    ...f.server.sessions.chat,
+    status: "waiting_input",
+    tags: { [ownerTag]: installation, [roleTag]: "quick-chat" },
+  };
+  await f.store.transaction(connection.id, async (saved, persist) => {
+    saved.pointer = "chat";
+    await persist();
+  });
+  const chat = new QuickChatController(
+    connection,
+    f.store,
+    async () => undefined,
+    false,
+    f.client,
+    () => 1000,
+  );
+  await chat.start();
+  assert.equal(chat.canSend(), true);
+
+  f.server.events.push(wire(1, "approval_request", "Run", { approval_id: "c1" }, "chat"));
+  const own = f.controller("chat");
+  await own.start();
+  f.server.status = 500;
+  await own.submit(own.getSnapshot().interactions[0], { decision: "approve" });
+  f.server.status = 200;
+  await chat.syncPending();
+  assert.equal(chat.canSend(), false);
+  assert.match(chat.getSnapshot().notice!, /request is unconfirmed/);
+
+  const other = f.controller("agent");
+  await other.start();
+  await other.releasePending();
+  assert.equal(
+    (await f.store.load(connection.id)).pending?.sessionId,
+    "chat",
+    "another conversation's checkpoint stays",
+  );
+
+  await own.releasePending();
+  await chat.syncPending();
+  assert.equal(chat.canSend(), true);
+  assert.equal(chat.getSnapshot().session?.id, "chat");
+  await f.close();
+});

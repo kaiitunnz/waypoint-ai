@@ -318,6 +318,27 @@ export class QuickChatController {
       this.publish({ busy: false });
     }
   }
+  // Session interactions share this checkpoint; follow changes made outside this controller.
+  async syncPending() {
+    if (this.state.busy) return;
+    try {
+      await this.queue;
+      const saved = await this.store.load(this.connection.id);
+      if (saved.pending?.operationId === this.state.pending?.operationId) return;
+      this.publish({
+        pending: saved.pending,
+        error: undefined,
+        notice:
+          saved.pending?.kind === "interaction"
+            ? "A response to a session request is unconfirmed. Check it before sending; nothing was resent."
+            : saved.pending
+              ? "An earlier operation has an unconfirmed outcome. Check it before sending again; no message was resent."
+              : undefined,
+      });
+    } catch {
+      /* The next send re-checks the checkpoint under the lock. */
+    }
+  }
   async reconcile() {
     if (this.state.busy || !this.state.metadata) return;
     const metadata = this.state.metadata;

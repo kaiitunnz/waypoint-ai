@@ -68,6 +68,7 @@ export function ChatConversation({
   status,
   busy = false,
   revision = 0,
+  onPendingChange,
   refreshConnections,
   emptyMarkdown,
 }: {
@@ -85,6 +86,7 @@ export function ChatConversation({
   status?: string;
   busy?: boolean;
   revision?: number;
+  onPendingChange?: () => void;
   refreshConnections: () => Promise<void>;
   emptyMarkdown?: string;
 }) {
@@ -96,6 +98,10 @@ export function ChatConversation({
     metadata,
     feed,
   );
+  const pendingOperation = interactionState.pending?.operationId;
+  useEffect(() => {
+    onPendingChange?.();
+  }, [pendingOperation]);
   const interactionUrl = sessionId ? sessionUrl(connection.frontendUrl, sessionId) : undefined;
   const [mode, setMode] = useState<ReadingMode>("conversation");
   const [interactionSelection, setInteractionSelection] = useState<string>();

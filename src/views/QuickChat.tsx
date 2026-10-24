@@ -93,7 +93,10 @@ function QuickChatView({
     />
   );
   if (state.loading && !state.session) return <LoadingView title="Preparing your chat…" />;
-  const status = state.error || (state.pending ? state.notice || "Previous attempt unconfirmed." : undefined);
+  // The conversation's own Needs Attention section covers a checkpoint for one of its requests.
+  const ownInteraction = state.pending?.kind === "interaction" && state.pending.sessionId === state.session?.id;
+  const status =
+    state.error || (state.pending && !ownInteraction ? state.notice || "Previous attempt unconfirmed." : undefined);
   if (metadata)
     return (
       <ChatConversation
@@ -119,6 +122,7 @@ function QuickChatView({
         status={status || undefined}
         busy={state.busy}
         revision={state.revision}
+        onPendingChange={() => void controller.syncPending()}
       />
     );
   const context = metadata && state.defaults ? launchContext(state.defaults, metadata) : undefined;

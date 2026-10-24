@@ -213,7 +213,13 @@ export function SessionInteraction({
   const current = state.interactions.find((item) => item.key === captured.key);
   const eligible = current?.signature === captured.signature && current.availability === "actionable";
   const draft = state.drafts[controller.draftKey(captured)] ?? {};
-  const unconfirmed = state.pending?.kind === "interaction";
+  const unconfirmed = controller.owns(state.pending);
+  const blockedBy =
+    state.pending && !unconfirmed
+      ? state.pending.kind === "interaction"
+        ? "A response in another conversation is unconfirmed. Check it there first."
+        : "A Quick Chat operation is unconfirmed. Check it in Quick Chat first."
+      : undefined;
   const mounted = useRef(true);
   const { pop } = useNavigation();
   useEffect(() => {
@@ -317,6 +323,7 @@ export function SessionInteraction({
           <Form.Description title={state.error ? "Needs attention" : ""} text={state.error ?? state.notice!} />
         )
       )}
+      {blockedBy && <Form.Description title="Status" text={blockedBy} />}
       {status && <Form.Description title="Status" text={status} />}
       {!status && current?.afterApproval && (
         <Form.Description title="Status" text="An approval is also pending. Some agents need it answered first." />

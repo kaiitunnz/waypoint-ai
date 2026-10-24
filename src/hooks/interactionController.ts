@@ -103,6 +103,9 @@ export class InteractionController {
   private derive() {
     this.publish({ interactions: this.interactions() });
   }
+  owns(pending?: PendingOperation): pending is PendingOperation {
+    return pending?.kind === "interaction" && pending.sessionId === this.sessionId;
+  }
   draftKey(interaction: Interaction) {
     return `${this.sessionId}:${interaction.key}:${interaction.signature}`;
   }
@@ -348,7 +351,7 @@ export class InteractionController {
   }
   async releasePending() {
     const pending = this.state.pending;
-    if (this.state.busy || pending?.kind !== "interaction") return;
+    if (this.state.busy || !this.owns(pending)) return;
     this.publish({ busy: true, error: undefined, notice: undefined });
     try {
       await this.queue;
