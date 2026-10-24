@@ -48,6 +48,7 @@ export class QuickChatController {
   ) {
     this.draftKey = forceNew ? "new" : "quick";
   }
+  canSend = () => this.prepared && !this.state.loading && !this.state.busy && !this.state.pending;
   getSnapshot = () => this.state;
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -79,6 +80,11 @@ export class QuickChatController {
       if (this.state.session) {
         const session = await this.client.session(this.connection.token, this.state.session.id);
         if (this.active && generation === this.generation) this.publish({ session });
+      } else if (saved.pending?.sessionId) {
+        const session = await this.client.session(this.connection.token, saved.pending.sessionId);
+        this.checkOwned(session, saved.installation, metadata);
+        if (this.active && generation === this.generation) this.publish({ session });
+        this.prepared = true;
       } else if (!this.prepared) {
         this.observedPointer = saved.pointer;
         this.observedDefaults = JSON.stringify(saved.defaults);
@@ -172,7 +178,7 @@ export class QuickChatController {
       return;
     const text = this.state.draft.trim();
     const metadata = this.state.metadata;
-    this.publish({ busy: true, error: undefined });
+    this.publish({ busy: true, error: undefined, notice: undefined });
     try {
       await this.queue;
       await this.store.transaction(this.connection.id, async (saved, persist) => {
@@ -185,7 +191,8 @@ export class QuickChatController {
           !this.forceNew &&
           saved.defaults.mode !== "new" &&
           this.observedDefaults === JSON.stringify(saved.defaults) &&
-          saved.pointer
+          saved.pointer &&
+          saved.pointer !== this.observedPointer
         ) {
           const candidate = await this.client.session(this.connection.token, saved.pointer);
           this.checkOwned(candidate, saved.installation, metadata);
@@ -300,7 +307,7 @@ export class QuickChatController {
   async reconcile() {
     if (this.state.busy || !this.state.metadata) return;
     const metadata = this.state.metadata;
-    this.publish({ busy: true, error: undefined });
+    this.publish({ busy: true, error: undefined, notice: undefined });
     try {
       await this.queue;
       await this.store.transaction(this.connection.id, async (saved, persist) => {
@@ -363,22 +370,45 @@ export class QuickChatController {
     await this.reconcile();
     if (this.state.error || !this.state.pending) return;
     const operationId = this.state.pending.operationId;
-    await this.store.transaction(this.connection.id, async (saved, persist) => {
-      if (saved.pending?.operationId !== operationId)
-        throw new Error("The pending operation changed. Check the outcome again.");
-      saved.pending = undefined;
-      await persist();
-    });
-    this.publish({
-      pending: undefined,
-      notice: "Retry explicitly authorized. The draft is kept; press Send when ready.",
-    });
+    try {
+      await this.store.transaction(this.connection.id, async (saved, persist) => {
+        if (saved.pending?.operationId !== operationId)
+          throw new Error("The pending operation changed. Check the outcome again.");
+        saved.pending = undefined;
+        await persist();
+      });
+      this.publish({ pending: undefined, notice: undefined });
+    } catch (error) {
+      this.publish({ error: error instanceof Error ? error.message : "Could not authorize another attempt." });
+    }
+  }
+  async abandonPending() {
+    if (this.state.busy || !this.state.pending) return;
+    const operationId = this.state.pending.operationId;
+    this.publish({ busy: true });
+    try {
+      await this.queue;
+      await this.store.transaction(this.connection.id, async (saved, persist) => {
+        if (saved.pending?.operationId !== operationId)
+          throw new Error("The pending attempt changed. Check its outcome again.");
+        if (saved.pointer === saved.pending.sessionId) saved.pointer = undefined;
+        saved.pending = undefined;
+        await persist();
+      });
+      this.prepared = true;
+      this.observedDefaults = "manual-new";
+      this.publish({ session: undefined, pending: undefined, error: undefined, notice: undefined });
+    } catch (error) {
+      this.publish({ error: error instanceof Error ? error.message : "Could not abandon the attempt." });
+    } finally {
+      this.publish({ busy: false });
+    }
   }
   async action(action: "interrupt" | "reattach") {
     if (this.state.busy || this.state.pending || !this.state.session || !this.state.metadata) return;
     if (action === "reattach" && !canReattach(this.state.session, this.state.metadata)) return;
     const id = this.state.session.id;
-    this.publish({ busy: true, error: undefined });
+    this.publish({ busy: true, error: undefined, notice: undefined });
     try {
       await this.queue;
       await this.store.transaction(this.connection.id, async (saved, persist) => {

@@ -1,5 +1,5 @@
 import { randomUUID, createHash } from "node:crypto";
-import { mkdir, writeFile, link, unlink, readFile, rmdir } from "node:fs/promises";
+import { mkdir, writeFile, link, unlink, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isRecord } from "../domain/connections";
 
@@ -35,7 +35,7 @@ export class ServerMutex {
           acquired = true;
         } catch (error) {
           if (!isRecord(error) || error.code !== "EEXIST") throw error;
-          await this.reclaim(path);
+          await this.reclaim(path, owner);
           if (Date.now() - started >= this.waitMs)
             throw new Error("Another Quick Chat operation is still active for this server. Retry when it finishes.");
           await new Promise((resolve) => setTimeout(resolve, 25));
@@ -50,28 +50,56 @@ export class ServerMutex {
       await unlink(owner).catch(() => undefined);
     }
   }
-  private async reclaim(path: string) {
-    const guard = `${path}.reclaim`;
+  private async owner(path: string): Promise<{ pid: number; nonce: string } | undefined> {
     try {
-      await mkdir(guard);
+      const value: unknown = JSON.parse(await readFile(path, "utf8"));
+      if (
+        isRecord(value) &&
+        Number.isSafeInteger(value.pid) &&
+        Number(value.pid) > 0 &&
+        typeof value.nonce === "string" &&
+        /^[A-Za-z0-9-]{1,128}$/.test(value.nonce)
+      )
+        return { pid: Number(value.pid), nonce: value.nonce };
     } catch {
-      return;
+      /* An unreadable owner cannot safely be reclaimed. */
     }
+    return undefined;
+  }
+  private dead(pid: number): boolean {
     try {
-      let value: unknown;
+      process.kill(pid, 0);
+      return false;
+    } catch (error) {
+      return isRecord(error) && error.code === "ESRCH";
+    }
+  }
+  private async reclaim(path: string, owner: string) {
+    const stale = await this.owner(path);
+    if (!stale || !this.dead(stale.pid)) return;
+    // Immutable claim slots let a successor recover a dead reclaimer without stealing a live claim.
+    const visited: string[] = [];
+    let nonce = stale.nonce;
+    for (let attempt = 0; attempt < 128; attempt++) {
+      const claim = `${path}.reclaim.${nonce}`;
       try {
-        value = JSON.parse(await readFile(path, "utf8"));
-      } catch {
-        return;
-      }
-      if (!isRecord(value) || !Number.isSafeInteger(value.pid) || Number(value.pid) <= 0) return;
-      try {
-        process.kill(Number(value.pid), 0);
+        await link(owner, claim);
       } catch (error) {
-        if (isRecord(error) && error.code === "ESRCH") await unlink(path).catch(() => undefined);
+        if (!isRecord(error) || error.code !== "EEXIST") throw error;
+        const incumbent = await this.owner(claim);
+        if (!incumbent || !this.dead(incumbent.pid)) return;
+        visited.push(claim);
+        nonce = incumbent.nonce;
+        continue;
       }
-    } finally {
-      await rmdir(guard);
+      try {
+        const current = await this.owner(path);
+        if (current?.nonce === stale.nonce && this.dead(current.pid)) await unlink(path);
+      } finally {
+        await unlink(claim).catch(() => undefined);
+        for (const previous of visited) await unlink(previous).catch(() => undefined);
+      }
+      return;
     }
   }
 }

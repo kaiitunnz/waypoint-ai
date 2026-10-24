@@ -19,10 +19,17 @@ const connection = { id: "server-a", apiUrl: "http://localhost", name: "A", toke
 async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), "quick-chat-tests-"));
   const values = new Map<string, string>();
+  let failFinalWrite = false;
+  let inputGate: Promise<void> | undefined;
   const store = new QuickChatStore(
     {
       getItem: async (key) => values.get(key),
       setItem: async (key, value) => {
+        const state = JSON.parse(value);
+        if (failFinalWrite && !state.pending && Object.keys(state.sentAt).length) {
+          failFinalWrite = false;
+          throw new Error("Storage unavailable");
+        }
         values.set(key, value);
       },
     },
@@ -56,6 +63,7 @@ async function fixture() {
         pending_questions: { questions: [], as_of_sequence: 0, revision: 0 },
       });
     if (path.endsWith("/input")) {
+      await inputGate;
       if (uncertainInput) throw new Error("private connection failure");
       return respond({ session }, inputStatus);
     }
@@ -82,6 +90,12 @@ async function fixture() {
     requests,
     client,
     controller,
+    setInputGate: (value: Promise<void>) => {
+      inputGate = value;
+    },
+    failFinalWrite: () => {
+      failFinalWrite = true;
+    },
     setInputStatus: (value: number) => {
       inputStatus = value;
     },
@@ -124,6 +138,19 @@ test("reuse mode matrix includes exact timeout and finished waiting_input", () =
     ]),
     false,
   );
+});
+
+test("reuse interaction evidence follows Waypoint approval queue and latest plan", () => {
+  const session = parseSession({ ...sessionWire(), status: "waiting_input" });
+  const event = (sequence: number, kind: string, text: string, metadata = {}) =>
+    parseEvent({ ...eventWire(sequence, kind, text), metadata }, "demo");
+  const approval = event(1, "approval_request", "Approve?", { approval_id: "a" });
+  assert.equal(ongoing(session, undefined, [approval, event(2, "system_note", "Approval timed out")]), false);
+  const oldPlan = event(1, "assistant_message", "Old plan", { plan: { id: "old" } });
+  const newPlan = event(2, "assistant_message", "New plan", { plan: { id: "new" } });
+  const decided = event(3, "system_note", "Accepted", { plan_item_id: "new", plan_decision: "accept" });
+  assert.equal(ongoing(session, undefined, [oldPlan, newPlan, decided]), false);
+  assert.equal(ongoing(session, undefined, [newPlan, event(3, "user_input", "More detail")]), true);
 });
 
 test("launch request omits inherited values and retains preset tags without secrets", () => {
@@ -435,6 +462,27 @@ test("timed finished waiting_input expires while running work preserves the poin
   }
 });
 
+test("reuse is fixed at open; an expired pointer does not become a send destination", async () => {
+  const f = await fixture();
+  try {
+    const first = f.controller();
+    await first.start();
+    first.changeDraft("First");
+    await first.send();
+    f.sessions[0].status = "idle";
+    f.advance(30 * 60000);
+    const next = f.controller();
+    await next.start();
+    assert.equal(next.getSnapshot().session, undefined);
+    f.sessions[0].status = "running";
+    next.changeDraft("New conversation");
+    await next.send();
+    assert.equal(f.sessions.length, 2);
+  } finally {
+    await f.close();
+  }
+});
+
 test("manual New Chat and Always New follow-ups remain bound within the view", async () => {
   const f = await fixture();
   try {
@@ -492,5 +540,106 @@ test("mutation errors distinguish known rejections from uncertain server/network
         error.kind ===
           (status === 401 ? "expired-token" : status === 404 ? "not-found" : status === 500 ? "uncertain" : "rejected"),
     );
+  }
+});
+
+test("deleted uncertain destination can be explicitly abandoned without losing the draft", async () => {
+  const f = await fixture();
+  try {
+    const first = f.controller();
+    await first.start();
+    f.setUncertainInput(true);
+    first.changeDraft("Keep this work");
+    await first.send();
+    f.sessions.splice(0);
+    const reopened = f.controller();
+    await reopened.start();
+    await reopened.reconcile();
+    assert.ok(reopened.getSnapshot().pending);
+    await reopened.abandonPending();
+    assert.equal(reopened.getSnapshot().pending, undefined);
+    assert.equal(reopened.getSnapshot().draft, "Keep this work");
+    assert.equal(f.requests.filter((request) => request.path === "/api/sessions").length, 1);
+    f.setUncertainInput(false);
+    await reopened.send();
+    assert.equal(f.requests.filter((request) => request.path === "/api/sessions").length, 2);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a killed reclaimer leaves an owned claim that another process can recover", async () => {
+  const { createHash } = await import("node:crypto");
+  const directory = await mkdtemp(join(tmpdir(), "quick-reclaim-crash-"));
+  try {
+    const old = spawn(process.execPath, ["-e", ""]);
+    const deadPid = old.pid;
+    await new Promise<void>((resolve) => old.on("close", () => resolve()));
+    const path = join(directory, createHash("sha256").update("server").digest("hex"));
+    await writeFile(path, JSON.stringify({ pid: deadPid, nonce: "stale-main" }));
+    const script = `const fs=require('node:fs'); const owner=process.argv[1]+'.candidate'; fs.writeFileSync(owner,JSON.stringify({pid:process.pid,nonce:'killed-reclaimer'})); fs.linkSync(owner,process.argv[1]+'.reclaim.stale-main'); process.stdout.write('ready'); setInterval(()=>{},1000);`;
+    const child = spawn(process.execPath, ["-e", script, path]);
+    await new Promise<void>((resolve, reject) => {
+      child.stdout.once("data", () => resolve());
+      child.once("error", reject);
+    });
+    const stopped = new Promise<void>((resolve) => child.once("close", () => resolve()));
+    child.kill("SIGKILL");
+    await stopped;
+    let entered = false;
+    await new ServerMutex(directory, 100).run("server", async () => {
+      entered = true;
+    });
+    assert.equal(entered, true);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("a late acknowledged input persists after the view closes", async () => {
+  const f = await fixture();
+  try {
+    let release!: () => void;
+    f.setInputGate(
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+    );
+    const c = f.controller();
+    await c.start();
+    c.changeDraft("Close while sending");
+    const sending = c.send();
+    while (!f.requests.some((request) => request.path.endsWith("/input")))
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    c.stop();
+    release();
+    await sending;
+    const reopened = f.controller();
+    await reopened.start();
+    assert.equal(reopened.getSnapshot().draft, "");
+    assert.equal(reopened.getSnapshot().pending, undefined);
+    assert.equal(f.requests.filter((request) => request.path.endsWith("/input")).length, 1);
+    assert.equal((await f.store.load(connection.id)).pointer, "created-1");
+  } finally {
+    await f.close();
+  }
+});
+
+test("a failed final storage write cannot cause an acknowledged input to be resent on reopen", async () => {
+  const f = await fixture();
+  try {
+    const c = f.controller();
+    await c.start();
+    c.changeDraft("Accepted before storage failed");
+    f.failFinalWrite();
+    await c.send();
+    assert.ok(c.getSnapshot().pending);
+    const reopened = f.controller();
+    await reopened.start();
+    await reopened.send();
+    assert.equal(f.requests.filter((request) => request.path.endsWith("/input")).length, 1);
+    assert.equal(reopened.getSnapshot().draft, "Accepted before storage failed");
+  } finally {
+    await f.close();
   }
 });

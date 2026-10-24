@@ -112,13 +112,15 @@ export function canReattach(session: Session, metadata: ServerMetadata): boolean
 export function ongoing(session: Session, questions?: PendingQuestions, events: SessionEvent[] = []): boolean {
   if (["starting", "running"].includes(session.status) || questions?.questions.length) return true;
   const approvals = new Set<string>();
-  const plans = new Set<string>();
+  let latestPlan: string | undefined;
+  const decidedPlans = new Set<string>();
   for (const event of events) {
     const approvalId = typeof event.metadata.approval_id === "string" ? event.metadata.approval_id : "";
     if (event.kind === "approval_request") approvals.add(approvalId || `sequence:${event.sequence}`);
     if (
       event.kind === "system_note" &&
-      (event.metadata.method === "approval.invalidated" || /^Approval (response|request timed out)/i.test(event.text))
+      (event.metadata.method === "approval.invalidated" ||
+        /(Approval response sent|Approval timed out)/i.test(event.text))
     ) {
       if (approvalId) approvals.delete(approvalId);
       else {
@@ -126,12 +128,16 @@ export function ongoing(session: Session, questions?: PendingQuestions, events: 
         if (first) approvals.delete(first);
       }
     }
-    if (isRecord(event.metadata.plan) && typeof event.metadata.plan.id === "string") plans.add(event.metadata.plan.id);
-    if (typeof event.metadata.plan_item_id === "string" && event.metadata.plan_decision)
-      plans.delete(event.metadata.plan_item_id);
-    if (event.kind === "user_input") plans.clear();
+    if (
+      event.kind !== "approval_request" &&
+      isRecord(event.metadata.plan) &&
+      typeof event.metadata.plan.id === "string"
+    )
+      latestPlan = event.metadata.plan.id;
+    if (typeof event.metadata.plan_item_id === "string" && typeof event.metadata.plan_decision === "string")
+      decidedPlans.add(event.metadata.plan_item_id);
   }
-  return approvals.size > 0 || plans.size > 0;
+  return approvals.size > 0 || (!!latestPlan && !decidedPlans.has(latestPlan));
 }
 export function reuseDecision(
   defaults: ChatDefaults,
