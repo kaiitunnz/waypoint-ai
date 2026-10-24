@@ -49,7 +49,9 @@ export class InteractionController {
   private session?: Session;
   private events: SessionEvent[] = [];
   private questions?: PendingQuestions;
-  private feedQuestions?: PendingQuestions;
+  // What each feed last delivered, so a resumed feed's cached snapshot cannot override newer state.
+  private delivered = new WeakMap<object, { session?: Session; questions?: PendingQuestions }>();
+  private questionSource?: object;
   private questionChanges = 0;
   private sessionChanges = 0;
   // Highest event ID covered by the full-history load; undefined until history is loaded.
@@ -117,17 +119,20 @@ export class InteractionController {
     this.active = false;
     this.generation++;
   }
-  ingest(snapshot: ConversationSnapshot) {
+  ingest(snapshot: ConversationSnapshot, source: object = this) {
     if (snapshot.session && snapshot.session.id !== this.sessionId) return;
-    if (snapshot.session && snapshot.session !== this.session) {
+    const seen = this.delivered.get(source) ?? {};
+    this.delivered.set(source, { session: snapshot.session, questions: snapshot.questions });
+    if (snapshot.session && snapshot.session !== seen.session) {
       this.session = snapshot.session;
       this.sessionChanges++;
     }
     this.events = mergeEvents(this.events, snapshot.events, this.sessionId);
-    // The feed resolves socket epochs, so a changed feed snapshot replaces the current one outright.
-    if (snapshot.questions && snapshot.questions !== this.feedQuestions) {
-      this.feedQuestions = snapshot.questions;
-      this.questions = snapshot.questions;
+    if (snapshot.questions && snapshot.questions !== seen.questions) {
+      // A feed resolves its own socket epochs, so its newer snapshot replaces its previous one outright.
+      this.questions =
+        source === this.questionSource ? snapshot.questions : newerQuestions(this.questions, snapshot.questions);
+      this.questionSource = source;
       this.questionChanges++;
     }
     this.derive();

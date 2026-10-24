@@ -119,7 +119,7 @@ export function ConversationContent({
   const [active, setActive] = useState(true);
   const interactionState = useSyncExternalStore(interactions.subscribe, interactions.getSnapshot);
   const { state, feed } = useConversationFeed(connection, sessionId, active);
-  useEffect(() => feed.subscribe(() => interactions.ingest(feed.getSnapshot())), [feed, interactions]);
+  useEffect(() => feed.subscribe(() => interactions.ingest(feed.getSnapshot(), feed)), [feed, interactions]);
   const [selection, setSelection] = useState<string>();
   const [following, setFollowing] = useState(true);
   const [query, setQuery] = useState("");

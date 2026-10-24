@@ -539,3 +539,33 @@ test("clearing an own-session checkpoint unblocks Quick Chat, and another conver
   assert.equal(chat.getSnapshot().session?.id, "chat");
   await f.close();
 });
+
+test("a resumed feed's cached snapshot does not override state another feed delivered later", async () => {
+  const f = await fixture();
+  f.server.sessions.agent.status = "idle";
+  const c = f.controller();
+  await c.start();
+  const parent = {};
+  const history = {};
+  const stale = parseSession(f.server.sessions.agent);
+  const questions = (id: string, revision: number) =>
+    parseQuestions({ as_of_sequence: 5, revision, questions: id ? [question(id)] : [] }, "agent");
+  const cached = feed({ session: stale, questions: questions("q1", 1) });
+  c.ingest(cached, parent);
+  assert.deepEqual(
+    c.getSnapshot().interactions.map((item) => item.id),
+    ["q1"],
+  );
+  const answered = parseSession({ ...f.server.sessions.agent, status: "running" });
+  c.ingest(feed({ session: answered, questions: questions("", 2) }), history);
+  assert.deepEqual(c.getSnapshot().interactions, []);
+  c.ingest(cached, parent);
+  assert.deepEqual(c.getSnapshot().interactions, [], "the parent's cached snapshot is ignored");
+  c.ingest(feed({ session: answered, questions: questions("q2", 3) }), parent);
+  assert.deepEqual(
+    c.getSnapshot().interactions.map((item) => item.id),
+    ["q2"],
+    "a newer snapshot from the resumed feed still applies",
+  );
+  await f.close();
+});

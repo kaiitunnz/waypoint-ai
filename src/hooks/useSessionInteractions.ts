@@ -22,8 +22,8 @@ export function useSessionInteractions(
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   useEffect(() => {
     if (!sessionId) return;
-    const unsubscribe = feed.subscribe(() => controller.ingest(feed.getSnapshot()));
-    controller.ingest(feed.getSnapshot());
+    const unsubscribe = feed.subscribe(() => controller.ingest(feed.getSnapshot(), feed));
+    controller.ingest(feed.getSnapshot(), feed);
     void controller.start();
     return () => {
       unsubscribe();
