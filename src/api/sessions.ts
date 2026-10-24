@@ -104,6 +104,29 @@ export function parseSessions(value: unknown): Session[] {
   return array(value.sessions).map(parseSession);
 }
 
+function pick(source: Record<string, unknown>, keys: string[]): Record<string, unknown> {
+  return Object.fromEntries(keys.flatMap((key) => (typeof source[key] === "string" ? [[key, source[key]]] : [])));
+}
+
+// Keeps question fields with their original types so malformed shapes stay detectable.
+function questions(value: unknown): unknown {
+  if (!Array.isArray(value)) return null;
+  return value.map((entry) =>
+    isRecord(entry)
+      ? {
+          question: entry.question,
+          header: entry.header,
+          multiSelect: entry.multiSelect,
+          options: Array.isArray(entry.options)
+            ? entry.options.map((option) =>
+                isRecord(option) ? { label: option.label, description: option.description } : null,
+              )
+            : entry.options,
+        }
+      : null,
+  );
+}
+
 export function parseEvent(value: unknown, sessionId: string): SessionEvent {
   if (
     !isRecord(value) ||
@@ -123,16 +146,28 @@ export function parseEvent(value: unknown, sessionId: string): SessionEvent {
     "tool_name",
     "tool_use_id",
     "approval_id",
+    "kind",
+    "answers",
     "plan_item_id",
     "plan_decision",
     "status",
     "is_error",
     "tool_input",
     "plan",
-    "interaction",
     "attachments",
   ]) {
     if (source[key] !== undefined) metadata[key] = source[key];
+  }
+  if (isRecord(source.approval)) metadata.approval = pick(source.approval, ["approval_id"]);
+  if (isRecord(source.interaction))
+    metadata.interaction = pick(source.interaction, ["kind", "request_id", "title", "body", "plan_item_id"]);
+  if (isRecord(source.payload)) {
+    const payload = pick(source.payload, ["id", "requestID", "permissionID"]);
+    if (isRecord(source.payload.input) && source.payload.input.questions !== undefined)
+      payload.input = { questions: questions(source.payload.input.questions) };
+    if (isRecord(source.payload.item) && source.payload.item.type === "plan")
+      payload.item = pick(source.payload.item, ["id", "text"]);
+    if (Object.keys(payload).length) metadata.payload = payload;
   }
   return {
     id: number(value.id),

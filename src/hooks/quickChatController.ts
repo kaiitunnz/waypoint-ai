@@ -89,7 +89,7 @@ export class QuickChatController {
         if (this.active && generation === this.generation) this.publish({ session });
       } else if (saved.pending?.kind === "create") {
         this.prepared = true;
-      } else if (saved.pending?.sessionId) {
+      } else if (saved.pending?.sessionId && saved.pending.kind !== "interaction") {
         const session = await this.client.session(this.connection.token, saved.pending.sessionId);
         this.checkOwned(session, saved.installation, metadata);
         if (this.active && generation === this.generation) this.publish({ session });
@@ -127,7 +127,9 @@ export class QuickChatController {
       this.publish({
         loading: false,
         notice: saved.pending
-          ? "An earlier operation has an unconfirmed outcome. Check it before sending again; no message was resent."
+          ? saved.pending.kind === "interaction"
+            ? "A response to a session request is unconfirmed. Check it before sending; nothing was resent."
+            : "An earlier operation has an unconfirmed outcome. Check it before sending again; no message was resent."
           : this.state.session
             ? "Continue this conversation. Quick Chat defaults apply to future sessions."
             : "Ready for a new conversation. Waypoint creates it on your first send.",
@@ -352,6 +354,12 @@ export class QuickChatController {
                 ? "Multiple matching sessions exist. Review them in Waypoint before retrying; none was selected."
                 : "No matching session is visible yet. This does not prove creation failed. Check Waypoint before explicitly retrying.",
             });
+        } else if (pending.kind === "interaction") {
+          const session = await this.client.session(this.connection.token, pending.sessionId!);
+          this.publish({
+            pending,
+            notice: `The response to a request in “${session.title || "another session"}” is unconfirmed. Check it in that conversation; nothing was resent.`,
+          });
         } else {
           const session = await this.client.session(this.connection.token, pending.sessionId!);
           const page = await this.client.events(this.connection.token, session.id, { cursor: pending.baseline ?? 0 });
@@ -395,18 +403,24 @@ export class QuickChatController {
     }
   }
   async abandonPending() {
-    if (this.state.busy || !this.state.pending) return;
-    const operationId = this.state.pending.operationId;
+    const pending = this.state.pending;
+    if (this.state.busy || !pending) return;
+    const operationId = pending.operationId;
     this.publish({ busy: true });
     try {
       await this.queue;
       await this.store.transaction(this.connection.id, async (saved, persist) => {
         if (saved.pending?.operationId !== operationId)
           throw new Error("The pending attempt changed. Check its outcome again.");
-        if (saved.pointer === saved.pending.sessionId) saved.pointer = undefined;
+        if (saved.pending.kind !== "interaction" && saved.pointer === saved.pending.sessionId)
+          saved.pointer = undefined;
         saved.pending = undefined;
         await persist();
       });
+      if (pending.kind === "interaction") {
+        this.publish({ pending: undefined, error: undefined, notice: undefined });
+        return;
+      }
       this.generation++;
       this.prepared = true;
       this.observedDefaults = "manual-new";

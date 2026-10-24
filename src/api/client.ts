@@ -1,3 +1,4 @@
+import { InteractionAction } from "../domain/interactions";
 import { ModelCatalog, parseModels } from "./models";
 import { isRecord } from "../domain/connections";
 import { parseMetadata, ServerMetadata } from "./contracts";
@@ -18,6 +19,7 @@ export class ApiError extends Error {
     public readonly kind: ApiErrorKind,
     message: string,
     public readonly detail?: string,
+    public readonly status?: number,
   ) {
     super(message);
     this.name = "ApiError";
@@ -181,6 +183,7 @@ export class WaypointClient {
           "rejected",
           message,
           ["cwd-not-found", "ssh-master-required"].includes(detail) ? detail : undefined,
+          response.status,
         );
       }
       if (!response.ok)
@@ -207,6 +210,36 @@ export class WaypointClient {
   }
   action(token: string, id: string, action: "interrupt" | "reattach") {
     return this.mutate(token, `/api/sessions/${encodeURIComponent(id)}/${action}`);
+  }
+  // Some agents report upstream failures as HTTP 400 after the response may have been delivered,
+  // so only statuses Waypoint returns before dispatch count as definitive rejections.
+  async interaction(token: string, id: string, action: InteractionAction, body: Record<string, unknown>) {
+    let session: Session;
+    try {
+      session = await this.mutate(token, `/api/sessions/${encodeURIComponent(id)}/${action}`, body);
+    } catch (error) {
+      if (error instanceof ApiError && error.kind === "expired-token")
+        throw new ApiError("expired-token", "Your sign-in expired. Sign in again; your response is kept.");
+      if (error instanceof ApiError && error.kind === "not-found")
+        throw new ApiError("not-found", "This session is no longer available on this server. Your response is kept.");
+      if (error instanceof ApiError && error.kind === "rejected" && [409, 422].includes(error.status ?? 0))
+        throw new ApiError(
+          "rejected",
+          "Waypoint did not accept this response yet. Respond to any pending approval, refresh, and try again; your response is kept.",
+          undefined,
+          error.status,
+        );
+      throw new ApiError(
+        "uncertain",
+        "Waypoint did not confirm this response. It may have reached the agent. Check the outcome before trying again.",
+      );
+    }
+    if (session.id !== id)
+      throw new ApiError(
+        "uncertain",
+        "Waypoint did not confirm this response. It may have reached the agent. Check the outcome before trying again.",
+      );
+    return session;
   }
   models(token: string, backend: string, target: string, profile: string, signal?: AbortSignal): Promise<ModelCatalog> {
     const query = new URLSearchParams({

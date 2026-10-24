@@ -20,6 +20,8 @@ export interface Agent {
   configOverrides: boolean;
   reattach: boolean;
   planApproval: boolean;
+  approvalDecisions: string[];
+  approvalNote: boolean;
 }
 
 export interface ExecutionTarget {
@@ -109,6 +111,11 @@ export function parseMetadata(value: unknown): ServerMetadata {
           : [],
       customArgs: isRecord(item.agent_capabilities) && item.agent_capabilities.supports_custom_cli_args === true,
       configOverrides: isRecord(item.agent_capabilities) && item.agent_capabilities.supports_config_overrides === true,
+      approvalDecisions:
+        isRecord(item.agent_capabilities) && Array.isArray(item.agent_capabilities.approval_decisions)
+          ? strings(item.agent_capabilities.approval_decisions)
+          : [],
+      approvalNote: isRecord(item.agent_capabilities) && item.agent_capabilities.supports_approval_note === true,
       planApproval: isRecord(item.agent_capabilities) && item.agent_capabilities.supports_plan_approval === true,
       reattach:
         isRecord(item.transport_capabilities) && item.transport_capabilities.supports_reattach_after_exit === true,
