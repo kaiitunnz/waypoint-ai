@@ -13,6 +13,7 @@ export interface Session {
   pinnedAt?: string;
   lastEventAt: string;
   model?: string;
+  permissionMode?: string;
   context?: { used: number; limit?: number };
   tokens?: number;
   rateLimits: { label: string; percent: number }[];
@@ -79,6 +80,7 @@ export function parseSession(value: unknown): Session {
     pinnedAt: optionalText(value.pinned_at),
     lastEventAt: text(value.last_event_at ?? value.updated_at),
     model: optionalText(value.resolved_model) ?? optionalText(value.model),
+    permissionMode: optionalText(value.permission_mode),
     context: used !== undefined ? { used, limit: number(context?.context_window_tokens) } : undefined,
     tokens: number(usage?.display_total_tokens),
     rateLimits: Array.isArray(limits?.windows)

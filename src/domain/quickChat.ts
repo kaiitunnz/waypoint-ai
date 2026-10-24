@@ -109,7 +109,12 @@ export function createRequest(
 export function canReattach(session: Session, metadata: ServerMetadata): boolean {
   return metadata.agents.find((agent) => agent.nativeTransport === session.transport)?.reattach === true;
 }
-export function ongoing(session: Session, questions?: PendingQuestions, events: SessionEvent[] = []): boolean {
+export function ongoing(
+  session: Session,
+  questions?: PendingQuestions,
+  events: SessionEvent[] = [],
+  metadata?: ServerMetadata,
+): boolean {
   if (["starting", "running"].includes(session.status) || questions?.questions.length) return true;
   const approvals = new Set<string>();
   let latestPlan: string | undefined;
@@ -137,7 +142,10 @@ export function ongoing(session: Session, questions?: PendingQuestions, events: 
     if (typeof event.metadata.plan_item_id === "string" && typeof event.metadata.plan_decision === "string")
       decidedPlans.add(event.metadata.plan_item_id);
   }
-  return approvals.size > 0 || (!!latestPlan && !decidedPlans.has(latestPlan));
+  const eligiblePlan =
+    session.permissionMode === "plan" &&
+    metadata?.agents.some((agent) => agent.id === session.backend && agent.planApproval);
+  return approvals.size > 0 || (!!eligiblePlan && !!latestPlan && !decidedPlans.has(latestPlan));
 }
 export function reuseDecision(
   defaults: ChatDefaults,

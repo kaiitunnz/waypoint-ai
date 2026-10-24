@@ -107,7 +107,7 @@ export class QuickChatController {
               session,
               saved.sentAt[session.id],
               this.now(),
-              ongoing(session, page.questions, events),
+              ongoing(session, page.questions, events, metadata),
               false,
             ) === "continue"
           ) {
@@ -208,7 +208,7 @@ export class QuickChatController {
               candidate,
               saved.sentAt[candidate.id],
               this.now(),
-              ongoing(candidate, page.questions, page.events),
+              ongoing(candidate, page.questions, page.events, metadata),
               false,
             ) === "continue"
           )

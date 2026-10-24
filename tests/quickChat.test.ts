@@ -158,11 +158,30 @@ test("reuse interaction evidence follows Waypoint approval queue and latest plan
     parseEvent({ ...eventWire(sequence, kind, text), metadata }, "demo");
   const approval = event(1, "approval_request", "Approve?", { approval_id: "a" });
   assert.equal(ongoing(session, undefined, [approval, event(2, "system_note", "Approval timed out")]), false);
+  const catalog = parseMetadata({
+    ...metadataWire,
+    backends: metadataWire.backends.map((agent) => ({
+      ...agent,
+      agent_capabilities: { supports_plan_approval: true },
+    })),
+  });
+  const planning = { ...session, permissionMode: "plan" };
   const oldPlan = event(1, "assistant_message", "Old plan", { plan: { id: "old" } });
   const newPlan = event(2, "assistant_message", "New plan", { plan: { id: "new" } });
   const decided = event(3, "system_note", "Accepted", { plan_item_id: "new", plan_decision: "accept" });
-  assert.equal(ongoing(session, undefined, [oldPlan, newPlan, decided]), false);
-  assert.equal(ongoing(session, undefined, [newPlan, event(3, "user_input", "More detail")]), true);
+  assert.equal(ongoing(planning, undefined, [oldPlan, newPlan, decided], catalog), false);
+  assert.equal(ongoing(planning, undefined, [newPlan, event(3, "user_input", "More detail")], catalog), true);
+  assert.equal(ongoing({ ...planning, permissionMode: "default" }, undefined, [newPlan], catalog), false);
+  assert.equal(ongoing(planning, undefined, [newPlan], parseMetadata(metadataWire)), false);
+  assert.equal(
+    reuseDecision(initialDefaults(), planning, 0, 30 * 60000, ongoing(planning, undefined, [newPlan], catalog), false),
+    "continue",
+  );
+  const finished = { ...planning, permissionMode: "default" };
+  assert.equal(
+    reuseDecision(initialDefaults(), finished, 0, 30 * 60000, ongoing(finished, undefined, [newPlan], catalog), false),
+    "new",
+  );
 });
 
 test("launch request omits inherited values and retains preset tags without secrets", () => {
