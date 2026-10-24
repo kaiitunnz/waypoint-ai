@@ -230,3 +230,27 @@ test("does not forward bearer credentials through an actual HTTP redirect", asyn
     await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
   }
 });
+
+test("session HTTP endpoints preserve encoded identity and raw event cursor semantics", async () => {
+  const { sessionWire, eventWire } = await import("./fixtures/conversation");
+  const requests: string[] = [];
+  const client = new WaypointClient("https://example.com/proxy", async (url) => {
+    const path = String(url);
+    requests.push(path);
+    if (path.endsWith("/sessions")) return respond({ sessions: [sessionWire("a/b")] });
+    if (path.includes("/events"))
+      return respond({ events: [eventWire(9, "agent_output", "hello", "reply", "a/b")], has_more: false });
+    return respond({ session: sessionWire("a/b") });
+  });
+  assert.equal((await client.sessions("fixture-token"))[0].id, "a/b");
+  assert.equal((await client.session("fixture-token", "a/b")).id, "a/b");
+  await client.events("fixture-token", "a/b", { before: 9 });
+  await client.events("fixture-token", "a/b", { cursor: 109 });
+  assert.ok(requests[1].endsWith("/api/sessions/a%2Fb"));
+  assert.ok(requests[2].includes("messages=40&before_sequence=9"));
+  assert.ok(requests[3].endsWith("?cursor=109"));
+  await assert.rejects(
+    new WaypointClient("http://localhost", async () => respond({}, 404)).session("token", "missing"),
+    (error: unknown) => error instanceof ApiError && error.kind === "not-found",
+  );
+});

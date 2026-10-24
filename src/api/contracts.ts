@@ -9,6 +9,7 @@ export interface Agent {
   id: string;
   label: string;
   transport: string;
+  nativeTransport: string;
   transports: string[];
   structured: boolean;
   profiles: Profile[];
@@ -60,6 +61,7 @@ export function parseMetadata(value: unknown): ServerMetadata {
       id: string(item.id),
       label: string(item.label),
       transport: string(item.default_transport ?? item.transport_id),
+      nativeTransport: string(item.transport_id ?? item.default_transport),
       transports: strings(item.supported_transports ?? [item.transport_id]),
       structured: isRecord(item.transport_capabilities)
         ? item.transport_capabilities.is_structured === true

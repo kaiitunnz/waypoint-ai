@@ -1,0 +1,131 @@
+import { SessionEvent, PendingQuestions } from "../api/sessions";
+
+export interface TranscriptRow {
+  id: string;
+  kind: "user" | "assistant" | "reasoning" | "tool" | "approval" | "note";
+  title: string;
+  text: string;
+  timestamp: string;
+  sequence: number;
+}
+
+export function mergeEvents(current: SessionEvent[], incoming: SessionEvent[], sessionId: string): SessionEvent[] {
+  const ids = new Set<number>();
+  const sequences = new Set<number>();
+  return [...current, ...incoming]
+    .filter((event) => {
+      if (
+        event.sessionId !== sessionId ||
+        sequences.has(event.sequence) ||
+        (event.id !== undefined && ids.has(event.id))
+      )
+        return false;
+      sequences.add(event.sequence);
+      if (event.id !== undefined) ids.add(event.id);
+      return true;
+    })
+    .sort((a, b) => a.sequence - b.sequence || (a.id ?? 0) - (b.id ?? 0));
+}
+
+function string(value: unknown) {
+  return typeof value === "string" ? value : "";
+}
+const deltas = new Set(["item/commandExecution/outputDelta", "item/fileChange/outputDelta"]);
+
+export function transcript(events: SessionEvent[]): TranscriptRow[] {
+  const rows: TranscriptRow[] = [];
+  const messages = new Map<string, TranscriptRow>();
+  const tools = new Map<string, { row: TranscriptRow; call: string; output: string; streamed: boolean }>();
+  for (const event of events) {
+    if (event.kind === "raw_terminal_chunk") continue;
+    const item = string(event.metadata.item_id);
+    const eventKey = `sequence:${event.sequence}`;
+    if (event.kind === "tool_call" || event.kind === "tool_result") {
+      const key = item ? `tool:${item}` : eventKey;
+      let tool = tools.get(key);
+      if (!tool) {
+        const row: TranscriptRow = {
+          id: key,
+          kind: "tool",
+          title: string(event.metadata.tool_name) || "Tool activity",
+          text: "",
+          timestamp: event.timestamp,
+          sequence: event.sequence,
+        };
+        tool = { row, call: "", output: "", streamed: false };
+        tools.set(key, tool);
+        rows.push(row);
+      }
+      if (event.kind === "tool_call") {
+        tool.call = event.text || JSON.stringify(event.metadata.tool_input ?? "");
+        if (event.metadata.tool_name) tool.row.title = string(event.metadata.tool_name);
+      } else {
+        const delta = deltas.has(string(event.metadata.method));
+        if (event.metadata.item_type === "todo_list") tool.output = event.text || tool.output;
+        else if (delta) tool.output += event.text;
+        else if (!tool.streamed)
+          tool.output =
+            !tool.output || tool.output === event.text ? event.text || tool.output : `${tool.output}\n${event.text}`;
+        else if (!tool.output) tool.output = event.text;
+        tool.streamed ||= delta;
+      }
+      tool.row.text = [tool.call, tool.output].filter(Boolean).join("\n\n");
+      if (event.metadata.is_error === true) tool.row.title = `${tool.row.title} · Error`;
+      continue;
+    }
+    const kind: TranscriptRow["kind"] =
+      event.kind === "user_input"
+        ? "user"
+        : event.kind === "agent_output"
+          ? ["reasoning", "progress"].includes(string(event.metadata.item_kind))
+            ? "reasoning"
+            : "assistant"
+          : event.kind === "approval_request"
+            ? "approval"
+            : "note";
+    if (event.kind === "status_update" && !event.text) continue;
+    const key = event.kind === "agent_output" && item ? `${kind}:${item}` : eventKey;
+    const existing = messages.get(key);
+    if (existing) {
+      existing.text += event.text;
+      continue;
+    }
+    const row: TranscriptRow = {
+      id: key,
+      kind,
+      title:
+        kind === "user"
+          ? "You"
+          : kind === "assistant"
+            ? "Assistant"
+            : kind === "reasoning"
+              ? "Thinking"
+              : kind === "approval"
+                ? "Approval request"
+                : "Session update",
+      text: event.text,
+      timestamp: event.timestamp,
+      sequence: event.sequence,
+    };
+    rows.push(row);
+    messages.set(key, row);
+  }
+  return rows;
+}
+
+export function newerQuestions(current: PendingQuestions | undefined, next: PendingQuestions): PendingQuestions {
+  return !current ||
+    next.sequence > current.sequence ||
+    (next.sequence === current.sequence && next.revision >= current.revision)
+    ? next
+    : current;
+}
+
+export function selectedRow(
+  rows: TranscriptRow[],
+  previousId: string | undefined,
+  following: boolean,
+): string | undefined {
+  if (following) return rows.findLast((row) => row.kind === "assistant")?.id ?? rows.at(-1)?.id;
+  return rows.some((row) => row.id === previousId) ? previousId : rows.at(-1)?.id;
+}
