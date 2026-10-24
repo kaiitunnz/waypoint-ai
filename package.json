@@ -22,7 +22,15 @@
   "engines": {
     "node": ">=22"
   },
-  "commands": [],
+  "commands": [
+    {
+      "name": "manage-servers",
+      "title": "Manage Servers",
+      "subtitle": "Waypoint AI",
+      "description": "Connect to Waypoint servers and manage sign-in, defaults, and execution metadata.",
+      "mode": "view"
+    }
+  ],
   "tools": [],
   "dependencies": {
     "@raycast/api": "^2.9.0",
@@ -45,8 +53,9 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
-    "verify": "npm run format:check && npm run lint",
+    "verify": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run lint:extension && npm run build",
     "prepublishOnly": "echo \"\\n\\nIt seems like you are trying to publish the Raycast extension to npm.\\n\\nIf you did intend to publish it to npm, remove the \\`prepublishOnly\\` script and rerun \\`npm publish\\` again.\\nIf you wanted to publish it to the Raycast Store instead, use \\`npm run publish\\` instead.\\n\\n\" && exit 1",
-    "publish": "npx @raycast/api@latest publish"
+    "publish": "npx @raycast/api@latest publish",
+    "test": "node -e \"require('node:fs').rmSync('tmp/test-build', { recursive: true, force: true })\" && tsc -p tsconfig.tests.json && node --test tmp/test-build/tests/*.test.js"
   }
 }
