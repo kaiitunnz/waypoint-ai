@@ -21,6 +21,9 @@ async function fixture() {
   const values = new Map<string, string>();
   let failFinalWrite = false;
   let inputGate: Promise<void> | undefined;
+  let sessionGate: Promise<void> | undefined;
+  let sessionReads = 0;
+  const eventQueries: string[] = [];
   const store = new QuickChatStore(
     {
       getItem: async (key) => values.get(key),
@@ -56,12 +59,14 @@ async function fixture() {
     const id = decodeURIComponent(path.split("/")[3]);
     const session = sessions.find((item) => item.id === id);
     if (!session) return respond({}, 404);
-    if (path.endsWith("/events"))
+    if (path.endsWith("/events")) {
+      eventQueries.push(new URL(String(url)).search);
       return respond({
         events: [],
         has_more: false,
         pending_questions: { questions: [], as_of_sequence: 0, revision: 0 },
       });
+    }
     if (path.endsWith("/input")) {
       await inputGate;
       if (uncertainInput) throw new Error("private connection failure");
@@ -71,6 +76,8 @@ async function fixture() {
       session.status = "idle";
       return respond({ session });
     }
+    sessionReads++;
+    await sessionGate;
     return respond({ session });
   });
   const controller = (forceNew = false) =>
@@ -90,6 +97,11 @@ async function fixture() {
     requests,
     client,
     controller,
+    eventQueries,
+    sessionReads: () => sessionReads,
+    setSessionGate: (value: Promise<void>) => {
+      sessionGate = value;
+    },
     setInputGate: (value: Promise<void>) => {
       inputGate = value;
     },
@@ -212,6 +224,7 @@ test("first send creates once, persists pointer before input, and follow-ups reu
     await c.send();
     assert.equal(f.sessions.length, 1);
     assert.equal(c.getSnapshot().session?.id, "created-1");
+    assert.ok(f.eventQueries.every((query) => !query.includes("cursor=")));
   } finally {
     await f.close();
   }
@@ -353,7 +366,7 @@ test("missing or foreign pointer requires explicit New Chat and retains draft", 
     });
     const foreign = f.controller();
     await foreign.start();
-    foreign.changeDraft("No takeover");
+    await foreign.changeDraft("No takeover");
     await foreign.send();
     assert.equal(f.sessions.length, 1);
   } finally {
@@ -639,6 +652,56 @@ test("a failed final storage write cannot cause an acknowledged input to be rese
     await reopened.send();
     assert.equal(f.requests.filter((request) => request.path.endsWith("/input")).length, 1);
     assert.equal(reopened.getSnapshot().draft, "Accepted before storage failed");
+  } finally {
+    await f.close();
+  }
+});
+
+test("reconciling another view's creation preserves an already-bound destination", async () => {
+  const f = await fixture();
+  try {
+    const first = f.controller();
+    await first.start();
+    first.changeDraft("First");
+    await first.send();
+    const next = f.controller(true);
+    await next.start();
+    f.setUncertainCreate(true);
+    next.changeDraft("Second");
+    await next.send();
+    await first.reconcile();
+    assert.equal(first.getSnapshot().session?.id, "created-1");
+    assert.equal((await f.store.load(connection.id)).pointer, "created-2");
+    assert.equal(f.requests.filter((request) => request.path.endsWith("/input")).length, 1);
+  } finally {
+    await f.close();
+  }
+});
+
+test("manual New Chat invalidates a delayed refresh of its predecessor", async () => {
+  const f = await fixture();
+  try {
+    const c = f.controller();
+    await c.start();
+    c.changeDraft("First");
+    await c.send();
+    let release!: () => void;
+    f.setSessionGate(
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+    );
+    const before = f.sessionReads();
+    const refreshing = c.start();
+    while (f.sessionReads() === before) await new Promise<void>((resolve) => setImmediate(resolve));
+    await c.newChat();
+    release();
+    await refreshing;
+    assert.equal(c.getSnapshot().session, undefined);
+    assert.equal(c.getSnapshot().loading, false);
+    c.changeDraft("New intent");
+    await c.send();
+    assert.equal(f.sessions.length, 2);
   } finally {
     await f.close();
   }

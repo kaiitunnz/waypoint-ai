@@ -7,6 +7,7 @@ import { useConnections } from "../hooks/useConnections";
 import { useConversationFeed } from "../hooks/useSessionFeeds";
 import { ConversationFeed, FeedConnection } from "../hooks/sessionFeeds";
 import { LoadingView, markdownText, sessionSummary, statusIcon } from "../components/SessionPresentation";
+import { ChatConversation } from "./ChatConversation";
 import { ManageServers } from "./ManageServers";
 import { SignInForm } from "./ServerForm";
 
@@ -41,11 +42,38 @@ export function ConversationScreen({
       />
     );
   return (
-    <ConversationContent
+    <ChatConversation
       connection={{ ...connection, token: connection.token }}
       sessionId={sessionId}
       metadata={metadata}
       refreshConnections={refresh}
+      actions={(setActive) => (
+        <>
+          {connection.frontendUrl && (
+            <Action.OpenInBrowser title="Open in Waypoint" url={sessionUrl(connection.frontendUrl, sessionId)!} />
+          )}
+          <Action.Push
+            title="Sign in Again"
+            icon={Icon.Lock}
+            target={<SignInForm connection={connection} onSaved={refresh} />}
+            onPush={() => setActive(false)}
+            onPop={() => {
+              setActive(true);
+              void refresh();
+            }}
+          />
+          <Action.Push
+            title="Manage Servers"
+            icon={Icon.Network}
+            target={<ManageServers />}
+            onPush={() => setActive(false)}
+            onPop={() => {
+              setActive(true);
+              void refresh();
+            }}
+          />
+        </>
+      )}
     />
   );
 }
@@ -73,7 +101,7 @@ function FullResponse({ feed, rowId }: { feed: ConversationFeed; rowId: string }
   );
 }
 
-function ConversationContent({
+export function ConversationContent({
   connection,
   sessionId,
   metadata,

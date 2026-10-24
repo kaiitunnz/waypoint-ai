@@ -80,6 +80,8 @@ export class QuickChatController {
       if (this.state.session) {
         const session = await this.client.session(this.connection.token, this.state.session.id);
         if (this.active && generation === this.generation) this.publish({ session });
+      } else if (saved.pending?.kind === "create") {
+        this.prepared = true;
       } else if (saved.pending?.sessionId) {
         const session = await this.client.session(this.connection.token, saved.pending.sessionId);
         this.checkOwned(session, saved.installation, metadata);
@@ -153,14 +155,17 @@ export class QuickChatController {
         error: error instanceof Error ? error.message : "Could not save draft. Keep this view open and retry.",
       }),
     );
+    return this.queue;
   }
   async newChat() {
     if (this.state.busy || this.state.pending) return;
+    this.generation++;
     this.prepared = true;
     this.observedPointer = undefined;
     this.observedDefaults = "manual-new";
     this.publish({
       session: undefined,
+      loading: false,
       error: undefined,
       notice: "A new conversation will be created on send. The previous session keeps running.",
       revision: this.state.revision + 1,
@@ -260,7 +265,7 @@ export class QuickChatController {
           await persist();
           this.publish({ session });
         }
-        const before = await this.client.events(this.connection.token, session.id, { cursor: 0 });
+        const before = await this.client.events(this.connection.token, session.id);
         const baseline = before.events.reduce((max, event) => Math.max(max, event.id ?? 0), 0);
         saved.pending = {
           kind: "input",
@@ -329,7 +334,7 @@ export class QuickChatController {
             saved.pending = undefined;
             await persist();
             this.publish({
-              session: matches[0],
+              session: this.state.session ?? matches[0],
               pending: undefined,
               notice: "Recovered the created conversation. The prompt was not resent. Send it when ready.",
             });
@@ -347,7 +352,7 @@ export class QuickChatController {
             (event) => event.kind === "user_input" && event.text.trim() === pending.text,
           );
           this.publish({
-            session,
+            session: this.state.session && this.state.session.id !== session.id ? this.state.session : session,
             pending,
             notice:
               pending.kind === "input"

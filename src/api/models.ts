@@ -1,6 +1,7 @@
 import { isRecord } from "../domain/connections";
 export interface ModelCatalog {
   models: { id: string; label: string; efforts?: string[] }[];
+  defaultModel?: string;
   freeText: boolean;
   efforts: string[];
 }
@@ -18,6 +19,7 @@ export function parseModels(value: unknown): ModelCatalog {
         efforts: model.supported_efforts == null ? undefined : strings(model.supported_efforts),
       };
     }),
+    defaultModel: typeof value.default_model_id === "string" ? value.default_model_id : undefined,
     freeText: value.supports_free_text === true,
     efforts: strings(value.effort_levels),
   };
