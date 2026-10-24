@@ -22,15 +22,17 @@ The macOS Raycast pass used the development extension and an isolated Waypoint A
 | Submit after the sign-in expires              | The sign-in message appears; no checkpoint is written                                                                                        |
 | Approve from Quick Chat's own conversation    | The request appears under Needs Attention above the transcript; a lost response blocks Send at once                                          |
 | Clear that checkpoint from the row            | Send Message returns without reconnecting, and the agent's continuing output streams in                                                      |
+| Open a conversation while the server is down  | Needs Attention reports that requests are unavailable alongside the connection error                                                         |
+| Refresh after the server returns              | Pending requests load without reopening the conversation                                                                                     |
 | Open Conversation History                     | The shared Needs Attention row appears above the transcript                                                                                  |
 
 The pass found and fixed three presentation issues before the final checks: request context collapsing onto one line with raw Markdown, a duplicated request title, and repeated unconfirmed-response copy. The reader now also shows the result of Check Previous Outcome.
 
-Not exercised natively: OpenCode nested approval IDs, `permission.replied`, and positional answers; Claude plan-mode approvals and approval notes; Windows. These paths are covered by unit and integration tests. Browser handoff URLs were not opened.
+Not exercised natively: OpenCode nested approval IDs, `permission.replied`, and positional answers; Claude plan-mode approvals and approval notes; returning from Conversation History after answering a request there; Windows. These paths are covered by unit and integration tests. Browser handoff URLs were not opened.
 
 ## Automated coverage
 
-`npm run verify` checks formatting, ESLint, strict types, 100 behavior and integration tests, Raycast validation, and build. Interaction tests cover sanitized event metadata, approval queues across flat, nested, invalidation, and `permission.replied` resolutions, advertised decisions, live-status gating, Waypoint's current-plan rules, question shape validation, exact answer serialization including OpenCode limits, HTTP outcome classification, storage validation, history watermarks, snapshot ordering across refreshes and the live feed, replaced and changed requests, unconfirmed and definitive outcomes, storage failure after acknowledgement, completion after closing, draft pruning, and coordination with Quick Chat, including clearing a checkpoint for Quick Chat's own conversation.
+`npm run verify` checks formatting, ESLint, strict types, 100 behavior and integration tests, Raycast validation, and build. Interaction tests cover sanitized event metadata, approval queues across flat, nested, invalidation, and `permission.replied` resolutions, advertised decisions, live-status gating, Waypoint's current-plan rules, question shape validation, exact answer serialization including OpenCode limits, HTTP outcome classification, storage validation, history watermarks, snapshot ordering across refreshes and the live feed, replaced and changed requests, unconfirmed and definitive outcomes, storage failure after acknowledgement, completion after closing, draft pruning, and coordination with Quick Chat, including clearing a checkpoint for Quick Chat's own conversation, refresh failures and retry, and snapshots from a resumed conversation feed.
 
 ## Screenshots
 
