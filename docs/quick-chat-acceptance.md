@@ -29,7 +29,7 @@ The native composition field and transcript share one List view. Turns group use
 
 ## Automated coverage
 
-`npm run verify` covers formatting, ESLint, strict TypeScript, 71 behavior/integration tests, Raycast validation, and build. Quick Chat tests cover timeout boundaries and all reuse modes, unresolved interaction evidence, preset omission and ownership tags, concurrent opens, per-session send clocks, draft isolation, rejected and uncertain writes, create recovery, missing destinations, explicit abandonment, late acknowledgements, final storage-write failure, cross-process coordination, dead owners, and a process killed during reclamation. Chat presentation tests preserve complete user text and assistant Markdown while grouping turns.
+`npm run verify` covers formatting, ESLint, strict TypeScript, 72 behavior/integration tests, Raycast validation, and build. Quick Chat tests cover timeout boundaries and all reuse modes, unresolved interaction evidence, preset omission and ownership tags, concurrent opens, per-session send clocks, draft isolation, rejected and uncertain writes, create recovery, missing destinations, explicit abandonment, late acknowledgements, final storage-write failure, cross-process coordination, dead owners, and a process killed during reclamation. Chat presentation tests preserve complete user text and assistant Markdown while grouping turns.
 
 ## Coverage limits
 

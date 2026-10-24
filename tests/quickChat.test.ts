@@ -786,3 +786,34 @@ test("an edit during a delayed refresh remains the visible and saved draft", asy
     await f.close();
   }
 });
+
+test("abandoning an attempt invalidates a delayed refresh of its destination", async () => {
+  const f = await fixture();
+  try {
+    const c = f.controller();
+    await c.start();
+    f.setUncertainInput(true);
+    c.changeDraft("Unconfirmed");
+    await c.send();
+    let release!: () => void;
+    f.setSessionGate(
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+    );
+    const before = f.sessionReads();
+    const refreshing = c.start();
+    while (f.sessionReads() === before) await new Promise<void>((resolve) => setImmediate(resolve));
+    await c.abandonPending();
+    release();
+    await refreshing;
+    assert.equal(c.getSnapshot().session, undefined);
+    assert.equal(c.getSnapshot().pending, undefined);
+    assert.equal(c.getSnapshot().loading, false);
+    f.setUncertainInput(false);
+    await c.send();
+    assert.equal(f.sessions.length, 2);
+  } finally {
+    await f.close();
+  }
+});

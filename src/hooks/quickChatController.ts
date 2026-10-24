@@ -407,9 +407,10 @@ export class QuickChatController {
         saved.pending = undefined;
         await persist();
       });
+      this.generation++;
       this.prepared = true;
       this.observedDefaults = "manual-new";
-      this.publish({ session: undefined, pending: undefined, error: undefined, notice: undefined });
+      this.publish({ session: undefined, loading: false, pending: undefined, error: undefined, notice: undefined });
     } catch (error) {
       this.publish({ error: error instanceof Error ? error.message : "Could not abandon the attempt." });
     } finally {
