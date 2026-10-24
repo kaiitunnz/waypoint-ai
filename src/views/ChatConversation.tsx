@@ -1,13 +1,47 @@
 import { Action, ActionPanel, Detail, Icon, Keyboard, List } from "@raycast/api";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import { ServerMetadata } from "../api/contracts";
 import { chatExchanges, chatMarkdown } from "../domain/chatPresentation";
 import { transcript } from "../domain/transcript";
 import { isStructured } from "../domain/sessions";
 import { useConversationFeed } from "../hooks/useSessionFeeds";
-import { FeedConnection } from "../hooks/sessionFeeds";
+import { ConversationFeed, FeedConnection } from "../hooks/sessionFeeds";
 import { markdownText, sessionSummary } from "../components/SessionPresentation";
 import { ConversationContent } from "./Conversation";
+
+function FullExchange({
+  feed,
+  exchangeId,
+  showActivity,
+}: {
+  feed: ConversationFeed;
+  exchangeId: string;
+  showActivity: boolean;
+}) {
+  const state = useSyncExternalStore(feed.subscribe, feed.getSnapshot);
+  const exchanges = chatExchanges(transcript(state.events));
+  const exchange = exchanges.find((item) => item.id === exchangeId);
+  const waiting =
+    exchange?.id === exchanges.at(-1)?.id && !!state.session && ["starting", "running"].includes(state.session.status);
+  const response = exchange?.rows
+    .filter((row) => row.kind === "assistant")
+    .map((row) => row.text)
+    .join("\n\n");
+  return (
+    <Detail
+      navigationTitle="Conversation"
+      markdown={chatMarkdown(exchange, showActivity, waiting)}
+      isLoading={state.loading}
+      actions={
+        response ? (
+          <ActionPanel>
+            <Action.CopyToClipboard title="Copy Response" content={response} />
+          </ActionPanel>
+        ) : undefined
+      }
+    />
+  );
+}
 
 export function ChatConversation({
   connection,
@@ -140,17 +174,8 @@ export function ChatConversation({
           <Action.Push
             title="Read Exchange at Full Width"
             icon={Icon.Text}
-            target={
-              <Detail
-                markdown={chatMarkdown(
-                  exchange,
-                  showActivity,
-                  found < 0 && !!session && ["starting", "running"].includes(session.status),
-                )}
-              />
-            }
-            onPush={() => setActive(false)}
-            onPop={() => setActive(true)}
+            shortcut={Keyboard.Shortcut.Common.Open}
+            target={<FullExchange feed={feed} exchangeId={exchange.id} showActivity={showActivity} />}
           />
         )}
         {sessionId && (

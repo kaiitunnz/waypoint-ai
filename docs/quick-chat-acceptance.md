@@ -13,6 +13,7 @@ The macOS Raycast pass used the development extension and disposable Waypoint AP
 | Browse an older exchange with a draft             | Draft stays visible; Enter sends to the current conversation and selects the latest exchange  |
 | Stream assistant output                           | Response updates inside the selected exchange; composer remains on screen                     |
 | Open New Chat command                             | Prepares a fresh conversation with a separate draft                                           |
+| Read an exchange at full width during generation  | The delayed response appears without leaving the reader                                       |
 | Start New Chat                                    | Predecessor remains; creation waits for the first send                                        |
 | Reopen an expired idle session                    | Prepares a new conversation                                                                   |
 | Reopen expired running work                       | Keeps the running conversation                                                                |
