@@ -32,14 +32,14 @@ export function chatMarkdown(exchange: ChatExchange | undefined, showActivity = 
     parts.push("---");
   }
   let assistant = false;
-  const activity = exchange.rows.filter((row) => ["tool", "reasoning", "note"].includes(row.kind));
+  const activity = exchange.rows.filter((row) => row.kind === "tool");
   for (const row of exchange.rows) {
     if (row.kind === "assistant") {
       if (!assistant) parts.push("**Waypoint**");
       parts.push(row.text || "_Thinking…_");
       assistant = true;
     } else if (row.kind === "approval") {
-      parts.push(`### Approval needed\n\n${row.text}`);
+      parts.push(`### Approval request\n\n${row.text}`);
     } else if (showActivity) {
       parts.push(
         `**${plainText(row.title)}**\n\n${row.kind === "tool" ? `\`\`\`text\n${row.text.replaceAll("```", "` ` `")}\n\`\`\`` : row.text}`,
@@ -51,4 +51,11 @@ export function chatMarkdown(exchange: ChatExchange | undefined, showActivity = 
   if (activity.length && !showActivity)
     parts.push(`---\n\n_${activity.length} ${activity.length === 1 ? "activity item" : "activity items"}_`);
   return parts.join("\n\n");
+}
+
+export function conversationMarkdown(exchanges: ChatExchange[], showActivity = false, waiting = false): string {
+  return exchanges
+    .map((exchange, index) => chatMarkdown(exchange, showActivity, waiting && index === exchanges.length - 1))
+    .filter(Boolean)
+    .join("\n\n---\n\n");
 }

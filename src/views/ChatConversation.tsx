@@ -1,7 +1,7 @@
 import { Action, ActionPanel, Detail, Icon, Keyboard, List } from "@raycast/api";
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { ServerMetadata } from "../api/contracts";
-import { chatExchanges, chatMarkdown } from "../domain/chatPresentation";
+import { chatExchanges, chatMarkdown, conversationMarkdown } from "../domain/chatPresentation";
 import { transcript } from "../domain/transcript";
 import { isStructured } from "../domain/sessions";
 import { useConversationFeed } from "../hooks/useSessionFeeds";
@@ -9,33 +9,38 @@ import { ConversationFeed, FeedConnection } from "../hooks/sessionFeeds";
 import { markdownText, sessionSummary } from "../components/SessionPresentation";
 import { ConversationContent } from "./Conversation";
 
-function FullExchange({
+type ReadingMode = "conversation" | "latest";
+
+function FullConversation({
   feed,
-  exchangeId,
+  mode,
   showActivity,
 }: {
   feed: ConversationFeed;
-  exchangeId: string;
+  mode: ReadingMode;
   showActivity: boolean;
 }) {
   const state = useSyncExternalStore(feed.subscribe, feed.getSnapshot);
   const exchanges = chatExchanges(transcript(state.events));
-  const exchange = exchanges.find((item) => item.id === exchangeId);
-  const waiting =
-    exchange?.id === exchanges.at(-1)?.id && !!state.session && ["starting", "running"].includes(state.session.status);
-  const response = exchange?.rows
-    .filter((row) => row.kind === "assistant")
+  const waiting = !!state.session && ["starting", "running"].includes(state.session.status);
+  const response = exchanges
+    .at(-1)
+    ?.rows.filter((row) => row.kind === "assistant")
     .map((row) => row.text)
     .join("\n\n");
   return (
     <Detail
-      navigationTitle="Conversation"
-      markdown={chatMarkdown(exchange, showActivity, waiting)}
+      navigationTitle={mode === "conversation" ? "Conversation" : "Latest Response"}
+      markdown={
+        mode === "conversation"
+          ? conversationMarkdown(exchanges, showActivity, waiting)
+          : chatMarkdown(exchanges.at(-1), showActivity, waiting)
+      }
       isLoading={state.loading}
       actions={
         response ? (
           <ActionPanel>
-            <Action.CopyToClipboard title="Copy Response" content={response} />
+            <Action.CopyToClipboard title="Copy Latest Response" content={response} />
           </ActionPanel>
         ) : undefined
       }
@@ -74,13 +79,11 @@ export function ChatConversation({
 }) {
   const [active, setActive] = useState(true);
   const { state, feed } = useConversationFeed(connection, sessionId ?? "", active && !!sessionId);
-  const [selected, setSelected] = useState<{ id: string; revision: number }>();
+  const [mode, setMode] = useState<ReadingMode>("conversation");
   const [showActivity, setShowActivity] = useState(false);
   const exchanges = useMemo(() => chatExchanges(transcript(state.events)), [state.events]);
-  const found = selected?.revision === revision ? exchanges.findIndex((item) => item.id === selected.id) : -1;
-  const index = found >= 0 ? found : exchanges.length - 1;
-  const exchange = exchanges[index];
   const session = state.session;
+  const waiting = !!session && ["starting", "running"].includes(session.status);
   const unsupported = session && !isStructured(session, metadata);
   const problem =
     status ||
@@ -97,85 +100,70 @@ export function ChatConversation({
   ]
     .filter(Boolean)
     .join(" · ");
-  const body = unsupported
-    ? "## This conversation needs Waypoint\n\nIts interface changed. Open it in Waypoint to continue."
-    : exchange
-      ? chatMarkdown(exchange, showActivity, found < 0 && !!session && ["starting", "running"].includes(session.status))
-      : emptyMarkdown || "";
-  const markdown = [
-    problem
-      ? `> **Needs attention**\n>\n${problem
-          .split("\n")
-          .map((line) => `> ${markdownText(line)}`)
-          .join("\n")}\n\n---`
-      : "",
-    questions ? `> **${questions} pending ${questions === 1 ? "question" : "questions"}**\n\n---` : "",
-    body,
-    session?.status === "running" || session?.status === "starting" ? "\n\n_Working…_" : "",
-    !composer && exchanges.length
-      ? `\n\n_Exchange ${index + 1} of ${exchanges.length}${found < 0 ? " · Latest" : " · History"}_`
-      : "",
-  ]
-    .filter(Boolean)
+  const latest = exchanges.at(-1);
+  const response = latest?.rows
+    .filter((row) => row.kind === "assistant")
+    .map((row) => row.text)
     .join("\n\n");
+  const turns = exchanges.filter((exchange) => exchange.prompt).length;
+
+  useEffect(() => {
+    setMode("conversation");
+  }, [sessionId, revision]);
+
+  const renderMarkdown = (readingMode: ReadingMode) =>
+    [
+      problem
+        ? `> **Needs attention**\n>\n${problem
+            .split("\n")
+            .map((line) => `> ${markdownText(line)}`)
+            .join("\n")}\n\n---`
+        : "",
+      questions ? `> **${questions} pending ${questions === 1 ? "question" : "questions"}**\n\n---` : "",
+      unsupported
+        ? "## This conversation needs Waypoint\n\nIts interface changed. Open it in Waypoint to continue."
+        : exchanges.length
+          ? readingMode === "conversation"
+            ? conversationMarkdown(exchanges, showActivity, waiting)
+            : chatMarkdown(latest, showActivity, waiting)
+          : emptyMarkdown || "",
+      waiting ? "_Working…_" : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+
   const actionPanel = (
     <ActionPanel>
       {composer?.text.trim() && composer.canSend && (
         <Action title="Send Message" icon={Icon.ArrowUp} onAction={composer.onSend} />
       )}
-      {!composer?.text.trim() && !status && exchange?.rows.some((row) => row.kind === "assistant") && (
-        <Action.CopyToClipboard
-          title="Copy Response"
-          content={exchange.rows
-            .filter((row) => row.kind === "assistant")
-            .map((row) => row.text)
-            .join("\n\n")}
-        />
+      {!composer?.text.trim() && !status && response && (
+        <Action.CopyToClipboard title="Copy Latest Response" content={response} />
       )}
       {actions?.(setActive)}
       <ActionPanel.Section title="Conversation">
-        {index > 0 && (
+        {turns > 1 && (
           <Action
-            title="Previous Exchange"
-            icon={Icon.ArrowUp}
+            title={mode === "conversation" ? "Show Latest Response" : "Show Conversation"}
+            icon={mode === "conversation" ? Icon.ArrowDownCircle : Icon.Message}
             shortcut={{
-              macOS: { modifiers: ["cmd"], key: "arrowUp" },
-              Windows: { modifiers: ["ctrl"], key: "arrowUp" },
+              macOS: { modifiers: ["cmd", "shift"], key: "f" },
+              Windows: { modifiers: ["ctrl", "shift"], key: "f" },
             }}
-            onAction={() => setSelected({ id: exchanges[index - 1].id, revision })}
+            onAction={() => setMode((current) => (current === "conversation" ? "latest" : "conversation"))}
           />
         )}
-        {index < exchanges.length - 1 && (
-          <Action
-            title="Next Exchange"
-            icon={Icon.ArrowDown}
-            shortcut={{
-              macOS: { modifiers: ["cmd"], key: "arrowDown" },
-              Windows: { modifiers: ["ctrl"], key: "arrowDown" },
-            }}
-            onAction={() => setSelected({ id: exchanges[index + 1].id, revision })}
-          />
-        )}
-        <Action
-          title="Show Latest Exchange"
-          icon={Icon.ArrowDownCircle}
-          shortcut={{
-            macOS: { modifiers: ["cmd", "shift"], key: "f" },
-            Windows: { modifiers: ["ctrl", "shift"], key: "f" },
-          }}
-          onAction={() => setSelected(undefined)}
-        />
         <Action
           title={showActivity ? "Hide Activity" : "Show Activity"}
           icon={Icon.Hammer}
           onAction={() => setShowActivity((value) => !value)}
         />
-        {exchange?.prompt && (
+        {composer && exchanges.length > 0 && (
           <Action.Push
-            title="Read Exchange at Full Width"
-            icon={Icon.Text}
+            title="Read Conversation at Full Width"
+            icon={Icon.Maximize}
             shortcut={Keyboard.Shortcut.Common.Open}
-            target={<FullExchange feed={feed} exchangeId={exchange.id} showActivity={showActivity} />}
+            target={<FullConversation feed={feed} mode={mode} showActivity={showActivity} />}
           />
         )}
         {sessionId && (
@@ -217,12 +205,12 @@ export function ChatConversation({
       </ActionPanel.Section>
     </ActionPanel>
   );
+
   if (!composer)
     return (
       <Detail
-        key={exchange?.id ?? "empty"}
         navigationTitle={`Chat · ${context}`}
-        markdown={markdown}
+        markdown={renderMarkdown(mode)}
         isLoading={busy || (!!sessionId && state.loading)}
         actions={actionPanel}
       />
@@ -237,51 +225,31 @@ export function ChatConversation({
       searchBarAccessory={composer.accessory}
       isShowingDetail
       isLoading={busy || (!!sessionId && state.loading)}
-      selectedItemId={exchange?.id ?? "empty"}
+      selectedItemId={mode}
       onSelectionChange={(id) => {
-        if (!busy && !state.loading && id && id !== exchange?.id && exchanges.some((item) => item.id === id))
-          setSelected({ id, revision });
+        if (id === "conversation" || id === "latest") setMode(id);
       }}
     >
       <List.Section
         title="Conversation"
         subtitle={session?.status === "running" ? "Working…" : session?.status.replaceAll("_", " ")}
       >
-        {exchanges.length ? (
-          exchanges
-            .slice()
-            .reverse()
-            .map((item) => (
-              <List.Item
-                key={item.id}
-                id={item.id}
-                icon={Icon.Message}
-                title={item.prompt?.text.replace(/\s+/g, " ").slice(0, 80) || "Waypoint"}
-                subtitle={item.id === exchanges.at(-1)?.id ? "Latest" : undefined}
-                detail={
-                  <List.Item.Detail
-                    markdown={
-                      item.id === exchange?.id
-                        ? markdown
-                        : chatMarkdown(
-                            item,
-                            showActivity,
-                            item.id === exchanges.at(-1)?.id &&
-                              !!session &&
-                              ["starting", "running"].includes(session.status),
-                          )
-                    }
-                  />
-                }
-                actions={actionPanel}
-              />
-            ))
-        ) : (
+        <List.Item
+          id="conversation"
+          icon={Icon.Message}
+          title={session?.title || (sessionId ? "Conversation" : "New conversation")}
+          accessories={
+            turns ? [{ text: `${turns}${state.hasMore ? "+" : ""} ${turns === 1 ? "turn" : "turns"}` }] : undefined
+          }
+          detail={<List.Item.Detail markdown={renderMarkdown("conversation")} />}
+          actions={actionPanel}
+        />
+        {turns > 1 && (
           <List.Item
-            id="empty"
-            title={sessionId ? "Conversation" : "New conversation"}
-            icon={Icon.Message}
-            detail={<List.Item.Detail markdown={markdown} />}
+            id="latest"
+            icon={Icon.ArrowDownCircle}
+            title="Latest response"
+            detail={<List.Item.Detail markdown={renderMarkdown("latest")} />}
             actions={actionPanel}
           />
         )}

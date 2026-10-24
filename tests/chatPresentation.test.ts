@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { chatExchanges, chatMarkdown } from "../src/domain/chatPresentation";
+import { chatExchanges, chatMarkdown, conversationMarkdown } from "../src/domain/chatPresentation";
 import { transcript } from "../src/domain/transcript";
 import { parseEvent } from "../src/api/sessions";
 import { eventWire } from "./fixtures/conversation";
@@ -38,4 +38,49 @@ test("long prompts remain complete and render as plain text", () => {
   assert.ok(markdown.includes("Visible reply"));
   assert.equal(exchanges[0].prompt?.text, prompt);
   assert.equal(exchanges[0].prompt?.text.length, prompt.length);
+});
+
+test("a continuous conversation retains every turn in chronological order", () => {
+  const exchanges = chatExchanges(
+    transcript([
+      event(0, "system_note", "Session started"),
+      event(1, "user_input", "Remember the blue garden"),
+      event(2, "agent_output", "The blue garden is our topic"),
+      event(3, "user_input", "Add herbs"),
+      event(4, "agent_output", "Add basil to the garden"),
+      event(5, "user_input", "Now add flowers"),
+    ]),
+  );
+  const markdown = conversationMarkdown(exchanges, false, true);
+  assert.ok(markdown.startsWith("**You**"));
+  assert.ok(!markdown.includes("Session started"));
+  assert.ok(conversationMarkdown(exchanges, true, true).includes("Session started"));
+  const contents = [
+    "Remember the blue garden",
+    "The blue garden is our topic",
+    "Add herbs",
+    "Add basil to the garden",
+    "Now add flowers",
+    "Waiting for a response",
+  ];
+  const positions = contents.map((text) => markdown.indexOf(text));
+  assert.ok(positions.every((position) => position >= 0));
+  assert.deepEqual(
+    positions,
+    positions.slice().sort((a, b) => a - b),
+  );
+  assert.equal((markdown.match(/\*\*You\*\*/g) || []).length, 3);
+  assert.equal((markdown.match(/Waiting for a response/g) || []).length, 1);
+  exchanges.at(-1)!.rows.push({
+    id: "last",
+    kind: "assistant",
+    title: "Assistant",
+    text: "Flowers come next",
+    timestamp: "",
+    sequence: 6,
+  });
+  const completed = conversationMarkdown(exchanges);
+  assert.ok(completed.includes("The blue garden is our topic"));
+  assert.ok(completed.includes("Flowers come next"));
+  assert.ok(!completed.includes("Waiting for a response"));
 });

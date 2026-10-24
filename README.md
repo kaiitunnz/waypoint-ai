@@ -33,11 +33,11 @@ Open structured sessions in the native conversation reader. Terminal and unknown
 
 ![Search Sessions](docs/screenshots/search-sessions.png)
 
-The conversation opens at the latest user/assistant exchange, with formatted responses at full width. Previous/Next Exchange navigates turns. Copy Response copies the current answer. Conversation Details shows server-reported context and token usage.
+The conversation displays loaded user and assistant turns together in chronological order, with formatted responses at full width. Show Latest Response focuses the newest turn when needed. Copy Latest Response copies the current answer. Conversation Details shows server-reported context and token usage.
 
 **Conversation History** opens the detailed event inspector with paired tool activity, filtering, older history, and follow-latest controls.
 
-Pending questions appear above the exchange. Use Open in Waypoint for approvals and answers. Older approval details may be outside the loaded history. Native approvals, answers, and sending to sessions opened from search are planned for subsequent changes.
+Pending questions appear above the transcript. Use Open in Waypoint for approvals and answers. Older approval details may be outside the loaded history. Native approvals, answers, and sending to sessions opened from search are planned for subsequent changes.
 
 Reconnects recover missed events and preserve loaded history. Expired sign-in offers reauthentication. The conversation content remains in memory and is not saved to extension storage.
 
@@ -45,9 +45,9 @@ Reconnects recover missed events and preserve loaded history. Expired sign-in of
 
 ## Quick Chat
 
-Type in the top message field and press Enter to send. The draft and transcript share one screen. Each history row groups a user turn with its assistant response; selecting an older turn keeps the draft visible. Sending returns to the latest turn. Activity details, response copying, full-width reading, and session information are available in Actions.
+Type in the top message field and press Enter to send. Follow-ups continue the same Waypoint session. The transcript keeps loaded turns together in chronological order, alongside the draft. The conversation row shows its turn count; Latest Response is an optional focused view. Sending returns to the continuous conversation. Activity details, response copying, full-width reading, and session information are available in Actions.
 
-![Quick Chat](docs/screenshots/quick-chat.png)
+![Quick Chat](docs/screenshots/quick-chat.jpg)
 
 Quick Chat continues its own conversation for each saved server. The default timeout is 30 minutes after the last successful user send. Running work and unresolved approvals, questions, or plans keep their conversation. **Quick Chat Defaults** offers Always Continue, Always New, and a configurable timeout. **New Chat** and **Start New Chat** prepare a fresh conversation; creation happens on first send, and existing sessions keep running.
 
