@@ -121,6 +121,9 @@ export function ChatConversation({
   const interactions = interactionState.interactions;
   const unconfirmed = unconfirmedFor(interactionState, sessionId);
   const attention = [
+    ...(interactionState.loadError
+      ? [`- **Requests unavailable.** ${markdownText(interactionState.loadError)} Refresh to retry.`]
+      : []),
     ...(unconfirmed
       ? [
           `- **Unconfirmed response.** ${markdownText(interactionState.notice ?? "Check its outcome before responding again.")}`,
@@ -251,7 +254,10 @@ export function ChatConversation({
           title="Refresh Conversation"
           icon={Icon.ArrowClockwise}
           shortcut={Keyboard.Shortcut.Common.Refresh}
-          onAction={() => feed.retry()}
+          onAction={() => {
+            feed.retry();
+            void interactionController.refresh();
+          }}
         />
         {session && (
           <Action.Push

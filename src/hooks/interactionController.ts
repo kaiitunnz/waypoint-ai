@@ -27,7 +27,8 @@ export interface InteractionSnapshot {
   error?: string;
   notice?: string;
   outcome?: Outcome;
-  revision: number;
+  // A failed refresh leaves approvals and plans unknown until the next successful one.
+  loadError?: string;
 }
 export type Outcome = "pending" | "resolved" | "elsewhere";
 
@@ -44,7 +45,7 @@ const definitive = new Set(["expired-token", "not-found", "rejected"]);
 const message = (error: unknown, fallback: string) => (error instanceof Error ? error.message : fallback);
 
 export class InteractionController {
-  private state: InteractionSnapshot = { loading: true, busy: false, interactions: [], drafts: {}, revision: 0 };
+  private state: InteractionSnapshot = { loading: true, busy: false, interactions: [], drafts: {} };
   private listeners = new Set<() => void>();
   private session?: Session;
   private events: SessionEvent[] = [];
@@ -183,7 +184,7 @@ export class InteractionController {
     const generation = ++this.generation;
     const sessionChanges = this.sessionChanges;
     const questionChanges = this.questionChanges;
-    this.publish({ loading: true, error: undefined });
+    this.publish({ loading: true, error: undefined, loadError: undefined });
     try {
       await this.queue;
       const [fresh, saved] = await Promise.all([this.snapshot(), this.store.load(this.connection.id)]);
@@ -198,7 +199,11 @@ export class InteractionController {
       await this.prune();
     } catch (error) {
       if (this.active && generation === this.generation)
-        this.publish({ loading: false, error: message(error, "Could not refresh requests.") });
+        this.publish({
+          loading: false,
+          error: message(error, "Could not refresh requests."),
+          loadError: message(error, "Could not refresh requests."),
+        });
     }
     if (this.historyFollowUp && this.watermark === undefined && this.active && generation === this.generation) {
       this.historyFollowUp = false;
@@ -322,7 +327,6 @@ export class InteractionController {
       this.publish({
         pending: undefined,
         drafts,
-        revision: this.state.revision + 1,
         notice: cancel ? "Question cancelled." : "Response sent.",
       });
     }

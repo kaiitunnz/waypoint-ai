@@ -51,6 +51,7 @@ export const unconfirmedFor = (state: InteractionSnapshot, sessionId?: string) =
 
 export function interactionItemIds(state: InteractionSnapshot, sessionId?: string) {
   return [
+    ...(state.loadError ? ["interaction:load-error"] : []),
     ...(unconfirmedFor(state, sessionId) ? ["interaction:unconfirmed"] : []),
     ...state.interactions.map((interaction) => `interaction:${interaction.key}`),
   ];
@@ -91,9 +92,28 @@ export function InteractionSection({
 }) {
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const unconfirmed = unconfirmedFor(state, sessionId);
-  if (!unconfirmed && !state.interactions.length) return null;
+  if (!unconfirmed && !state.interactions.length && !state.loadError) return null;
   return (
     <List.Section title="Needs Attention">
+      {state.loadError && (
+        <List.Item
+          id="interaction:load-error"
+          title="Requests unavailable"
+          icon={{ source: Icon.ExclamationMark, tintColor: Color.Orange }}
+          detail={
+            <List.Item.Detail
+              markdown={`## Requests unavailable\n\n${markdownText(state.loadError)}\n\nPending approvals and plans may be missing until requests load.`}
+            />
+          }
+          actions={
+            <ActionPanel>
+              {leading}
+              <Action title="Retry Requests" icon={Icon.ArrowClockwise} onAction={() => controller.refresh()} />
+              {trailing}
+            </ActionPanel>
+          }
+        />
+      )}
       {unconfirmed && (
         <List.Item
           id="interaction:unconfirmed"

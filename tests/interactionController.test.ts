@@ -82,6 +82,7 @@ async function fixture() {
     status: 200,
     gate: undefined as Promise<void> | undefined,
     onPost: undefined as (() => void) | undefined,
+    failHistory: false,
   };
   const fetcher: typeof fetch = async (url, options) => {
     const parsed = new URL(String(url));
@@ -98,6 +99,7 @@ async function fixture() {
       return respond(server.status === 400 ? { detail: "no pending approval request" } : { session }, server.status);
     }
     if (path.endsWith("/events")) {
+      if (server.failHistory && parsed.searchParams.has("cursor")) return respond({}, 503);
       server.queries.push(`${id}${parsed.search}`);
       const own = server.events.filter((event) => event.session_id === id);
       const cursor = parsed.searchParams.get("cursor");
@@ -566,6 +568,24 @@ test("a resumed feed's cached snapshot does not override state another feed deli
     c.getSnapshot().interactions.map((item) => item.id),
     ["q2"],
     "a newer snapshot from the resumed feed still applies",
+  );
+  await f.close();
+});
+
+test("a failed request refresh is visible and a retry loads the missing history", async () => {
+  const f = await fixture();
+  f.server.events.push(approval());
+  f.server.failHistory = true;
+  const c = f.controller();
+  await c.start();
+  assert.ok(c.getSnapshot().loadError);
+  assert.deepEqual(c.getSnapshot().interactions, []);
+  f.server.failHistory = false;
+  await c.refresh();
+  assert.equal(c.getSnapshot().loadError, undefined);
+  assert.deepEqual(
+    c.getSnapshot().interactions.map((item) => item.key),
+    ["approval:a1"],
   );
   await f.close();
 });

@@ -188,7 +188,10 @@ export function ConversationContent({
         title="Retry Connection"
         icon={Icon.ArrowClockwise}
         shortcut={Keyboard.Shortcut.Common.Refresh}
-        onAction={() => feed.retry()}
+        onAction={() => {
+          feed.retry();
+          void interactions.refresh();
+        }}
       />
 
       {url ? (
