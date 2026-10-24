@@ -1,8 +1,9 @@
 import { isRecord } from "../domain/connections";
 import { parseMetadata, ServerMetadata } from "./contracts";
+import { Session, EventsPage, parseSession, parseSessions, parseEventsPage } from "./sessions";
 
 export type ApiErrorKind =
-  "unreachable" | "invalid-credentials" | "expired-token" | "invalid-response" | "server-error";
+  "unreachable" | "invalid-credentials" | "expired-token" | "invalid-response" | "server-error" | "not-found";
 
 export class ApiError extends Error {
   constructor(
@@ -44,6 +45,11 @@ export class WaypointClient {
           ? new ApiError("invalid-credentials", "The password was not accepted. Check it and try again.")
           : new ApiError("expired-token", "Your sign-in expired or was revoked. Sign in again to reconnect.");
       }
+      if (response.status === 404)
+        throw new ApiError(
+          "not-found",
+          "This session is no longer available on this server. Return to Search Sessions and refresh.",
+        );
       if (!response.ok)
         throw new ApiError("server-error", `The server returned HTTP ${response.status}. Check the server and retry.`);
       try {
@@ -87,5 +93,50 @@ export class WaypointClient {
         "The server returned incompatible connection information. Check the Waypoint version and API URL.",
       );
     }
+  }
+  private async read<T>(
+    path: string,
+    token: string,
+    signal: AbortSignal | undefined,
+    parse: (value: unknown) => T,
+  ): Promise<T> {
+    const value = await this.call(path, { token, signal });
+    try {
+      return parse(value);
+    } catch {
+      throw new ApiError(
+        "invalid-response",
+        "The server returned incompatible session information. Check the Waypoint version and retry.",
+      );
+    }
+  }
+
+  sessions(token: string, signal?: AbortSignal): Promise<Session[]> {
+    return this.read("/api/sessions", token, signal, parseSessions);
+  }
+
+  session(token: string, id: string, signal?: AbortSignal): Promise<Session> {
+    return this.read(`/api/sessions/${encodeURIComponent(id)}`, token, signal, (value) => {
+      if (!isRecord(value)) throw new Error("Invalid session response");
+      const session = parseSession(value.session);
+      if (session.id !== id) throw new Error("Mismatched session");
+      return session;
+    });
+  }
+
+  events(
+    token: string,
+    id: string,
+    options: { before?: number; cursor?: number } = {},
+    signal?: AbortSignal,
+  ): Promise<EventsPage> {
+    const query = new URLSearchParams(
+      options.cursor !== undefined
+        ? { cursor: String(options.cursor) }
+        : { messages: "40", ...(options.before !== undefined ? { before_sequence: String(options.before) } : {}) },
+    );
+    return this.read(`/api/sessions/${encodeURIComponent(id)}/events?${query}`, token, signal, (value) =>
+      parseEventsPage(value, id),
+    );
   }
 }
