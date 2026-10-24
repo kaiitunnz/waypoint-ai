@@ -33,9 +33,11 @@ Open structured sessions in the native conversation reader. Terminal and unknown
 
 ![Search Sessions](docs/screenshots/search-sessions.png)
 
-The split view groups assistant output and paired tool activity. Selecting an older row pauses following; Follow Latest Response selects the newest assistant response. Load Older Messages adds earlier history while preserving selection. Find in Conversation filters the loaded messages. View Full Response opens the selected response at full width, and Copy Response copies its text. Session Information shows server-reported context and token usage.
+The conversation opens at the latest user/assistant exchange, with formatted responses at full width. Previous/Next Exchange navigates turns. Copy Response copies the current answer. Conversation Details shows server-reported context and token usage.
 
-Pending questions show their availability; a waiting session also shows an input-needed notice. Use Open in Waypoint for approvals and answers. Older approval details may be outside the loaded history. Native approvals, answers, and sending to sessions opened from search are planned for subsequent changes.
+**Conversation History** opens the detailed event inspector with paired tool activity, filtering, older history, and follow-latest controls.
+
+Pending questions appear above the exchange. Use Open in Waypoint for approvals and answers. Older approval details may be outside the loaded history. Native approvals, answers, and sending to sessions opened from search are planned for subsequent changes.
 
 Reconnects recover missed events and preserve loaded history. Expired sign-in offers reauthentication. The conversation content remains in memory and is not saved to extension storage.
 
