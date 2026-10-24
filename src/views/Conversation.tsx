@@ -84,7 +84,8 @@ function ConversationContent({
   metadata: ServerMetadata;
   refreshConnections: () => Promise<void>;
 }) {
-  const { state, feed } = useConversationFeed(connection, sessionId);
+  const [active, setActive] = useState(true);
+  const { state, feed } = useConversationFeed(connection, sessionId, active);
   const [selection, setSelection] = useState<string>();
   const [following, setFollowing] = useState(true);
   const [query, setQuery] = useState("");
@@ -120,6 +121,11 @@ function ConversationContent({
           }}
           icon={Icon.Lock}
           target={<SignInForm connection={connection} onSaved={refreshConnections} />}
+          onPush={() => setActive(false)}
+          onPop={() => {
+            setActive(true);
+            void refreshConnections();
+          }}
         />
       )}
       <Action
@@ -159,7 +165,11 @@ function ConversationContent({
           title="Configure Frontend URL"
           icon={Icon.Network}
           target={<ManageServers />}
-          onPop={refreshConnections}
+          onPush={() => setActive(false)}
+          onPop={() => {
+            setActive(true);
+            void refreshConnections();
+          }}
         />
       )}
     </>
@@ -318,6 +328,8 @@ function ConversationContent({
                     title="Session Information"
                     icon={Icon.Info}
                     target={<Detail markdown={sessionSummary(state.session)} />}
+                    onPush={() => setActive(false)}
+                    onPop={() => setActive(true)}
                   />
                 )}
               </ActionPanel>

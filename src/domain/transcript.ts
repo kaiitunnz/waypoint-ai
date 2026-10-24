@@ -1,4 +1,5 @@
 import { SessionEvent, PendingQuestions } from "../api/sessions";
+import { isRecord } from "./connections";
 
 export interface TranscriptRow {
   id: string;
@@ -40,6 +41,37 @@ export function transcript(events: SessionEvent[]): TranscriptRow[] {
     if (event.kind === "raw_terminal_chunk") continue;
     const item = string(event.metadata.item_id);
     const eventKey = `sequence:${event.sequence}`;
+    const plan = isRecord(event.metadata.plan) ? event.metadata.plan : undefined;
+    const approvalInput =
+      event.kind === "approval_request" &&
+      event.metadata.tool_name === "ExitPlanMode" &&
+      isRecord(event.metadata.tool_input)
+        ? event.metadata.tool_input
+        : undefined;
+    const planText = string(plan?.text).trim() || string(approvalInput?.plan).trim();
+    if (planText) {
+      const approval = event.kind === "approval_request";
+      const key = `${approval ? "plan-approval" : "plan"}:${string(plan?.id) || string(event.metadata.approval_id) || item || eventKey}`;
+      const existing = messages.get(key);
+      if (existing) {
+        existing.text = planText;
+        existing.sequence = event.sequence;
+        existing.timestamp = event.timestamp;
+      } else {
+        const row: TranscriptRow = {
+          id: key,
+          kind: approval ? "approval" : "assistant",
+          title: approval ? "Plan approval request" : "Plan",
+          text: planText,
+          timestamp: event.timestamp,
+          sequence: event.sequence,
+        };
+        messages.set(key, row);
+        rows.push(row);
+      }
+      continue;
+    }
+
     if (event.kind === "tool_call" || event.kind === "tool_result") {
       const key = item ? `tool:${item}` : eventKey;
       let tool = tools.get(key);
@@ -110,7 +142,7 @@ export function transcript(events: SessionEvent[]): TranscriptRow[] {
     rows.push(row);
     messages.set(key, row);
   }
-  return rows;
+  return rows.sort((a, b) => a.sequence - b.sequence);
 }
 
 export function newerQuestions(current: PendingQuestions | undefined, next: PendingQuestions): PendingQuestions {

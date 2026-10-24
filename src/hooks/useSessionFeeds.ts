@@ -12,15 +12,16 @@ export function useSessionsFeed(connection: FeedConnection, active: boolean) {
   return { state, feed };
 }
 
-export function useConversationFeed(connection: FeedConnection, sessionId: string) {
+export function useConversationFeed(connection: FeedConnection, sessionId: string, active: boolean) {
   const feed = useMemo(
     () => new ConversationFeed(connection, sessionId),
     [connection.id, connection.apiUrl, connection.token, sessionId],
   );
   const state = useSyncExternalStore(feed.subscribe, feed.getSnapshot);
   useEffect(() => {
+    if (!active) return;
     feed.start();
     return () => feed.stop();
-  }, [feed]);
+  }, [feed, active]);
   return { state, feed };
 }

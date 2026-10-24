@@ -96,3 +96,42 @@ test("question snapshots use sequence/revision and older pages never synthesize 
   assert.equal(newerQuestions(current, { sequence: 9, revision: 99, questions: [] }), current);
   assert.equal(parseEventsPage({ events: [], has_more: false, pending_questions: null }, "demo").questions, undefined);
 });
+
+test("completed Codex plan snapshots render their canonical body without concatenation", () => {
+  const events = [
+    parse({
+      ...eventWire(1, "system_note", "Started plan", "plan-a"),
+      metadata: { item_id: "plan-a", item_type: "plan" },
+    }),
+    parse({
+      ...eventWire(2, "system_note", "Plan updated", "plan-a"),
+      metadata: { plan: { id: "plan-a", text: "First draft" } },
+    }),
+    parse({
+      ...eventWire(3, "system_note", "Completed plan", "plan-a"),
+      metadata: { plan: { id: "plan-a", text: "## Final plan\n\n1. Inspect\n2. Validate" } },
+    }),
+  ];
+  const rows = transcript(events);
+  const plans = rows.filter((row) => row.title === "Plan");
+  assert.equal(plans.length, 1);
+  assert.equal(plans[0].text, "## Final plan\n\n1. Inspect\n2. Validate");
+  assert.equal(plans[0].id, "plan:plan-a");
+  assert.equal(selectedRow(rows, undefined, true), plans[0].id);
+});
+
+test("Claude plan approval includes the plan body as readable request context", () => {
+  const rows = transcript([
+    parse({
+      ...eventWire(1, "approval_request", "Exit plan mode", ""),
+      metadata: {
+        tool_name: "ExitPlanMode",
+        approval_id: "approval-plan",
+        tool_input: { plan: "Review the seedlings, then update the schedule." },
+      },
+    }),
+  ]);
+  assert.equal(rows[0].kind, "approval");
+  assert.equal(rows[0].title, "Plan approval request");
+  assert.equal(rows[0].text, "Review the seedlings, then update the schedule.");
+});

@@ -18,6 +18,7 @@ The macOS Raycast desktop pass used the development extension, two isolated Wayp
 | Copy Response                                    | Raycast confirms Copied to Clipboard                                                                                    |
 | Stop the recording API                           | Loaded history and selected response remain visible with a connection error                                             |
 | Restart after a delivery gap                     | Automatic recovery retains selection and catches up stored events; recovered text matched 160 distinct database records |
+| Open a canonical completed-plan event            | Full plan body renders as the selected latest response                                                                  |
 | Open a waiting session                           | Input-needed notice and a session-wide pending question appear                                                          |
 | Select the pending question                      | Question and availability render with Open in Waypoint                                                                  |
 | Select a terminal session                        | Browser handoff replaces the native conversation action                                                                 |
@@ -30,7 +31,7 @@ The Actions popup and actual browser navigation were not verified through comput
 
 ## Automated coverage
 
-`npm run verify` checks formatting, ESLint, strict types, 39 behavior/integration tests, Raycast manifest/icon validation, and build. Tests cover event identity and ordering, provider output/tool recordings, overlapping REST/live history, cross-page tools, older-message selection, reconnect recovery beyond a tail page, ID-less history fallback, session/question snapshot races, auth expiry and close 4401, malformed envelopes, disposal, filtering, transport gating, and credential isolation. A real loopback WebSocket test verifies Node's native WebSocket JSON delivery and auth close handling.
+`npm run verify` checks formatting, ESLint, strict types, 42 behavior/integration tests, Raycast manifest/icon validation, and build. Tests cover event identity and ordering, provider output/tool recordings, canonical plan snapshots, hidden-view pause/resume, overlapping REST/live history, cross-page tools, older-message selection, reconnect recovery beyond a tail page, ID-less history fallback, session/question snapshot races, auth expiry and close 4401, malformed envelopes, disposal, filtering, transport gating, and credential isolation. A real loopback WebSocket test verifies Node's native WebSocket JSON delivery and auth close handling.
 
 ## Screenshots
 
@@ -41,3 +42,5 @@ The Actions popup and actual browser navigation were not verified through comput
 ![Full-width response](screenshots/full-response.png)
 
 ![Pending question](screenshots/pending-question.png)
+
+![Canonical plan response](screenshots/plan-response.png)

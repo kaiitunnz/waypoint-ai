@@ -317,3 +317,31 @@ test("REST history remains readable when the socket cannot subscribe", async () 
   assert.equal(feed.getSnapshot().loading, false);
   feed.stop();
 });
+
+test("pausing a hidden conversation closes subscriptions and resuming catches up", async () => {
+  const f = fixture();
+  let resume = false;
+  const client = new WaypointClient(connection.apiUrl, async (url) =>
+    String(url).includes("/events")
+      ? response({ events: [eventWire(resume ? 2 : 1)], has_more: false })
+      : response({ session: sessionWire() }),
+  );
+  const feed = new ConversationFeed(connection, "demo", client, f);
+  feed.start();
+  f.send("session_state", { session: sessionWire() });
+  await tick();
+  feed.stop();
+  assert.equal(f.sockets[0].closed, true);
+  assert.equal(f.jobs.size, 0);
+  f.send("event", { event: eventWire(2) }, 0);
+  assert.equal(feed.getSnapshot().events.length, 1);
+  resume = true;
+  feed.start();
+  f.send("session_state", { session: sessionWire() });
+  await tick();
+  assert.deepEqual(
+    feed.getSnapshot().events.map((event) => event.sequence),
+    [1, 2],
+  );
+  feed.stop();
+});
