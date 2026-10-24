@@ -36,6 +36,7 @@ export class QuickChatController {
   private observedPointer?: string;
   private observedDefaults = "";
   private prepared = false;
+  private draftLoaded = false;
   private queue: Promise<unknown> = Promise.resolve();
   private readonly draftKey: string;
   constructor(
@@ -70,9 +71,15 @@ export class QuickChatController {
     const generation = ++this.generation;
     this.publish({ loading: true, error: undefined });
     try {
+      await this.queue;
       const saved = await this.store.load(this.connection.id);
       if (!this.active || generation !== this.generation) return;
-      this.publish({ draft: saved.drafts[this.draftKey] ?? "", defaults: saved.defaults, pending: saved.pending });
+      this.publish({
+        draft: this.draftLoaded ? this.state.draft : (saved.drafts[this.draftKey] ?? ""),
+        defaults: saved.defaults,
+        pending: saved.pending,
+      });
+      this.draftLoaded = true;
       await this.verifyConnection();
       const metadata = await this.client.me(this.connection.token);
       if (!this.active || generation !== this.generation) return;

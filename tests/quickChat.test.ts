@@ -22,11 +22,17 @@ async function fixture() {
   let failFinalWrite = false;
   let inputGate: Promise<void> | undefined;
   let sessionGate: Promise<void> | undefined;
+  let readGate: Promise<void> | undefined;
+  let storageReads = 0;
   let sessionReads = 0;
   const eventQueries: string[] = [];
   const store = new QuickChatStore(
     {
-      getItem: async (key) => values.get(key),
+      getItem: async (key) => {
+        storageReads++;
+        await readGate;
+        return values.get(key);
+      },
       setItem: async (key, value) => {
         const state = JSON.parse(value);
         if (failFinalWrite && !state.pending && Object.keys(state.sentAt).length) {
@@ -97,6 +103,10 @@ async function fixture() {
     requests,
     client,
     controller,
+    storageReads: () => storageReads,
+    setReadGate: (value: Promise<void>) => {
+      readGate = value;
+    },
     eventQueries,
     sessionReads: () => sessionReads,
     setSessionGate: (value: Promise<void>) => {
@@ -171,6 +181,15 @@ test("reuse interaction evidence follows Waypoint approval queue and latest plan
   const decided = event(3, "system_note", "Accepted", { plan_item_id: "new", plan_decision: "accept" });
   assert.equal(ongoing(planning, undefined, [oldPlan, newPlan, decided], catalog), false);
   assert.equal(ongoing(planning, undefined, [newPlan, event(3, "user_input", "More detail")], catalog), true);
+  assert.equal(
+    ongoing(
+      planning,
+      undefined,
+      [newPlan, decided, event(4, "agent_output", "Revised", { plan: { id: "new" } })],
+      catalog,
+    ),
+    true,
+  );
   assert.equal(ongoing({ ...planning, permissionMode: "default" }, undefined, [newPlan], catalog), false);
   assert.equal(ongoing(planning, undefined, [newPlan], parseMetadata(metadataWire)), false);
   assert.equal(
@@ -721,6 +740,48 @@ test("manual New Chat invalidates a delayed refresh of its predecessor", async (
     c.changeDraft("New intent");
     await c.send();
     assert.equal(f.sessions.length, 2);
+  } finally {
+    await f.close();
+  }
+});
+
+test("refresh waits for queued draft writes instead of restoring old text", async () => {
+  const f = await fixture();
+  try {
+    const c = f.controller();
+    await c.start();
+    await c.changeDraft("Old text");
+    const saving = c.changeDraft("New text");
+    await c.start();
+    await saving;
+    assert.equal(c.getSnapshot().draft, "New text");
+    assert.equal((await f.store.load(connection.id)).drafts.quick, "New text");
+  } finally {
+    await f.close();
+  }
+});
+
+test("an edit during a delayed refresh remains the visible and saved draft", async () => {
+  const f = await fixture();
+  try {
+    const c = f.controller();
+    await c.start();
+    await c.changeDraft("Before refresh");
+    let release!: () => void;
+    f.setReadGate(
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+    );
+    const before = f.storageReads();
+    const refreshing = c.start();
+    while (f.storageReads() === before) await new Promise<void>((resolve) => setImmediate(resolve));
+    const saving = c.changeDraft("Edited during refresh");
+    release();
+    await refreshing;
+    await saving;
+    assert.equal(c.getSnapshot().draft, "Edited during refresh");
+    assert.equal((await f.store.load(connection.id)).drafts.quick, "Edited during refresh");
   } finally {
     await f.close();
   }

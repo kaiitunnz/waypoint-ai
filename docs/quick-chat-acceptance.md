@@ -9,6 +9,7 @@ The macOS Raycast pass used the development extension and disposable Waypoint AP
 | Open Quick Chat before first send                 | Prepared view; database session count remained zero                                           |
 | Save defaults                                     | Native form saves reuse timeout and returns to the same conversation                          |
 | Close and reopen with a draft                     | Message text restores without sending                                                         |
+| Reconnect immediately after editing               | The current draft remains visible and is not sent                                             |
 | First send and follow-up                          | One created session, multiple input events; successful sends clear the input                  |
 | Browse an older exchange with a draft             | Draft stays visible; Enter sends to the current conversation and selects the latest exchange  |
 | Stream assistant output                           | Response updates inside the selected exchange; composer remains on screen                     |
@@ -28,7 +29,7 @@ The native composition field and transcript share one List view. Turns group use
 
 ## Automated coverage
 
-`npm run verify` covers formatting, ESLint, strict TypeScript, 69 behavior/integration tests, Raycast validation, and build. Quick Chat tests cover timeout boundaries and all reuse modes, unresolved interaction evidence, preset omission and ownership tags, concurrent opens, per-session send clocks, draft isolation, rejected and uncertain writes, create recovery, missing destinations, explicit abandonment, late acknowledgements, final storage-write failure, cross-process coordination, dead owners, and a process killed during reclamation. Chat presentation tests preserve complete user text and assistant Markdown while grouping turns.
+`npm run verify` covers formatting, ESLint, strict TypeScript, 71 behavior/integration tests, Raycast validation, and build. Quick Chat tests cover timeout boundaries and all reuse modes, unresolved interaction evidence, preset omission and ownership tags, concurrent opens, per-session send clocks, draft isolation, rejected and uncertain writes, create recovery, missing destinations, explicit abandonment, late acknowledgements, final storage-write failure, cross-process coordination, dead owners, and a process killed during reclamation. Chat presentation tests preserve complete user text and assistant Markdown while grouping turns.
 
 ## Coverage limits
 

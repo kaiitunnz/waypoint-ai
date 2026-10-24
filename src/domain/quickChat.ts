@@ -137,8 +137,10 @@ export function ongoing(
       event.kind !== "approval_request" &&
       isRecord(event.metadata.plan) &&
       typeof event.metadata.plan.id === "string"
-    )
+    ) {
       latestPlan = event.metadata.plan.id;
+      decidedPlans.delete(latestPlan);
+    }
     if (typeof event.metadata.plan_item_id === "string" && typeof event.metadata.plan_decision === "string")
       decidedPlans.add(event.metadata.plan_item_id);
   }
