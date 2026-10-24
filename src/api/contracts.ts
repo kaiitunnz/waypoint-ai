@@ -19,6 +19,7 @@ export interface ExecutionTarget {
   id: string;
   name: string;
   connected: boolean;
+  auth: "key" | "password";
   profiles: Profile[];
 }
 
@@ -73,6 +74,7 @@ export function parseMetadata(value: unknown): ServerMetadata {
       id: string(item.id),
       name: string(item.name),
       connected: item.connected === true,
+      auth: item.auth === "password" ? "password" : "key",
       profiles: isRecord(item.account_profiles_by_backend)
         ? Object.values(item.account_profiles_by_backend).flatMap(profiles)
         : [],

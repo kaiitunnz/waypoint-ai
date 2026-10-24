@@ -25,7 +25,7 @@ The keyboard paths for Add, Edit, Retry, Make Default, and Remove were exercised
 
 ## Automated checks
 
-`npm run verify` covers formatting, ESLint, strict types including tests, 15 behavior/integration tests, Raycast manifest/icon validation, and build. The tests cover URL normalization, corrupt/unsupported storage versions, round trips, concurrent mutations, credential isolation, reauthentication, URL identity changes, removal, HTTP auth/error handling, timeouts, rejected redirects, catalog sanitization, and late responses after switching or cancellation.
+`npm run verify` covers formatting, ESLint, strict types including tests, 19 behavior/integration tests, Raycast manifest/icon validation, and build. The tests cover URL normalization, corrupt/unsupported storage versions, round trips, concurrent mutations, credential isolation, reauthentication, URL identity changes, removal, HTTP auth/error handling, timeouts, rejected redirects, catalog sanitization, late responses after switching or cancellation, delayed form completion after navigation away, and SSH authentication status.
 
 There is no automated desktop end-to-end suite. The desktop checks above were performed with computer use against the native app and actual backend.
 

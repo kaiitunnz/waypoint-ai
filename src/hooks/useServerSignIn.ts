@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { WaypointClient, ApiError } from "../api/client";
 import { Connection } from "../domain/connections";
 import { connectionStore } from "../storage/raycast";
+import { runWhileActive } from "./runWhileActive";
 
-export function useServerSignIn(connection: Connection, onComplete: () => Promise<void>) {
+export function useServerSignIn(connection: Connection, onComplete: (signal: AbortSignal) => Promise<void>) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string>();
   const [loading, setLoading] = useState(false);
@@ -27,9 +28,10 @@ export function useServerSignIn(connection: Connection, onComplete: () => Promis
       const token = await client.login(password, request.signal);
       await client.me(token, request.signal);
       request.signal.throwIfAborted();
-      await connectionStore.authenticate(connection.id, connection.apiUrl, token);
+      await runWhileActive(request.signal, () => connectionStore.authenticate(connection.id, connection.apiUrl, token));
+      request.signal.throwIfAborted();
       setPassword("");
-      await onComplete();
+      await onComplete(request.signal);
     } catch (error) {
       if (!request.signal.aborted)
         setError(

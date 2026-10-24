@@ -1,8 +1,9 @@
 import { Action, ActionPanel, Form, Icon, Toast, showToast, useNavigation } from "@raycast/api";
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Connection, normalizeConnection } from "../domain/connections";
 import { connectionStore } from "../storage/raycast";
 import { useServerSignIn } from "../hooks/useServerSignIn";
+import { runWhileActive } from "../hooks/runWhileActive";
 
 export function ServerForm({ connection, onSaved }: { connection?: Connection; onSaved: () => Promise<void> }) {
   const { pop } = useNavigation();
@@ -12,6 +13,12 @@ export function ServerForm({ connection, onSaved }: { connection?: Connection; o
   const [error, setError] = useState<string>();
   const [loading, setLoading] = useState(false);
   const busy = useRef(false);
+  const lifetime = useRef(new AbortController());
+  useEffect(() => {
+    const controller = new AbortController();
+    lifetime.current = controller;
+    return () => controller.abort();
+  }, []);
 
   async function submit() {
     if (busy.current) return;
@@ -24,20 +31,24 @@ export function ServerForm({ connection, onSaved }: { connection?: Connection; o
     }
     busy.current = true;
     setLoading(true);
+    const { signal } = lifetime.current;
     try {
-      await connectionStore.save(normalized, connection?.id);
-      await onSaved();
-      await showToast({
-        style: Toast.Style.Success,
-        title: "Server saved",
-        message: "Sign in to check its available agents and targets.",
-      });
+      await runWhileActive(signal, () => connectionStore.save(normalized, connection?.id));
+      await runWhileActive(signal, onSaved);
+      await runWhileActive(signal, () =>
+        showToast({
+          style: Toast.Style.Success,
+          title: "Server saved",
+          message: "Sign in to check its available agents and targets.",
+        }),
+      );
+      signal.throwIfAborted();
       pop();
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Could not save this server. Retry.");
+      if (!signal.aborted) setError(error instanceof Error ? error.message : "Could not save this server. Retry.");
     } finally {
       busy.current = false;
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
   }
 
@@ -91,9 +102,12 @@ export function ServerForm({ connection, onSaved }: { connection?: Connection; o
 
 export function SignInForm({ connection, onSaved }: { connection: Connection; onSaved: () => Promise<void> }) {
   const { pop } = useNavigation();
-  const { password, error, loading, submit, changePassword } = useServerSignIn(connection, async () => {
-    await onSaved();
-    await showToast({ style: Toast.Style.Success, title: "Connected", message: connection.name });
+  const { password, error, loading, submit, changePassword } = useServerSignIn(connection, async (signal) => {
+    await runWhileActive(signal, onSaved);
+    await runWhileActive(signal, () =>
+      showToast({ style: Toast.Style.Success, title: "Connected", message: connection.name }),
+    );
+    signal.throwIfAborted();
     pop();
   });
 

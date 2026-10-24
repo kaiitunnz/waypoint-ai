@@ -1,6 +1,7 @@
 import { Color, Icon, List } from "@raycast/api";
 import { Connection } from "../domain/connections";
 import { ConnectionStatus } from "../api/connectionProbe";
+import { targetConnectionLabel } from "../domain/targets";
 
 function escapeMarkdown(value: string) {
   return value.replace(/[\\`*_{}[\]()<>#+.!|~-]/g, "\\$&");
@@ -47,7 +48,7 @@ export function ServerDetail({
         "- **Local** · Runs on the API server",
         ...metadata.targets.map(
           (target) =>
-            `- **${md(target.name)}** · SSH · ${target.connected ? "Connected" : "Not connected"}${target.profiles.length ? ` · ${target.profiles.map((profile) => md(profile.label)).join(", ")}` : ""}`,
+            `- **${md(target.name)}** · SSH · ${targetConnectionLabel(target)}${target.profiles.length ? ` · ${target.profiles.map((profile) => md(profile.label)).join(", ")}` : ""}`,
         ),
         "### Presets",
         metadata.presets.length
