@@ -52,8 +52,14 @@ async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), "interaction-tests-"));
   const values = new Map<string, string>();
   let failAcknowledgedWrite = false;
+  let readGate: Promise<void> | undefined;
+  let reads = 0;
   const storage = {
-    getItem: async (key: string) => values.get(key),
+    getItem: async (key: string) => {
+      reads++;
+      await readGate;
+      return values.get(key);
+    },
     setItem: async (key: string, value: string) => {
       const state = JSON.parse(value);
       if (failAcknowledgedWrite && !state.pending && server.posts.length) {
@@ -89,7 +95,7 @@ async function fixture() {
       server.posts.push({ path, body });
       await server.gate;
       server.onPost?.();
-      return respond({ session }, server.status);
+      return respond(server.status === 400 ? { detail: "no pending approval request" } : { session }, server.status);
     }
     if (path.endsWith("/events")) {
       server.queries.push(`${id}${parsed.search}`);
@@ -128,6 +134,10 @@ async function fixture() {
     fetcher,
     values,
     controller,
+    setReadGate: (gate: Promise<void> | undefined) => {
+      readGate = gate;
+    },
+    reads: () => reads,
     failAcknowledgedWrite: () => {
       failAcknowledgedWrite = true;
     },
@@ -380,6 +390,42 @@ test("live approval events trigger a history load and drafts survive filtering u
       .sort(),
     ["keep me", "other session"],
   );
+  await f.close();
+});
+
+test("a request event during a history-less refresh triggers a follow-up history load", async () => {
+  const f = await fixture();
+  f.server.sessions.agent.status = "idle";
+  let release!: () => void;
+  f.setReadGate(new Promise<void>((resolve) => (release = resolve)));
+  const c = f.controller();
+  const starting = c.start();
+  while (!f.server.queries.includes("agent?messages=40")) await new Promise((resolve) => setTimeout(resolve, 5));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.ok(!f.server.queries.includes("agent?cursor=0"), "the first refresh skipped history");
+  f.server.events.push(approval(1));
+  f.server.sessions.agent.status = "waiting_input";
+  c.ingest(feed({ session: parseSession(f.server.sessions.agent), events: [parseEvent(approval(1), "agent")] }));
+  f.setReadGate(undefined);
+  release();
+  await starting;
+  assert.ok(f.server.queries.includes("agent?cursor=0"));
+  assert.deepEqual(
+    c.getSnapshot().interactions.map((item) => item.key),
+    ["approval:a1"],
+  );
+  await f.close();
+});
+
+test("a provably undelivered approval ends without a checkpoint", async () => {
+  const f = await fixture();
+  f.server.events.push(approval());
+  const c = f.controller();
+  await c.start();
+  f.server.status = 400;
+  assert.equal(await c.submit(c.getSnapshot().interactions[0], { decision: "approve" }), false);
+  assert.match(c.getSnapshot().error!, /no longer pending/);
+  assert.equal((await f.store.load(connection.id)).pending, undefined);
   await f.close();
 });
 

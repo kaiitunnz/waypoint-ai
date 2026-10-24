@@ -20,6 +20,7 @@ export class ApiError extends Error {
     message: string,
     public readonly detail?: string,
     public readonly status?: number,
+    public readonly serverDetail?: string,
   ) {
     super(message);
     this.name = "ApiError";
@@ -35,11 +36,10 @@ export class WaypointClient {
 
   private async call(
     path: string,
-    options: { token?: string; password?: string; signal?: AbortSignal } = {},
+    options: { token?: string; password?: string; signal?: AbortSignal; timeoutMs?: number } = {},
   ): Promise<unknown> {
-    const signal = options.signal
-      ? AbortSignal.any([options.signal, AbortSignal.timeout(this.timeoutMs)])
-      : AbortSignal.timeout(this.timeoutMs);
+    const timeout = AbortSignal.timeout(options.timeoutMs ?? this.timeoutMs);
+    const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
     try {
       const response = await this.request(`${this.apiUrl}${path}`, {
         method: options.password !== undefined ? "POST" : "GET",
@@ -110,8 +110,9 @@ export class WaypointClient {
     token: string,
     signal: AbortSignal | undefined,
     parse: (value: unknown) => T,
+    timeoutMs?: number,
   ): Promise<T> {
-    const value = await this.call(path, { token, signal });
+    const value = await this.call(path, { token, signal, timeoutMs });
     try {
       return parse(value);
     } catch {
@@ -146,8 +147,13 @@ export class WaypointClient {
         ? { cursor: String(options.cursor) }
         : { messages: "40", ...(options.before !== undefined ? { before_sequence: String(options.before) } : {}) },
     );
-    return this.read(`/api/sessions/${encodeURIComponent(id)}/events?${query}`, token, signal, (value) =>
-      parseEventsPage(value, id),
+    // Cursor reads return every later event in one response, so they get more time.
+    return this.read(
+      `/api/sessions/${encodeURIComponent(id)}/events?${query}`,
+      token,
+      signal,
+      (value) => parseEventsPage(value, id),
+      options.cursor !== undefined ? this.timeoutMs * 5 : undefined,
     );
   }
   async mutate(token: string, path: string, body?: Record<string, unknown>): Promise<Session> {
@@ -184,6 +190,7 @@ export class WaypointClient {
           message,
           ["cwd-not-found", "ssh-master-required"].includes(detail) ? detail : undefined,
           response.status,
+          detail,
         );
       }
       if (!response.ok)
@@ -211,9 +218,15 @@ export class WaypointClient {
   action(token: string, id: string, action: "interrupt" | "reattach") {
     return this.mutate(token, `/api/sessions/${encodeURIComponent(id)}/${action}`);
   }
-  // Some agents report upstream failures as HTTP 400 after the response may have been delivered,
-  // so only statuses Waypoint returns before dispatch count as definitive rejections.
-  async interaction(token: string, id: string, action: InteractionAction, body: Record<string, unknown>) {
+  // Some agents report upstream failures as HTTP 400 after the response may have been delivered, so a
+  // 400 is definitive only when its detail proves Waypoint rejected it before dispatch.
+  async interaction(
+    token: string,
+    id: string,
+    action: InteractionAction,
+    body: Record<string, unknown>,
+    preDispatch: string[] = [],
+  ) {
     let session: Session;
     try {
       session = await this.mutate(token, `/api/sessions/${encodeURIComponent(id)}/${action}`, body);
@@ -222,6 +235,17 @@ export class WaypointClient {
         throw new ApiError("expired-token", "Your sign-in expired. Sign in again; your response is kept.");
       if (error instanceof ApiError && error.kind === "not-found")
         throw new ApiError("not-found", "This session is no longer available on this server. Your response is kept.");
+      if (
+        error instanceof ApiError &&
+        error.status === 400 &&
+        preDispatch.some((detail) => error.serverDetail?.startsWith(detail))
+      )
+        throw new ApiError(
+          "rejected",
+          "This request is no longer pending. Refresh the conversation; your response is kept.",
+          undefined,
+          400,
+        );
       if (error instanceof ApiError && error.kind === "rejected" && [409, 422].includes(error.status ?? 0))
         throw new ApiError(
           "rejected",

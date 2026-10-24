@@ -8,6 +8,7 @@ import {
   cancelRequest,
   interactionRequest,
   isLive,
+  preDispatchDetails,
   openInteractionKeys,
   plansDecisions,
   sessionInteractions,
@@ -54,6 +55,7 @@ export class InteractionController {
   // Highest event ID covered by the full-history load; undefined until history is loaded.
   private watermark?: number;
   private historyRequested = false;
+  private historyFollowUp = false;
   private generation = 0;
   private active = true;
   private queue: Promise<unknown> = Promise.resolve();
@@ -114,10 +116,13 @@ export class InteractionController {
     if (
       this.session &&
       !this.historyRequested &&
-      !this.state.loading &&
       (needsHistory(this.session, this.metadata) || snapshot.events.some(requestEvent))
-    )
-      void this.refresh();
+    ) {
+      this.historyRequested = true;
+      // A refresh already in flight may have decided to skip history; follow it with one that loads it.
+      if (this.state.loading) this.historyFollowUp = true;
+      else void this.refresh();
+    }
   }
   // Full history is fetched once, only when approvals or plans can be pending; later reads fetch deltas.
   private async snapshot() {
@@ -171,6 +176,10 @@ export class InteractionController {
     } catch (error) {
       if (this.active && generation === this.generation)
         this.publish({ loading: false, error: message(error, "Could not refresh requests.") });
+    }
+    if (this.historyFollowUp && this.watermark === undefined && this.active && generation === this.generation) {
+      this.historyFollowUp = false;
+      await this.refresh();
     }
   }
   // Only an authoritative refresh may prune; filtered visibility must never discard a live request's draft.
@@ -251,7 +260,13 @@ export class InteractionController {
         await persist();
         let session: Session;
         try {
-          session = await this.client.interaction(this.connection.token, this.sessionId, request.action, request.body);
+          session = await this.client.interaction(
+            this.connection.token,
+            this.sessionId,
+            request.action,
+            request.body,
+            preDispatchDetails(current, fresh.session.backend),
+          );
         } catch (error) {
           if (error instanceof ApiError && definitive.has(error.kind)) {
             saved.pending = undefined;

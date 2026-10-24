@@ -7,6 +7,7 @@ import {
   Interaction,
   cancelRequest,
   openInteractionKeys,
+  preDispatchDetails,
   interactionRequest,
   latestPlan,
   pendingApprovals,
@@ -47,6 +48,7 @@ const snapshot = (
     },
     "demo",
   );
+const respond400 = (detail: string) => new Response(JSON.stringify({ detail }), { status: 400 });
 const ask = (questions: unknown) => ({ tool_name: "AskUserQuestion", payload: { input: { questions } } });
 const only = (interactions: Interaction[]) => {
   assert.equal(interactions.length, 1);
@@ -147,7 +149,7 @@ test("approvals use advertised decisions, notes and stable IDs while the session
     body: { approval_id: "a1", decision: "approve", text: "ok" },
   });
   assert.throws(() => interactionRequest(approval, { decision: "cancel" }), /available decision/);
-  for (const status of ["idle", "exited", "error"])
+  for (const status of ["idle", "exited", "error", "interrupted"])
     assert.deepEqual(
       sessionInteractions({ ...waiting, status }, metadata, [request]),
       [],
@@ -406,6 +408,18 @@ test("interaction HTTP outcomes separate definitive rejections from unconfirmed 
     }
   };
   assert.equal(await outcome(200), "ok");
+  const proven = async (detail: string, known: string[]) => {
+    const client = new WaypointClient("http://localhost", async () => respond400(detail));
+    try {
+      await client.interaction("token", "demo", "approve", {}, known);
+    } catch (error) {
+      assert.ok(error instanceof ApiError);
+      return error.kind;
+    }
+  };
+  assert.equal(await proven("no pending approval request", ["no pending approval request"]), "rejected");
+  assert.equal(await proven("no pending approval request", []), "uncertain");
+  assert.equal(await proven("failed to answer question", ["question is no longer open"]), "uncertain");
   assert.equal(await outcome(401), "expired-token");
   assert.equal(await outcome(404), "not-found");
   assert.equal(await outcome(409), "rejected");
@@ -416,6 +430,17 @@ test("interaction HTTP outcomes separate definitive rejections from unconfirmed 
   assert.equal(await outcome("network"), "uncertain");
   assert.equal(await outcome(200, { session: sessionWire("other") }), "uncertain");
   assert.equal(await outcome(200, { nope: true }), "uncertain");
+});
+
+test("pre-dispatch details depend on the request kind and agent", () => {
+  const request = event(1, "approval_request", "Run", { approval_id: "a" });
+  const approval = only(sessionInteractions(waiting, metadata, [request]));
+  assert.deepEqual(preDispatchDetails(approval, "codex"), ["no pending approval request"]);
+  assert.deepEqual(preDispatchDetails(approval, "opencode"), []);
+  const question = only(
+    sessionInteractions(waiting, metadata, [], snapshot([{ id: "q", metadata: ask([{ question: "Q?" }]) }])),
+  );
+  assert.ok(preDispatchDetails(question, "opencode").includes("question is no longer open"));
 });
 
 test("interaction storage validates nested drafts and checkpoints without losing version-1 data", () => {

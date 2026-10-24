@@ -43,12 +43,13 @@ export interface InteractionRequest {
   body: Record<string, unknown>;
 }
 
-const stoppedStatuses = ["idle", "exited", "error"];
-export const isLive = (session: Session) => !stoppedStatuses.includes(session.status);
+export const isLive = (session: Session) => ["starting", "running", "waiting_input"].includes(session.status);
 const approvalDecisions = ["approve", "accept", "acceptForSession", "acceptAlways", "decline", "cancel"];
 const planDecisions = ["accept", "acceptForSession", "decline", "cancel"];
-// OpenCode splits answers on commas and drops unanswered questions from a positional list.
+// OpenCode splits answers on commas and drops unanswered questions from a positional list, and
+// reports a failed upstream permission reply with the same 400 as a request that is not pending.
 const positionalAnswerAgents = new Set(["opencode"]);
+const lateRejectionAgents = new Set(["opencode"]);
 const handoff = {
   transport: "Open this interface in Waypoint.",
   identity: "This request has no stable ID. Open it in Waypoint.",
@@ -243,7 +244,7 @@ export function sessionInteractions(
 ): Interaction[] {
   const structured = isStructured(session, metadata);
   // Requests outlive their process in history; a stopped session has no live request to answer.
-  const approvals = history && !stoppedStatuses.includes(session.status) ? pendingApprovals(events) : [];
+  const approvals = history && isLive(session) ? pendingApprovals(events) : [];
   const result = approvals.map((event) => approval(event, session, metadata, structured));
   const plan =
     history && !approvals.length && structured && plansDecisions(session, metadata) ? latestPlan(events) : undefined;
@@ -373,6 +374,14 @@ export function interactionRequest(interaction: Interaction, draft: InteractionD
         .join(", "),
     },
   };
+}
+
+// Waypoint details raised by identity or state checks before anything reaches the agent.
+export function preDispatchDetails(interaction: Interaction, backend: string): string[] {
+  if (interaction.kind === "plan")
+    return ["codex plan item was not found", "codex session is not in plan mode", "unsupported plan decision"];
+  if (interaction.kind === "question") return ["no pending question for this session", "question is no longer open"];
+  return lateRejectionAgents.has(backend) ? [] : ["no pending approval request"];
 }
 
 export function cancelRequest(interaction: Interaction): InteractionRequest {
