@@ -1,6 +1,6 @@
 # Waypoint AI
 
-Connect Raycast to your [Waypoint](https://github.com/kaiitunnz/waypoint) servers. **Search Sessions** finds sessions and reads live conversations. **Manage Servers** saves named connections, signs in securely, and shows each server's agents and execution targets.
+Connect Raycast to your [Waypoint](https://github.com/kaiitunnz/waypoint) servers. **Quick Chat** sends messages to a dedicated conversation. **New Chat** starts fresh. **Search Sessions** reads live conversations, and **Manage Servers** configures your connections.
 
 ![Manage Servers](docs/screenshots/manage-servers.png)
 
@@ -33,13 +33,29 @@ Open structured sessions in the native conversation reader. Terminal and unknown
 
 ![Search Sessions](docs/screenshots/search-sessions.png)
 
-The split view groups assistant output and paired tool activity. Selecting an older row pauses following; Follow Latest Response selects the newest assistant response. Load Older Messages adds earlier history while preserving selection. Find in Conversation filters the loaded messages. View Full Response opens the selected response at full width, and Copy Response copies its text. Session Information shows server-reported context and token usage.
+The conversation displays loaded user and assistant turns together in chronological order, with formatted responses at full width. Show Latest Response focuses the newest turn when needed. Copy Latest Response copies the current answer. Conversation Details shows server-reported context and token usage.
 
-Pending questions show their availability; a waiting session also shows an input-needed notice. Use Open in Waypoint for approvals and answers. Older approval details may be outside the loaded history. Native answers and chat composition are planned for subsequent changes.
+**Conversation History** opens the detailed event inspector with paired tool activity, filtering, older history, and follow-latest controls.
+
+Pending questions appear above the transcript. Use Open in Waypoint for approvals and answers. Older approval details may be outside the loaded history. Native approvals, answers, and sending to sessions opened from search are planned for subsequent changes.
 
 Reconnects recover missed events and preserve loaded history. Expired sign-in offers reauthentication. The conversation content remains in memory and is not saved to extension storage.
 
 ![Conversation reader](docs/screenshots/session-conversation.png)
+
+## Quick Chat
+
+Type in the top message field and press Enter to send. Follow-ups continue the same Waypoint session. The transcript keeps loaded turns together in chronological order, alongside the draft. The conversation row shows its turn count; Latest Response is an optional focused view. Sending returns to the continuous conversation. Activity details, response copying, full-width reading, and session information are available in Actions.
+
+![Quick Chat](docs/screenshots/quick-chat.jpg)
+
+Quick Chat continues its own conversation for each saved server. The default timeout is 30 minutes after the last successful user send. Running work and unresolved approvals, questions, or plans keep their conversation. **Quick Chat Defaults** offers Always Continue, Always New, and a configurable timeout. **New Chat** and **Start New Chat** prepare a fresh conversation; creation happens on first send, and existing sessions keep running.
+
+Defaults apply to new conversations. Choose the server preset, execution target, working directory, agent, model, and effort. Advanced settings expose supported transport, account profile, permissions, arguments, and configuration overrides. Inherited settings and private preset values are resolved by Waypoint. Each saved server keeps its own defaults and draft.
+
+Drafts survive closing the command. Reopening catches up with Waypoint without resending. Rejected sends keep the draft and an already-created session. **Interrupt Session** is explicit; exited sessions reattach before sending when their transport supports it.
+
+An unconfirmed operation blocks further sends. **Check Previous Outcome** inspects the session and history without resending. Matching recorded input does not establish agent delivery. **Allow Explicit Retry** warns that another attempt may duplicate work. **Abandon Attempt and Start New Chat** discards the local checkpoint after confirmation; existing sessions keep running. Coordination covers extension commands on this computer, not other devices.
 
 ## Development
 
@@ -60,4 +76,4 @@ The gate checks formatting, ESLint, strict TypeScript, behavior and HTTP integra
 
 Source is organized into thin command entries, `api/`, `domain/`, `storage/`, `hooks/`, `views/`, and `components/`. Tests compile into an ignored temporary build directory using the installed TypeScript compiler and Node's test runner.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contributor guidance and [connection acceptance](docs/server-connections-acceptance.md) and [conversation acceptance](docs/session-conversations-acceptance.md) for runtime coverage.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contributor guidance and [connection acceptance](docs/server-connections-acceptance.md) [conversation acceptance](docs/session-conversations-acceptance.md), and [Quick Chat acceptance](docs/quick-chat-acceptance.md) for runtime coverage.

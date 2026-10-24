@@ -36,6 +36,20 @@
       "subtitle": "Waypoint AI",
       "description": "Find Waypoint sessions and read live conversations, tool activity, and pending interactions.",
       "mode": "view"
+    },
+    {
+      "name": "quick-chat",
+      "title": "Quick Chat",
+      "subtitle": "Waypoint AI",
+      "description": "Continue your dedicated Waypoint conversation or prepare a new chat on first send.",
+      "mode": "view"
+    },
+    {
+      "name": "new-chat",
+      "title": "New Chat",
+      "subtitle": "Waypoint AI",
+      "description": "Start a fresh Waypoint conversation without stopping earlier work.",
+      "mode": "view"
     }
   ],
   "tools": [],

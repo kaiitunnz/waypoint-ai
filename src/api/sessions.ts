@@ -13,10 +13,12 @@ export interface Session {
   pinnedAt?: string;
   lastEventAt: string;
   model?: string;
+  permissionMode?: string;
   context?: { used: number; limit?: number };
   tokens?: number;
   rateLimits: { label: string; percent: number }[];
   usageStale: boolean;
+  tags: Record<string, string>;
 }
 
 export interface SessionEvent {
@@ -78,6 +80,7 @@ export function parseSession(value: unknown): Session {
     pinnedAt: optionalText(value.pinned_at),
     lastEventAt: text(value.last_event_at ?? value.updated_at),
     model: optionalText(value.resolved_model) ?? optionalText(value.model),
+    permissionMode: optionalText(value.permission_mode),
     context: used !== undefined ? { used, limit: number(context?.context_window_tokens) } : undefined,
     tokens: number(usage?.display_total_tokens),
     rateLimits: Array.isArray(limits?.windows)
@@ -88,6 +91,11 @@ export function parseSession(value: unknown): Session {
         )
       : [],
     usageStale: limits?.stale === true || limits?.unavailable === true,
+    tags: isRecord(value.tags)
+      ? Object.fromEntries(
+          Object.entries(value.tags).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+        )
+      : {},
   };
 }
 
@@ -115,6 +123,8 @@ export function parseEvent(value: unknown, sessionId: string): SessionEvent {
     "tool_name",
     "tool_use_id",
     "approval_id",
+    "plan_item_id",
+    "plan_decision",
     "status",
     "is_error",
     "tool_input",
