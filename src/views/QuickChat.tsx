@@ -182,9 +182,35 @@ function QuickChatActions({
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const metadata = state.metadata;
   const url = state.session ? sessionUrl(connection.frontendUrl, state.session.id) : connection.frontendUrl;
+  const interaction = state.pending?.kind === "interaction";
   return (
     <>
-      {state.pending && (
+      {interaction && state.pending?.sessionId !== state.session?.id && (
+        <>
+          <Action
+            title="Check Previous Outcome"
+            icon={Icon.MagnifyingGlass}
+            shortcut={Keyboard.Shortcut.Common.OpenWith}
+            onAction={() => controller.reconcile()}
+          />
+          <Action
+            title="Clear Unconfirmed Response"
+            icon={Icon.ArrowClockwise}
+            onAction={async () => {
+              if (
+                await confirmAlert({
+                  title: "Clear the unconfirmed response?",
+                  message:
+                    "It may already have reached the agent. Responding again can repeat its effect. Nothing is resent automatically.",
+                  primaryAction: { title: "Clear", style: Alert.ActionStyle.Destructive },
+                })
+              )
+                await controller.abandonPending();
+            }}
+          />
+        </>
+      )}
+      {state.pending && !interaction && (
         <>
           <Action
             title="Check Previous Outcome"
