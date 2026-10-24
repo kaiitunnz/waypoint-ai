@@ -115,7 +115,11 @@ export function ChatConversation({
   const interactions = interactionState.interactions;
   const unconfirmed = unconfirmedFor(interactionState, sessionId);
   const attention = [
-    ...(unconfirmed ? ["- **Unconfirmed response.** Check its outcome before responding again."] : []),
+    ...(unconfirmed
+      ? [
+          `- **Unconfirmed response.** ${markdownText(interactionState.notice ?? "Check its outcome before responding again.")}`,
+        ]
+      : []),
     ...interactions.map(
       (interaction) =>
         `- **${markdownText(interaction.title)}**${interactionStatus(interaction) ? ` · ${interactionStatus(interaction)}` : ""}`,

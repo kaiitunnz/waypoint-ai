@@ -426,6 +426,12 @@ test("a provably undelivered approval ends without a checkpoint", async () => {
   assert.equal(await c.submit(c.getSnapshot().interactions[0], { decision: "approve" }), false);
   assert.match(c.getSnapshot().error!, /no longer pending/);
   assert.equal((await f.store.load(connection.id)).pending, undefined);
+  const phantom = c.getSnapshot().interactions[0];
+  assert.equal(phantom.availability, "unavailable");
+  assert.match(phantom.reason!, /Open it in Waypoint/);
+  f.server.status = 200;
+  assert.equal(await c.submit(phantom, { decision: "approve" }), false, "not offered for another submit");
+  assert.equal(f.server.posts.length, 1);
   await f.close();
 });
 

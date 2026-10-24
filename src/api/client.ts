@@ -246,12 +246,19 @@ export class WaypointClient {
           undefined,
           400,
         );
-      if (error instanceof ApiError && error.kind === "rejected" && [409, 422].includes(error.status ?? 0))
+      if (error instanceof ApiError && error.kind === "rejected" && error.status === 409)
         throw new ApiError(
           "rejected",
-          "Waypoint did not accept this response yet. Respond to any pending approval, refresh, and try again; your response is kept.",
+          "Waypoint is busy with this request or waiting for something else first, such as an approval or the agent starting. An earlier response may still be in progress. Refresh before trying again; your response is kept.",
           undefined,
-          error.status,
+          409,
+        );
+      if (error instanceof ApiError && error.kind === "rejected" && error.status === 422)
+        throw new ApiError(
+          "rejected",
+          "Waypoint did not accept this response. Refresh the request; your response is kept.",
+          undefined,
+          422,
         );
       throw new ApiError(
         "uncertain",

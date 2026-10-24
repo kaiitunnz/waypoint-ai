@@ -56,6 +56,8 @@ export class InteractionController {
   private watermark?: number;
   private historyRequested = false;
   private historyFollowUp = false;
+  // Requests Waypoint proved are no longer pending, though history still lists them.
+  private notPending = new Set<string>();
   private generation = 0;
   private active = true;
   private queue: Promise<unknown> = Promise.resolve();
@@ -81,9 +83,22 @@ export class InteractionController {
     this.listeners.forEach((listener) => listener());
   }
   private interactions() {
-    return this.session
-      ? sessionInteractions(this.session, this.metadata, this.events, this.questions, this.watermark !== undefined)
-      : [];
+    if (!this.session) return [];
+    return sessionInteractions(
+      this.session,
+      this.metadata,
+      this.events,
+      this.questions,
+      this.watermark !== undefined,
+    ).map((interaction) =>
+      this.notPending.has(interaction.key)
+        ? {
+            ...interaction,
+            availability: "unavailable" as const,
+            reason: "This request is no longer pending. Open it in Waypoint to check.",
+          }
+        : interaction,
+    );
   }
   private derive() {
     this.publish({ interactions: this.interactions() });
@@ -271,6 +286,10 @@ export class InteractionController {
           if (error instanceof ApiError && definitive.has(error.kind)) {
             saved.pending = undefined;
             await persist();
+            if (error.status === 400) {
+              this.notPending.add(captured.key);
+              this.derive();
+            }
           }
           throw error;
         }

@@ -180,6 +180,26 @@ export function UnconfirmedActions({ controller, url }: { controller: Interactio
   );
 }
 
+// Form descriptions show plain single paragraphs, so each line gets its own row without Markdown markers.
+function ContextLines({ title, text }: { title: string; text: string }) {
+  const lines = text
+    .split("\n")
+    .map((line) =>
+      line
+        .replace(/^\s{0,3}#{1,6}\s+/, "")
+        .replace(/\*\*|__|`/g, "")
+        .trim(),
+    )
+    .filter(Boolean);
+  return (
+    <>
+      {lines.map((line, index) => (
+        <Form.Description key={index} title={index === 0 ? title : ""} text={line} />
+      ))}
+    </>
+  );
+}
+
 export function SessionInteraction({
   captured,
   controller,
@@ -269,6 +289,7 @@ export function SessionInteraction({
             <Action.Push
               title="Read Request"
               icon={Icon.Maximize}
+              shortcut={Keyboard.Shortcut.Common.Open}
               target={<Detail navigationTitle={captured.title} markdown={captured.text} />}
             />
             {url && <Action.OpenInBrowser title="Open in Waypoint" url={url} />}
@@ -282,19 +303,25 @@ export function SessionInteraction({
         </ActionPanel>
       }
     >
-      {state.error && <Form.Description title="Needs attention" text={state.error} />}
-      {unconfirmed && (
+      {unconfirmed ? (
         <Form.Description
           title="Unconfirmed"
-          text={state.notice ?? "An earlier response was not confirmed. Check its outcome before responding again."}
+          text={
+            state.notice ??
+            state.error ??
+            "An earlier response was not confirmed. Check its outcome before responding again."
+          }
         />
+      ) : (
+        (state.error || state.notice) && (
+          <Form.Description title={state.error ? "Needs attention" : ""} text={state.error ?? state.notice!} />
+        )
       )}
-      {!unconfirmed && state.notice && <Form.Description text={state.notice} />}
       {status && <Form.Description title="Status" text={status} />}
       {!status && current?.afterApproval && (
         <Form.Description title="Status" text="An approval is also pending. Some agents need it answered first." />
       )}
-      <Form.Description title={captured.kind === "question" ? "Request" : captured.title} text={captured.text} />
+      {captured.kind !== "question" && <ContextLines title="Request" text={captured.text} />}
       {captured.kind !== "question"
         ? captured.note && (
             <Form.TextArea
@@ -306,14 +333,7 @@ export function SessionInteraction({
             />
           )
         : captured.questions?.map((question, index) => (
-            <QuestionFields
-              key={index}
-              index={index}
-              question={question}
-              draft={draft}
-              update={update}
-              grouped={captured.questions!.length > 1}
-            />
+            <QuestionFields key={index} index={index} question={question} draft={draft} update={update} />
           ))}
     </Form>
   );
@@ -324,13 +344,11 @@ function QuestionFields({
   index,
   draft,
   update,
-  grouped,
 }: {
   question: Question;
   index: number;
   draft: InteractionDraft;
   update: (patch: Partial<InteractionDraft>) => void;
-  grouped: boolean;
 }) {
   const key = String(index);
   const selected = draft.selected?.[key] ?? [];
@@ -338,20 +356,15 @@ function QuestionFields({
   const described = !question.multiple && question.options.some((option) => option.description);
   return (
     <>
-      <Form.Separator />
-      {(grouped || question.header || described) && (
-        <Form.Description
-          title={question.header ?? ""}
-          text={[
-            question.question,
-            ...(described
-              ? question.options.map(
-                  (option) => `${option.label}${option.description ? `: ${option.description}` : ""}`,
-                )
-              : []),
-          ].join("\n")}
-        />
-      )}
+      {index > 0 && <Form.Separator />}
+      <Form.Description title={question.header ?? "Question"} text={question.question} />
+      {described &&
+        question.options.map((option) => (
+          <Form.Description
+            key={option.label}
+            text={option.description ? `${option.label}: ${option.description}` : option.label}
+          />
+        ))}
       {question.options.length > 0 &&
         (question.multiple ? (
           question.options.map((option, optionIndex) => (
