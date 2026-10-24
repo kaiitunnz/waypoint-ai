@@ -1,14 +1,23 @@
+import { ModelCatalog, parseModels } from "./models";
 import { isRecord } from "../domain/connections";
 import { parseMetadata, ServerMetadata } from "./contracts";
 import { Session, EventsPage, parseSession, parseSessions, parseEventsPage } from "./sessions";
 
 export type ApiErrorKind =
-  "unreachable" | "invalid-credentials" | "expired-token" | "invalid-response" | "server-error" | "not-found";
+  | "unreachable"
+  | "invalid-credentials"
+  | "expired-token"
+  | "invalid-response"
+  | "server-error"
+  | "not-found"
+  | "rejected"
+  | "uncertain";
 
 export class ApiError extends Error {
   constructor(
     public readonly kind: ApiErrorKind,
     message: string,
+    public readonly detail?: string,
   ) {
     super(message);
     this.name = "ApiError";
@@ -138,5 +147,72 @@ export class WaypointClient {
     return this.read(`/api/sessions/${encodeURIComponent(id)}/events?${query}`, token, signal, (value) =>
       parseEventsPage(value, id),
     );
+  }
+  async mutate(token: string, path: string, body?: Record<string, unknown>): Promise<Session> {
+    try {
+      const response = await this.request(`${this.apiUrl}${path}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, ...(body ? { "Content-Type": "application/json" } : {}) },
+        body: body ? JSON.stringify(body) : undefined,
+        redirect: "error",
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+      if (response.status === 401 || response.status === 403)
+        throw new ApiError("expired-token", "Your sign-in expired. Sign in again; the draft is kept.");
+      if (response.status === 404)
+        throw new ApiError("not-found", "This session is unavailable. Start an explicit New Chat; your draft is kept.");
+      if (response.status >= 400 && response.status < 500) {
+        let detail = "";
+        try {
+          const value: unknown = await response.json();
+          if (isRecord(value) && typeof value.detail === "string") detail = value.detail;
+        } catch {
+          /* HTTP status still establishes rejection. */
+        }
+        const message =
+          detail === "cwd-not-found"
+            ? "The working directory does not exist on the execution target. Update Quick Chat Defaults."
+            : detail === "ssh-master-required"
+              ? "Connect this SSH target in Waypoint, then retry. Your draft is kept."
+              : response.status === 409
+                ? "Waypoint rejected this operation because the session is busy or waiting for an interaction. Review it and retry; your draft is kept."
+                : "Waypoint rejected this operation. Check the selected agent, target, and launch settings; your draft is kept.";
+        throw new ApiError(
+          "rejected",
+          message,
+          ["cwd-not-found", "ssh-master-required"].includes(detail) ? detail : undefined,
+        );
+      }
+      if (!response.ok)
+        throw new ApiError(
+          "uncertain",
+          "Waypoint may have processed this operation, but its result was not confirmed. Check the outcome before retrying.",
+        );
+      const value: unknown = await response.json();
+      if (!isRecord(value)) throw new Error("Invalid mutation response");
+      return parseSession(value.session);
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(
+        "uncertain",
+        "The connection ended before the operation was confirmed. It may have reached Waypoint. Check the outcome before retrying.",
+      );
+    }
+  }
+  create(token: string, request: Record<string, unknown>) {
+    return this.mutate(token, "/api/sessions", request);
+  }
+  input(token: string, id: string, text: string) {
+    return this.mutate(token, `/api/sessions/${encodeURIComponent(id)}/input`, { text, submit: true });
+  }
+  action(token: string, id: string, action: "interrupt" | "reattach") {
+    return this.mutate(token, `/api/sessions/${encodeURIComponent(id)}/${action}`);
+  }
+  models(token: string, backend: string, target: string, profile: string, signal?: AbortSignal): Promise<ModelCatalog> {
+    const query = new URLSearchParams({
+      ...(target ? { launch_target_id: target } : {}),
+      ...(profile && profile !== "__default__" ? { account_profile_id: profile } : {}),
+    });
+    return this.read(`/api/backends/${encodeURIComponent(backend)}/models?${query}`, token, signal, parseModels);
   }
 }

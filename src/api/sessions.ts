@@ -17,6 +17,7 @@ export interface Session {
   tokens?: number;
   rateLimits: { label: string; percent: number }[];
   usageStale: boolean;
+  tags: Record<string, string>;
 }
 
 export interface SessionEvent {
@@ -88,6 +89,11 @@ export function parseSession(value: unknown): Session {
         )
       : [],
     usageStale: limits?.stale === true || limits?.unavailable === true,
+    tags: isRecord(value.tags)
+      ? Object.fromEntries(
+          Object.entries(value.tags).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+        )
+      : {},
   };
 }
 
@@ -115,6 +121,8 @@ export function parseEvent(value: unknown, sessionId: string): SessionEvent {
     "tool_name",
     "tool_use_id",
     "approval_id",
+    "plan_item_id",
+    "plan_decision",
     "status",
     "is_error",
     "tool_input",
