@@ -260,6 +260,7 @@ export class ConversationFeed extends Observable<ConversationSnapshot> {
           controller.signal,
         ),
       ]);
+      if (!current()) return;
       const fetched = [...page.events];
       let bridge = page;
       while (
@@ -271,6 +272,7 @@ export class ConversationFeed extends Observable<ConversationSnapshot> {
       ) {
         const before = bridge.events[0].sequence;
         bridge = await this.client.events(this.connection.token, this.sessionId, { before }, controller.signal);
+        if (!current()) return;
         if (bridge.events.length && bridge.events[0].sequence >= before)
           throw new Error("History cursor did not advance");
         fetched.push(...bridge.events);

@@ -29,6 +29,13 @@
       "subtitle": "Waypoint AI",
       "description": "Connect to Waypoint servers and manage sign-in, defaults, and execution metadata.",
       "mode": "view"
+    },
+    {
+      "name": "search-sessions",
+      "title": "Search Sessions",
+      "subtitle": "Waypoint AI",
+      "description": "Find Waypoint sessions and read live conversations, tool activity, and pending interactions.",
+      "mode": "view"
     }
   ],
   "tools": [],

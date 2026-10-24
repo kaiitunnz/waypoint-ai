@@ -80,7 +80,7 @@ test("reconnect catches a gap larger than one tail page from REST-confirmed ID, 
     queries.push(path.search);
     return response({
       events: path.searchParams.has("cursor")
-        ? Array.from({ length: 80 }, (_, index) => eventWire(index + 2, "agent_output", "."))
+        ? Array.from({ length: 80 }, (_, index) => eventWire(index + 2, "agent_output", ".", `gap-${index + 2}`))
         : [eventWire(1, "agent_output", "start")],
       has_more: false,
     });
@@ -89,15 +89,20 @@ test("reconnect catches a gap larger than one tail page from REST-confirmed ID, 
   feed.start();
   f.send("session_state", { session: sessionWire() });
   await tick();
-  f.send("event", { event: eventWire(81, "agent_output", ".") });
+  f.send("event", { event: eventWire(81, "agent_output", ".", "gap-81") });
   f.sockets[0].handlers.close(1006);
   f.reconnect();
   f.send("session_state", { session: sessionWire() });
-  f.send("event", { event: eventWire(82, "agent_output", "end") });
+  f.send("event", { event: eventWire(82, "agent_output", "end", "end") });
   await tick();
   assert.ok(queries.some((query) => query.includes("cursor=101")));
   assert.equal(feed.getSnapshot().events.length, 82);
-  assert.equal(transcript(feed.getSnapshot().events)[0].text, `start${".".repeat(80)}end`);
+  assert.equal(
+    transcript(feed.getSnapshot().events)
+      .map((row) => row.text)
+      .join(""),
+    `start${".".repeat(80)}end`,
+  );
   feed.stop();
 });
 
@@ -262,4 +267,53 @@ test("malformed frames reconnect safely and unknown envelopes have no effect", (
   assert.equal(f.sockets[0].closed, true);
   socket.stop();
   assert.equal(f.jobs.size, 0);
+});
+
+test("ID-less reconnect pages backward until the prior sequence is bridged", async () => {
+  const f = fixture();
+  let reconnecting = false;
+  const beforeQueries: string[] = [];
+  const client = new WaypointClient(connection.apiUrl, async (url) => {
+    const path = new URL(String(url));
+    if (!path.pathname.endsWith("/events")) return response({ session: sessionWire() });
+    const before = path.searchParams.get("before_sequence");
+    if (before) beforeQueries.push(before);
+    const sequences = !reconnecting ? [1, 2] : before === "5" ? [3, 4] : before === "3" ? [1, 2] : [5, 6];
+    return response({
+      events: sequences.map((sequence) => ({ ...eventWire(sequence), id: undefined })),
+      has_more: reconnecting && before !== "3",
+    });
+  });
+  const feed = new ConversationFeed(connection, "demo", client, f);
+  feed.start();
+  f.send("session_state", { session: sessionWire() });
+  await tick();
+  reconnecting = true;
+  f.sockets[0].handlers.close(1006);
+  f.reconnect();
+  f.send("session_state", { session: sessionWire() });
+  await tick();
+  assert.deepEqual(beforeQueries, ["5", "3"]);
+  assert.deepEqual(
+    feed.getSnapshot().events.map((event) => event.sequence),
+    [1, 2, 3, 4, 5, 6],
+  );
+  feed.stop();
+});
+
+test("REST history remains readable when the socket cannot subscribe", async () => {
+  const f = fixture();
+  const client = new WaypointClient(connection.apiUrl, async (url) =>
+    String(url).includes("/events")
+      ? response({ events: [eventWire(1)], has_more: true })
+      : response({ session: sessionWire() }),
+  );
+  const feed = new ConversationFeed(connection, "demo", client, f);
+  feed.start();
+  f.sockets[0].handlers.error();
+  await tick();
+  assert.equal(feed.getSnapshot().events.length, 1);
+  assert.equal(feed.getSnapshot().stream, "reconnecting");
+  assert.equal(feed.getSnapshot().loading, false);
+  feed.stop();
 });

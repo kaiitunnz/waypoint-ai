@@ -6,9 +6,11 @@ Install the locked dependencies with `npm ci`, then run `npm run verify` before 
 
 Use `npm run format` for formatting and `npm run fix-lint` for ESLint fixes. Review their changes before committing. Tests use Node's test runner and TypeScript, with HTTP and storage doubles for focused behavior and loopback servers for network integration. Keep tests in the type-checking gate.
 
-Runtime checks require Raycast and a configured Waypoint server. Use disposable passwords and isolated Waypoint data directories for acceptance checks. Include the scenarios exercised, platform, screenshots, and untested paths in the PR. See [the connection acceptance record](docs/server-connections-acceptance.md) for the current coverage.
+Runtime checks require Raycast and a configured Waypoint server. Use disposable passwords and isolated Waypoint data directories for acceptance checks. Include the scenarios exercised, platform, screenshots, and untested paths in the PR. See [connection acceptance](docs/server-connections-acceptance.md) and [conversation acceptance](docs/session-conversations-acceptance.md) for coverage.
 
-## Commits
+## Branches and commits
+
+Name feature branches `<type>/<slug>`, for example `feat/session-conversations` or `fix/session-reconnect`. Start each PR from the merged default branch.
 
 Use `<type>: <description>` with a space after the colon and a short description in plain language.
 

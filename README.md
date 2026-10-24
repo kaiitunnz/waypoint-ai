@@ -1,6 +1,6 @@
 # Waypoint AI
 
-Connect Raycast to your [Waypoint](https://github.com/kaiitunnz/waypoint) servers. **Manage Servers** saves named connections, signs in securely, and shows the agents, execution targets, presets, and usage sources available on each server.
+Connect Raycast to your [Waypoint](https://github.com/kaiitunnz/waypoint) servers. **Search Sessions** finds sessions and reads live conversations. **Manage Servers** saves named connections, signs in securely, and shows each server's agents and execution targets.
 
 ![Manage Servers](docs/screenshots/manage-servers.png)
 
@@ -25,7 +25,21 @@ Reauthentication preserves the connection's identity and setup. Changing its API
 
 Bearer tokens are kept in [Raycast's encrypted local storage](https://developers.raycast.com/api-reference/storage). Passwords are used only during sign-in. Connection failures preserve the saved configuration; use Retry Connection or Sign in Again to recover. Unknown or damaged saved-data formats are reported without overwriting the original data.
 
-Session browsing and chat commands are planned for subsequent changes.
+## Search Sessions
+
+Find sessions by title, working directory, repository, branch, agent, or status. The server dropdown switches API connections and keeps the current search. Pinned sessions appear first. Show Exited Sessions includes finished sessions; Show Only Exited Sessions narrows the list to them. Protected assistant and telemetry sessions are excluded.
+
+Open structured sessions in the native conversation reader. Terminal and unknown interfaces offer Open in Waypoint using the configured frontend URL.
+
+![Search Sessions](docs/screenshots/search-sessions.png)
+
+The split view groups assistant output and paired tool activity. Selecting an older row pauses following; Follow Latest Response selects the newest assistant response. Load Older Messages adds earlier history while preserving selection. Find in Conversation filters the loaded messages. View Full Response opens the selected response at full width, and Copy Response copies its text. Session Information shows server-reported context and token usage.
+
+Pending questions show their availability; a waiting session also shows an input-needed notice. Use Open in Waypoint for approvals and answers. Older approval details may be outside the loaded history. Native answers and chat composition are planned for subsequent changes.
+
+Reconnects recover missed events and preserve loaded history. Expired sign-in offers reauthentication. The conversation content remains in memory and is not saved to extension storage.
+
+![Conversation reader](docs/screenshots/session-conversation.png)
 
 ## Development
 
@@ -46,4 +60,4 @@ The gate checks formatting, ESLint, strict TypeScript, behavior and HTTP integra
 
 Source is organized into thin command entries, `api/`, `domain/`, `storage/`, `hooks/`, `views/`, and `components/`. Tests compile into an ignored temporary build directory using the installed TypeScript compiler and Node's test runner.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contributor guidance and [the desktop acceptance record](docs/server-connections-acceptance.md) for runtime coverage.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contributor guidance and [connection acceptance](docs/server-connections-acceptance.md) and [conversation acceptance](docs/session-conversations-acceptance.md) for runtime coverage.
