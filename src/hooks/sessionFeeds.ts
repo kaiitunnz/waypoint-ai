@@ -209,7 +209,9 @@ export class ConversationFeed extends Observable<ConversationSnapshot> {
     this.olderController?.abort();
     this.socket.stop();
   }
+  // A hidden conversation reconnects when it starts again, so retrying it here would only open a stray socket.
   retry() {
+    if (!this.active) return;
     this.hydrating = true;
     this.socket.retry();
   }

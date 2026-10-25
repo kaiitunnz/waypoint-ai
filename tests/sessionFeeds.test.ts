@@ -345,3 +345,18 @@ test("pausing a hidden conversation closes subscriptions and resuming catches up
   );
   feed.stop();
 });
+
+test("retrying a stopped conversation opens no socket until it starts again", () => {
+  const f = fixture();
+  const client = new WaypointClient(connection.apiUrl, async () => response({ session: sessionWire() }));
+  const feed = new ConversationFeed(connection, "demo", client, f);
+  feed.start();
+  feed.stop();
+  const opened = f.sockets.length;
+  feed.retry();
+  assert.equal(f.sockets.length, opened);
+  assert.ok(f.sockets.every((socket) => socket.closed));
+  feed.start();
+  assert.equal(f.sockets.length, opened + 1);
+  feed.stop();
+});

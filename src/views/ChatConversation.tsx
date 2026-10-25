@@ -98,8 +98,8 @@ export function ChatConversation({
   settings?: { available: boolean; newChat?: NewChatOption };
 }) {
   const [active, setActive] = useState(true);
-  const activeRef = useRef(active);
-  activeRef.current = active;
+  // Set while New Chat replaces the editor, so the editor's pop doesn't resume the hidden conversation.
+  const handingOff = useRef(false);
   const { push } = useNavigation();
   const { state, feed } = useConversationFeed(connection, sessionId ?? "", active && !!sessionId);
   const { state: interactionState, controller: interactionController } = useSessionInteractions(
@@ -295,19 +295,22 @@ export function ChatConversation({
                   settings?.newChat && {
                     ...settings.newChat,
                     open: (view) => {
+                      handingOff.current = true;
                       setActive(false);
-                      push(view, () => setActive(true));
+                      push(view, () => {
+                        handingOff.current = false;
+                        setActive(true);
+                      });
                     },
                   }
                 }
-                // A hidden conversation resumes its feed when it reappears, so only a visible one refreshes here.
-                onApplied={() => {
-                  if (activeRef.current) feed.retry();
-                }}
+                onApplied={() => feed.retry()}
               />
             }
             onPush={() => setActive(false)}
-            onPop={() => setActive(true)}
+            onPop={() => {
+              if (!handingOff.current) setActive(true);
+            }}
           />
         )}
         {session && (
