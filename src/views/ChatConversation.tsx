@@ -1,5 +1,5 @@
-import { Action, ActionPanel, Detail, Icon, Keyboard, List } from "@raycast/api";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { Action, ActionPanel, Detail, Icon, Keyboard, List, useNavigation } from "@raycast/api";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ServerMetadata } from "../api/contracts";
 import { chatExchanges, chatMarkdown, conversationMarkdown, previewMessageLimit } from "../domain/chatPresentation";
 import { transcript } from "../domain/transcript";
@@ -98,6 +98,9 @@ export function ChatConversation({
   settings?: { available: boolean; newChat?: NewChatOption };
 }) {
   const [active, setActive] = useState(true);
+  // Set while New Chat replaces the editor, so the editor's pop doesn't resume the hidden conversation.
+  const handingOff = useRef(false);
+  const { push } = useNavigation();
   const { state, feed } = useConversationFeed(connection, sessionId ?? "", active && !!sessionId);
   const { state: interactionState, controller: interactionController } = useSessionInteractions(
     connection,
@@ -288,12 +291,26 @@ export function ChatConversation({
               <EditSession
                 connection={connection}
                 sessionId={session.id}
-                newChat={settings?.newChat}
+                newChat={
+                  settings?.newChat && {
+                    ...settings.newChat,
+                    open: (view) => {
+                      handingOff.current = true;
+                      setActive(false);
+                      push(view, () => {
+                        handingOff.current = false;
+                        setActive(true);
+                      });
+                    },
+                  }
+                }
                 onApplied={() => feed.retry()}
               />
             }
             onPush={() => setActive(false)}
-            onPop={() => setActive(true)}
+            onPop={() => {
+              if (!handingOff.current) setActive(true);
+            }}
           />
         )}
         {session && (

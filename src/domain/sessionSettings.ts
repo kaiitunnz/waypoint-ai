@@ -3,7 +3,8 @@ import { ModelCatalog } from "../api/models";
 import { Session, UsageSource } from "../api/sessions";
 import { LaunchSettings, TransportOption, UsageProvider } from "../api/settings";
 import { ChatDefaults } from "./quickChat";
-import { modelEfforts } from "./modelOptions";
+import { customModelValue, modelEfforts } from "./modelOptions";
+import { structuredTransport } from "./sessions";
 
 export interface Capabilities extends TransportCapabilities {
   permissions: PermissionMode[];
@@ -15,11 +16,6 @@ export function capsFor(metadata: ServerMetadata, backend: string, transport: st
   const carrier = metadata.agents.find((entry) => entry.nativeTransport === transport);
   if (!agent || !carrier) return undefined;
   return { ...carrier.transportCapabilities, permissions: agent.permissions };
-}
-
-export function nativeTransport(metadata: ServerMetadata, transport: string): boolean {
-  const caps = metadata.agents.find((entry) => entry.nativeTransport === transport)?.transportCapabilities;
-  return !!caps && caps.structured && !caps.liveTerminal;
 }
 
 export interface SettingsBaseline {
@@ -139,7 +135,7 @@ export function availability(
 ): Availability {
   const launch = baseline.launch;
   const offered = launch?.transportSwitch ? launch.transportOptions.map((option) => option.id) : [];
-  const transports = offered.filter((id) => id === baseline.transport || nativeTransport(metadata, id));
+  const transports = offered.filter((id) => id === baseline.transport || structuredTransport(metadata, id));
   const switching = draft.transport !== baseline.transport;
   const option: TransportOption | undefined = switching
     ? launch?.transportOptions.find((entry) => entry.id === draft.transport)
@@ -391,14 +387,24 @@ export const defaultValue = "__default__";
 export const toChoice = (value: string | null) => value ?? defaultValue;
 export const fromChoice = (value: string) => (value === defaultValue ? null : value);
 
+const listed = (catalog: ModelCatalog | undefined, id: string) => !!catalog?.models.some((model) => model.id === id);
+
+export function modelChoice(catalog: ModelCatalog | undefined, baseline: SettingsBaseline, draft: SettingsDraft) {
+  if (draft.model === null) return defaultValue;
+  return listed(catalog, draft.model) || draft.model === baseline.model ? draft.model : customModelValue;
+}
+
 // Every option list includes the baseline, so a controlled dropdown never falls back to its first item.
 export function modelChoices(catalog: ModelCatalog | undefined, baseline: SettingsBaseline, draft: SettingsDraft) {
   const choices: Choice[] = [
     { value: defaultValue, title: catalog?.defaultLabel ? `Default (${catalog.defaultLabel})` : "Default" },
   ];
-  for (const value of [baseline.model, draft.model])
-    if (value && !catalog?.models.some((model) => model.id === value) && !choices.some((c) => c.value === value))
-      choices.push({ value, title: `Custom · ${value}` });
+  if (baseline.model && !listed(catalog, baseline.model))
+    choices.push({ value: baseline.model, title: `Custom · ${baseline.model}` });
+  // Kept while free text is allowed, so typing through a listed ID doesn't remove the selected item.
+  const custom = modelChoice(catalog, baseline, draft) === customModelValue;
+  if (custom || catalog?.freeText)
+    choices.push({ value: customModelValue, title: custom ? `Custom · ${draft.model}` : "Custom model (type below)" });
   for (const model of catalog?.models ?? []) choices.push({ value: model.id, title: model.label });
   return choices;
 }
@@ -555,7 +561,7 @@ export function newChatDefaults(
         effort: draft.effort === null ? defaultValue : draft.effort,
         permission: draft.permission ?? "",
         profile: draft.profileId === null ? defaultValue : draft.profileId,
-        transport: nativeTransport(metadata, draft.transport) ? draft.transport : "",
+        transport: structuredTransport(metadata, draft.transport) ? draft.transport : "",
         args: listOf(draft.args, !!agent?.customArgs, baseline.args),
         config: listOf(draft.config, !!agent?.configOverrides, baseline.config),
       }

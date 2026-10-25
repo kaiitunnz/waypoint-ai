@@ -52,26 +52,30 @@ const lifecycleBusy = "another lifecycle operation is in progress";
 const stillStarting = "cannot change launch settings while the session is STARTING";
 const restoreFailed = "restore failed after applying launch settings";
 
-export function settingsFailure(error: unknown, step: SettingsStep, targetName?: string): string {
+// `what` names the operation ("the model change"); `retry` is the verb each conflict message ends with.
+export function settingsFailure(error: unknown, what: string, retry: string, targetName?: string): string {
   if (error instanceof ApiError) {
     if (error.kind === "expired-token") return "Your sign-in expired. Sign in again; your changes stay in this form.";
     if (error.kind === "not-found") return "This session is no longer available on this server.";
     if (error.kind === "rejected") {
       const detail = error.serverDetail ?? "";
       if (detail.startsWith(lifecycleBusy))
-        return "Waypoint is restarting or reattaching this session. Wait for it to finish, then apply again.";
+        return `Waypoint is restarting or reattaching this session. Wait for it to finish, then ${retry}.`;
       if (detail.startsWith(stillStarting))
-        return "The session is still starting. Wait until it's ready, then apply again.";
+        return `The session is still starting. Wait until it's ready, then ${retry}.`;
       if (detail === "ssh-master-required")
-        return `Connect ${targetName ?? "the SSH target"} to restart this session, then apply again.`;
+        return `Connect ${targetName ?? "the SSH target"} to restart this session, then ${retry}.`;
       if (detail.startsWith(restoreFailed))
         return "The launch settings were saved, but the session didn't restart. Reattach it to continue.";
-      return `Waypoint rejected the ${step.label} change${detail ? `: ${detail}` : "."}`;
+      return `Waypoint rejected ${what}${detail ? `: ${detail}` : "."}`;
     }
   }
-  return `Waypoint didn't confirm the ${step.label} change. It may have applied. The form shows the session's current settings.`;
+  return `Waypoint didn't confirm ${what}. It may have applied.`;
 }
 
+// The target to connect when Waypoint refused because its SSH connection is down.
+const sshTarget = (error: unknown, targetId: string) =>
+  error instanceof ApiError && error.serverDetail === "ssh-master-required" ? targetId || undefined : undefined;
 // Launch settings are restart-scoped, so a confirmed restore failure still means they were saved.
 const restoreFailure = (error: unknown) =>
   error instanceof ApiError && error.kind === "rejected" && !!error.serverDetail?.startsWith(restoreFailed);
@@ -193,6 +197,7 @@ export class SessionSettingsController {
     }
     this.publish({ baseline: fresh.baseline, metadata: fresh.metadata, caps: fresh.caps });
     const plan = this.plan(draft, fresh.baseline, fresh.caps)!;
+    if (plan.errors.length) return { status: "changed", draft, message: plan.errors[0] };
     if (stepOps(plan) !== stepOps(shown))
       return { status: "changed", draft, message: this.statusMessage(fresh.baseline.status) };
     return { status: "ready", plan };
@@ -214,6 +219,7 @@ export class SessionSettingsController {
       const current = { ...previous, status: session.status };
       const plan = this.plan(draft, current)!;
       if (
+        plan.errors.length > 0 ||
         stepOps(plan) !== stepOps(confirmed) ||
         plan.restartCount > confirmed.restartCount ||
         (plan.interruptsTurn && !confirmed.interruptsTurn)
@@ -257,29 +263,26 @@ export class SessionSettingsController {
     const unsure = uncertain(error);
     if (unsure && step.restarts) await this.settle();
     const targetId = previous.targetId;
-    const message = settingsFailure(
-      error,
-      step,
-      this.state.metadata?.targets.find((target) => target.id === targetId)?.name,
-    );
+    const failure = settingsFailure(error, `the ${step.label} change`, "apply again", this.targetName(targetId));
     const applied = plan.steps.filter((entry) => succeeded.includes(entry.op)).map((entry) => entry.label);
     const next = await this.load();
-    const result = {
-      applied,
-      message:
-        unsure && step.op === "launch"
-          ? `${message} Environment changes may have applied. Check them before adding them again.`
-          : message,
-    };
+    const notes = [
+      failure,
+      unsure && step.op === "launch"
+        ? "Environment changes may have applied. Check them before adding them again."
+        : "",
+      !next ? "Reload Settings before applying again." : unsure ? "The form shows the session's current settings." : "",
+    ];
+    const result = { applied, message: notes.filter(Boolean).join(" ") };
     this.publish({
       result,
-      connectTarget:
-        error instanceof ApiError && error.serverDetail === "ssh-master-required" ? targetId || undefined : undefined,
+      connectTarget: sshTarget(error, targetId),
       reattach: restored,
     });
+    // Without fresh settings, the applied steps still leave the draft so they are never sent twice.
     return {
       ...result,
-      draft: next ? rebaseDraft(draft, previous, next, succeeded, unsure && step.op === "launch") : draft,
+      draft: rebaseDraft(draft, previous, next ?? previous, succeeded, unsure && step.op === "launch"),
     };
   }
 
@@ -297,17 +300,20 @@ export class SessionSettingsController {
     }
   }
 
+  private targetName(targetId: string) {
+    return this.state.metadata?.targets.find((target) => target.id === targetId)?.name;
+  }
+
   async reattach() {
-    this.publish({ applying: true, restarting: true });
+    const targetId = this.state.baseline?.targetId ?? "";
+    this.publish({ applying: true, restarting: true, connectTarget: undefined });
     try {
       await this.client.action(this.connection.token, this.sessionId, "reattach", restartTimeoutMs);
       this.publish({ reattach: false, result: undefined });
     } catch (error) {
       this.publish({
-        result: {
-          applied: [],
-          message: error instanceof Error ? error.message : "Could not reattach this session.",
-        },
+        result: { applied: [], message: settingsFailure(error, "reattaching", "reattach", this.targetName(targetId)) },
+        connectTarget: sshTarget(error, targetId),
       });
     } finally {
       this.publish({ applying: false, restarting: false });
