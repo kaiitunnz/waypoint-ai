@@ -1,5 +1,5 @@
-import { Action, ActionPanel, Detail, Icon, Keyboard, List } from "@raycast/api";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { Action, ActionPanel, Detail, Icon, Keyboard, List, useNavigation } from "@raycast/api";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ServerMetadata } from "../api/contracts";
 import { chatExchanges, chatMarkdown, conversationMarkdown, previewMessageLimit } from "../domain/chatPresentation";
 import { transcript } from "../domain/transcript";
@@ -98,6 +98,9 @@ export function ChatConversation({
   settings?: { available: boolean; newChat?: NewChatOption };
 }) {
   const [active, setActive] = useState(true);
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  const { push } = useNavigation();
   const { state, feed } = useConversationFeed(connection, sessionId ?? "", active && !!sessionId);
   const { state: interactionState, controller: interactionController } = useSessionInteractions(
     connection,
@@ -288,8 +291,19 @@ export function ChatConversation({
               <EditSession
                 connection={connection}
                 sessionId={session.id}
-                newChat={settings?.newChat}
-                onApplied={() => feed.retry()}
+                newChat={
+                  settings?.newChat && {
+                    ...settings.newChat,
+                    open: (view) => {
+                      setActive(false);
+                      push(view, () => setActive(true));
+                    },
+                  }
+                }
+                // A hidden conversation resumes its feed when it reappears, so only a visible one refreshes here.
+                onApplied={() => {
+                  if (activeRef.current) feed.retry();
+                }}
               />
             }
             onPush={() => setActive(false)}

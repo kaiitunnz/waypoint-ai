@@ -14,8 +14,9 @@ import {
   effortChoices,
   effortForModel,
   envPatch,
+  customModelValue,
+  modelChoice,
   modelChoices,
-  nativeTransport,
   newChatDefaults,
   permissionChoices,
   planSettings,
@@ -26,7 +27,7 @@ import {
   settingsFingerprint,
   usageChoices,
 } from "../src/domain/sessionSettings";
-import { isStructured } from "../src/domain/sessions";
+import { isStructured, structuredTransport } from "../src/domain/sessions";
 import { launchWire, metadataWire, option, sessionRecord } from "./fixtures/settings";
 
 const metadata = parseMetadata(metadataWire);
@@ -196,6 +197,13 @@ test("model and effort choices keep defaults, custom values, and the effort's th
     modelChoices(catalog, baseline, draft).map((choice) => choice.title),
     ["Default (Model A)", "Custom · custom-x", "Model A", "Model B", "Model C"],
   );
+  for (const typed of ["t", "typed", "typed-model"]) {
+    const typing = { ...draft, model: typed };
+    assert.equal(modelChoice(catalog, baseline, typing), customModelValue);
+    assert.ok(modelChoices(catalog, baseline, typing).some((choice) => choice.value === customModelValue));
+  }
+  assert.equal(modelChoice(catalog, baseline, { ...draft, model: "b" }), "b");
+  assert.equal(modelChoice(catalog, baseline, { ...draft, model: null }), "__default__");
   assert.deepEqual(effortChoices(catalog, baseline, { ...draft, model: null }).efforts, ["low", "medium"]);
   assert.deepEqual(effortChoices(catalog, baseline, { ...draft, model: "b" }).efforts, ["low", "high"]);
   assert.deepEqual(effortChoices(catalog, baseline, { ...draft, model: "c" }).efforts, []);
@@ -351,6 +359,8 @@ test("Waypoint's own catalog drives restart disclosure per agent and interface",
   );
   const tty = plan("claude_code", "claude_tty", "running", { effort: "medium", permission: "plan" });
   assert.deepEqual([tty.restartCount, tty.interruptsTurn], [2, true]);
-  assert.equal(nativeTransport(real, "tmux"), false);
-  assert.ok(["claude_cli", "claude_tty", "codex_app_server", "opencode_http"].every((t) => nativeTransport(real, t)));
+  assert.equal(structuredTransport(real, "tmux"), false);
+  assert.ok(
+    ["claude_cli", "claude_tty", "codex_app_server", "opencode_http"].every((t) => structuredTransport(real, t)),
+  );
 });

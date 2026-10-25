@@ -20,8 +20,9 @@ import {
   effortChoices,
   effortForModel,
   fromChoice,
+  customModelValue,
+  modelChoice,
   modelChoices,
-  nativeTransport,
   newChatDefaults,
   permissionChoices,
   profileChoices,
@@ -32,6 +33,7 @@ import {
   usageFromValue,
   usageValue,
 } from "../domain/sessionSettings";
+import { structuredTransport } from "../domain/sessions";
 import { FeedConnection } from "../hooks/sessionFeeds";
 import { SessionSettingsController } from "../hooks/sessionSettingsController";
 import { ConnectTarget } from "./ConnectTarget";
@@ -39,6 +41,8 @@ import { ConnectTarget } from "./ConnectTarget";
 // Saves Quick Chat defaults built from the current ones; returns a view to open when the chat isn't already on screen.
 export interface NewChatOption {
   start: (build: (current: ChatDefaults) => ChatDefaults) => Promise<React.ReactElement | void>;
+  // Opens the returned view in place of the editor, letting the conversation underneath pause.
+  open?: (view: React.ReactElement) => void;
 }
 
 function planText(plan: SettingsPlan | undefined): string {
@@ -86,7 +90,21 @@ export function EditSession({
 
   if (!baseline || !metadata || !draft)
     return (
-      <Form navigationTitle="Edit Current Session" isLoading={state.loading}>
+      <Form
+        navigationTitle="Edit Current Session"
+        isLoading={state.loading}
+        actions={
+          state.error ? (
+            <ActionPanel>
+              <Action
+                title="Reload Settings"
+                icon={Icon.ArrowClockwise}
+                onAction={() => void controller.load().then((loaded) => loaded && setDraft(settingsDraft(loaded)))}
+              />
+            </ActionPanel>
+          ) : undefined
+        }
+      >
         {state.error && <Form.Description title="Not loaded" text={state.error} />}
       </Form>
     );
@@ -100,6 +118,12 @@ export function EditSession({
     state.reattach ||
     (["exited", "error"].includes(baseline.status) &&
       metadata.agents.find((agent) => agent.nativeTransport === baseline.transport)?.reattach === true);
+  const setModel = (model: string | null) => {
+    if (model === draft.model) return;
+    const effort = effortForModel(state.catalog, model, draft.effort);
+    setEffortReset(effort !== draft.effort);
+    update({ model, effort });
+  };
   const update = (patch: Partial<SettingsDraft>) => {
     setProblem(undefined);
     setDraft((current) => current && { ...current, ...patch });
@@ -126,7 +150,7 @@ export function EditSession({
         });
         if (!mounted.current) return;
         pop();
-        if (view) push(view);
+        if (view) (newChat.open ?? push)(view);
         return;
       }
       const prepared = await controller.prepare(draft, plan);
@@ -191,7 +215,7 @@ export function EditSession({
   const agents = metadata.agents.filter(
     (agent) =>
       (!draft.targetId || metadata.targets.find((entry) => entry.id === draft.targetId)?.agents.includes(agent.id)) &&
-      agent.transports.some((transport) => nativeTransport(metadata, transport)),
+      agent.transports.some((transport) => structuredTransport(metadata, transport)),
   );
   const result = state.result;
   return (
@@ -253,6 +277,7 @@ export function EditSession({
           text={`${result.applied.length ? `Applied: ${result.applied.join(", ")}.\n` : ""}${result.message}`}
         />
       )}
+      {state.error && <Form.Description title="Not reloaded" text={state.error} />}
       {state.notices.length > 0 && <Form.Description title="Note" text={state.notices.join("\n")} />}
       <Form.TextField id="title" title="Title" value={draft.title} onChange={(title) => update({ title })} />
       <Form.Separator />
@@ -261,19 +286,24 @@ export function EditSession({
         <Form.Dropdown
           id="model"
           title="Model"
-          value={toChoice(draft.model)}
+          value={modelChoice(state.catalog, baseline, draft)}
           onChange={(value) => {
-            const model = fromChoice(value);
-            if (model === draft.model) return;
-            const effort = effortForModel(state.catalog, model, draft.effort);
-            setEffortReset(effort !== draft.effort);
-            update({ model, effort });
+            if (value !== customModelValue) setModel(fromChoice(value));
           }}
         >
           {modelChoices(state.catalog, baseline, draft).map((choice) => (
             <Form.Dropdown.Item key={choice.value} value={choice.value} title={choice.title} />
           ))}
         </Form.Dropdown>
+      )}
+      {available.model && state.catalog?.freeText && (
+        <Form.TextField
+          id="customModel"
+          title="Custom Model"
+          placeholder="Optional model ID"
+          value={draft.model ?? ""}
+          onChange={(value) => setModel(value.trim() ? value.trim() : null)}
+        />
       )}
       {available.effort && (efforts.efforts.length > 0 || baseline.effort !== null) && (
         <Form.Dropdown

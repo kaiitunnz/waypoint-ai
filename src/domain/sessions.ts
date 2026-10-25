@@ -35,8 +35,13 @@ export function visibleSessions(sessions: Session[], query: string, filter: Sess
     );
 }
 
+// Raycast renders structured transports natively; anything else is handed off to Waypoint.
+export function structuredTransport(metadata: ServerMetadata, transport: string): boolean {
+  return metadata.agents.find((agent) => agent.nativeTransport === transport)?.structured === true;
+}
+
 export function isStructured(session: Session, metadata?: ServerMetadata): boolean {
-  return metadata?.agents.find((agent) => agent.nativeTransport === session.transport)?.structured === true;
+  return !!metadata && structuredTransport(metadata, session.transport);
 }
 
 export function sessionUrl(frontendUrl: string | undefined, id: string): string | undefined {
