@@ -176,8 +176,7 @@ export function ComposeMessage({
                     primaryAction: { title: "Discard", style: Alert.ActionStyle.Destructive },
                   })
                 ) {
-                  await controller.discardCompose();
-                  if (mounted.current) pop();
+                  if ((await controller.discardCompose()) && mounted.current) pop();
                 }
               }}
             />

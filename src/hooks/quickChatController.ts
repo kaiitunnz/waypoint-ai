@@ -81,6 +81,7 @@ export class QuickChatController {
     hasDraft: false,
   };
   private composeValue = "";
+  private composeSaves = 0;
   private retry?: Retry;
   private listeners = new Set<() => void>();
   private active = true;
@@ -299,8 +300,9 @@ export class QuickChatController {
     })();
     return this.boundSession;
   }
-  // Resolves whether the parts were saved; on failure the form shows the saved parts again, since sends use those.
+  // Resolves whether the parts were saved. Sends use the saved parts, so when the latest save fails the form shows those again.
   private persistCompose(compose: ComposeParts): Promise<boolean> {
+    const save = ++this.composeSaves;
     this.publish({ compose });
     const result = this.queue
       .then(() =>
@@ -312,7 +314,8 @@ export class QuickChatController {
       .then(
         () => true,
         async (error) => {
-          const saved = await this.store.read(this.connection.id).catch(() => undefined);
+          const saved =
+            save === this.composeSaves ? await this.store.read(this.connection.id).catch(() => undefined) : undefined;
           this.publish({
             ...(saved ? { compose: storedParts(saved.compose?.[this.draftKey]) ?? emptyParts() } : {}),
             error: error instanceof Error ? error.message : "Could not save draft. Keep this view open and retry.",
@@ -325,8 +328,11 @@ export class QuickChatController {
   }
   // Moves the single-line draft into an empty compose draft so the text isn't sent twice.
   openCompose() {
-    if (this.state.busy || this.state.hasDraft || !this.state.draft.trim()) return Promise.resolve();
+    return this.state.busy || this.state.hasDraft ? Promise.resolve() : this.moveLineDraft();
+  }
+  private moveLineDraft() {
     const text = this.state.draft;
+    if (!text.trim()) return Promise.resolve();
     void this.changeDraft("");
     return this.replaceComposeText(text);
   }
@@ -343,11 +349,13 @@ export class QuickChatController {
       return false;
     }
     this.publish({ error: undefined });
-    void this.openCompose();
-    return this.persistCompose({
+    const move = !this.state.hasDraft;
+    const saved = await this.persistCompose({
       ...this.state.compose,
       context: [...this.state.compose.context, { id: randomUUID(), kind, text }],
     });
+    if (saved && move) await this.moveLineDraft();
+    return saved;
   }
   removeContext(id: string) {
     if (this.state.busy) return this.queue;
@@ -379,8 +387,9 @@ export class QuickChatController {
     await this.persistCompose({ ...this.state.compose, files });
     return problems;
   }
-  async removeFiles(ids: string[]) {
-    if (this.state.busy) return;
+  // Resolves whether the files were removed.
+  async removeFiles(ids: string[]): Promise<boolean> {
+    if (this.state.busy) return false;
     this.publish({ busy: true, error: undefined });
     try {
       await this.queue;
@@ -404,17 +413,20 @@ export class QuickChatController {
             .catch(() => undefined),
         ),
       );
+      return true;
     } catch (error) {
       this.publish({ error: error instanceof Error ? error.message : "Could not remove the file." });
+      return false;
     } finally {
       this.publish({ busy: false });
     }
   }
-  async discardCompose() {
-    await this.removeFiles(this.state.compose.files.map((file) => file.id));
-    if (this.state.error) return;
-    await this.persistCompose(emptyParts());
+  // Resolves whether the whole draft was discarded.
+  async discardCompose(): Promise<boolean> {
+    if (!(await this.removeFiles(this.state.compose.files.map((file) => file.id)))) return false;
+    if (!(await this.persistCompose(emptyParts()))) return false;
     await this.replaceComposeText("");
+    return true;
   }
   private checkPolicy(files: StagedFile[], agentId: string | undefined, targetId: string | undefined) {
     if (!files.length) return;
@@ -489,7 +501,6 @@ export class QuickChatController {
       return false;
     const metadata = this.state.metadata;
     let sent = false;
-    let remaining = emptyParts();
     let cleared = false;
     this.publish({ busy: true, error: undefined, notice: undefined, sshTarget: undefined });
     try {
@@ -506,10 +517,8 @@ export class QuickChatController {
             [this.draftKey]: storedParts(saved.compose?.[this.draftKey]) ?? composeParts(compose),
           };
         const draft = compose ? saved.compose![this.draftKey] : undefined;
-        // The saved parts are what gets uploaded, so the message and the cleanup after it use them too.
+        // The saved parts are what gets uploaded, so the message uses them too.
         if (draft && compose) text = composeMessage(compose.text, draft.context);
-        const sentContext = new Set(draft?.context.map((item) => item.id));
-        const sentFiles = new Set(draft?.files.map((file) => file.id));
         if (draft && !text && !draft.files.length) throw new Error("This draft has nothing to send.");
         let session = this.state.session;
         if (
@@ -632,13 +641,8 @@ export class QuickChatController {
             cleared = true;
             await this.store.drafts.write(this.composeKey, "");
           }
-          const rest: ComposeParts = {
-            context: draft.context.filter((item) => !sentContext.has(item.id)),
-            files: draft.files.filter((file) => !sentFiles.has(file.id)),
-          };
-          if (rest.context.length || rest.files.length) saved.compose![this.draftKey] = rest;
-          else delete saved.compose![this.draftKey];
-          remaining = saved.compose![this.draftKey] ?? emptyParts();
+          // Staging waits for the send, so everything in the saved parts was sent.
+          delete saved.compose![this.draftKey];
         } else if (this.state.draft.trim() === text) await this.store.drafts.write(this.lineKey, "");
         saved.pending = undefined;
         await persist();
@@ -646,7 +650,7 @@ export class QuickChatController {
         this.publish({
           session,
           ...(compose
-            ? { compose: remaining, ...(cleared ? { composeEpoch: this.state.composeEpoch + 1 } : {}) }
+            ? { compose: emptyParts(), ...(cleared ? { composeEpoch: this.state.composeEpoch + 1 } : {}) }
             : { draft: this.state.draft.trim() === text ? "" : this.state.draft }),
           pending: undefined,
           revision: this.state.revision + 1,

@@ -220,24 +220,28 @@ function QuickChatActions({
             }}
             target={compose}
           />
-          <Action
-            title="Include Selected Text"
-            icon={Icon.Text}
-            shortcut={{
-              macOS: { modifiers: ["cmd", "shift"], key: "e" },
-              Windows: { modifiers: ["ctrl", "shift"], key: "e" },
-            }}
-            onAction={() => include("selection")}
-          />
-          <Action
-            title="Include Clipboard"
-            icon={Icon.Clipboard}
-            shortcut={{
-              macOS: { modifiers: ["cmd", "shift"], key: "v" },
-              Windows: { modifiers: ["ctrl", "shift"], key: "v" },
-            }}
-            onAction={() => include("clipboard")}
-          />
+          {!state.busy && (
+            <>
+              <Action
+                title="Include Selected Text"
+                icon={Icon.Text}
+                shortcut={{
+                  macOS: { modifiers: ["cmd", "shift"], key: "e" },
+                  Windows: { modifiers: ["ctrl", "shift"], key: "e" },
+                }}
+                onAction={() => include("selection")}
+              />
+              <Action
+                title="Include Clipboard"
+                icon={Icon.Clipboard}
+                shortcut={{
+                  macOS: { modifiers: ["cmd", "shift"], key: "v" },
+                  Windows: { modifiers: ["ctrl", "shift"], key: "v" },
+                }}
+                onAction={() => include("clipboard")}
+              />
+            </>
+          )}
         </ActionPanel.Section>
       )}
       {state.sshTarget && metadata && (

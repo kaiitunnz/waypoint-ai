@@ -17,12 +17,15 @@ async function fixture(options: { attachments?: boolean; target?: "password" | "
   const directory = await mkdtemp(join(tmpdir(), "compose-controller-"));
   const values = new Map<string, string>();
   const writes: string[] = [];
-  const storage = { failState: false };
+  const storage = { failState: false, failNextState: false };
   const store = new QuickChatStore(
     {
       getItem: async (key) => values.get(key),
       setItem: async (key, value) => {
-        if (storage.failState && key.startsWith("waypoint.quick-chat.")) throw new Error("Storage unavailable");
+        if ((storage.failState || storage.failNextState) && key.startsWith("waypoint.quick-chat.")) {
+          storage.failNextState = false;
+          throw new Error("Storage unavailable");
+        }
         writes.push(key);
         values.set(key, value);
       },
@@ -442,5 +445,41 @@ test("staging context reports whether it was saved, even after an earlier error"
     c.getSnapshot().compose.context.map((item) => item.text),
     ["small"],
   );
+  await f.close();
+});
+
+test("when an earlier save fails and a later one succeeds, the form shows what was saved", async () => {
+  const f = await fixture();
+  const c = f.controller();
+  await c.start();
+  f.storage.failNextState = true;
+  const first = c.stageContext("clipboard", "one");
+  const second = c.stageContext("clipboard", "two");
+  assert.deepEqual([await first, await second], [false, true]);
+  const saved = (await f.store.read(connection.id)).compose!.quick.context.map((item) => item.text);
+  assert.deepEqual(saved, ["one", "two"]);
+  assert.deepEqual(
+    c.getSnapshot().compose.context.map((item) => item.text),
+    saved,
+  );
+  await f.close();
+});
+
+test("a failed stage keeps the search-bar text, and a failed discard keeps the draft", async () => {
+  const f = await fixture();
+  const c = f.controller();
+  await c.start();
+  await c.changeDraft("typed in the search bar");
+  f.storage.failState = true;
+  assert.equal(await c.stageContext("clipboard", "context"), false);
+  assert.equal(c.getSnapshot().draft, "typed in the search bar");
+  assert.equal(c.composeText(), "");
+  f.storage.failState = false;
+  assert.equal(await c.stageContext("clipboard", "context"), true);
+  assert.equal(c.composeText(), "typed in the search bar");
+  f.storage.failState = true;
+  assert.equal(await c.discardCompose(), false);
+  assert.equal(c.composeText(), "typed in the search bar");
+  assert.equal(c.getSnapshot().compose.context.length, 1);
   await f.close();
 });
