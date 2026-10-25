@@ -387,10 +387,8 @@ export const defaultValue = "__default__";
 export const toChoice = (value: string | null) => value ?? defaultValue;
 export const fromChoice = (value: string) => (value === defaultValue ? null : value);
 
-export { customModelValue };
 const listed = (catalog: ModelCatalog | undefined, id: string) => !!catalog?.models.some((model) => model.id === id);
 
-// A typed model keeps `customModelValue` while it changes (see modelOptions).
 export function modelChoice(catalog: ModelCatalog | undefined, baseline: SettingsBaseline, draft: SettingsDraft) {
   if (draft.model === null) return defaultValue;
   return listed(catalog, draft.model) || draft.model === baseline.model ? draft.model : customModelValue;

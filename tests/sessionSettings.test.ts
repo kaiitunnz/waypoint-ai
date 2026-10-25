@@ -14,7 +14,6 @@ import {
   effortChoices,
   effortForModel,
   envPatch,
-  customModelValue,
   modelChoice,
   modelChoices,
   newChatDefaults,
@@ -28,6 +27,7 @@ import {
   usageChoices,
 } from "../src/domain/sessionSettings";
 import { isStructured, structuredTransport } from "../src/domain/sessions";
+import { customModelValue } from "../src/domain/modelOptions";
 import { launchWire, metadataWire, option, sessionRecord } from "./fixtures/settings";
 
 const metadata = parseMetadata(metadataWire);

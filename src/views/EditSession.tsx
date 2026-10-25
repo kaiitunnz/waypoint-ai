@@ -20,7 +20,6 @@ import {
   effortChoices,
   effortForModel,
   fromChoice,
-  customModelValue,
   modelChoice,
   modelChoices,
   newChatDefaults,
@@ -33,6 +32,7 @@ import {
   usageFromValue,
   usageValue,
 } from "../domain/sessionSettings";
+import { customModelValue } from "../domain/modelOptions";
 import { structuredTransport } from "../domain/sessions";
 import { FeedConnection } from "../hooks/sessionFeeds";
 import { SessionSettingsController } from "../hooks/sessionSettingsController";
