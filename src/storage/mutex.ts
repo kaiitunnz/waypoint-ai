@@ -68,7 +68,8 @@ export class ServerMutex {
     try {
       // The heartbeat starts before this record is linked as the lock or a reclaim claim, so a stopped attempt always goes stale.
       await this.beat(path, nonce);
-      heartbeat = setInterval(() => (beating = this.beat(path, nonce)), this.heartbeatMs);
+      // Beats run in order, so a slow one can't land after a newer timestamp or after release.
+      heartbeat = setInterval(() => (beating = beating.then(() => this.beat(path, nonce))), this.heartbeatMs);
       heartbeat.unref?.();
       while (!acquired) {
         try {

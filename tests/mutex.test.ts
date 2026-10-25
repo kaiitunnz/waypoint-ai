@@ -99,3 +99,20 @@ test("released locks leave no heartbeat files, even when a beat is still writing
   assert.deepEqual(await readdir(directory), []);
   await rm(directory, { recursive: true, force: true });
 });
+
+test("slow heartbeats run in order and none outlives the release", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "mutex-slow-beats-"));
+  const mutex = new ServerMutex(directory, 2500, { heartbeatMs: 1, queues: new Map() });
+  const beats = mutex as unknown as { beat(path: string, nonce: string): Promise<unknown> };
+  const beat = beats.beat.bind(mutex);
+  let calls = 0;
+  beats.beat = async (path, nonce) => {
+    if (calls++ % 2) await new Promise((resolve) => setTimeout(resolve, 8));
+    return beat(path, nonce);
+  };
+  for (let run = 0; run < 20; run++)
+    await mutex.run("server-a", () => new Promise((resolve) => setTimeout(resolve, 15)));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.deepEqual(await readdir(directory), []);
+  await rm(directory, { recursive: true, force: true });
+});
