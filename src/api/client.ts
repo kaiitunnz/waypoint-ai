@@ -1,8 +1,11 @@
+import { openAsBlob } from "node:fs";
+import { basename } from "node:path";
 import { InteractionAction } from "../domain/interactions";
+import { mimeType } from "../domain/compose";
 import { ModelCatalog, parseModels } from "./models";
 import { isRecord } from "../domain/connections";
 import { parseMetadata, ServerMetadata } from "./contracts";
-import { Session, EventsPage, parseSession, parseSessions, parseEventsPage } from "./sessions";
+import { Session, EventsPage, parseAttachment, parseSession, parseSessions, parseEventsPage } from "./sessions";
 
 export type ApiErrorKind =
   | "unreachable"
@@ -167,8 +170,18 @@ export class WaypointClient {
       });
       if (response.status === 401 || response.status === 403)
         throw new ApiError("expired-token", "Your sign-in expired. Sign in again; the draft is kept.");
-      if (response.status === 404)
+      if (response.status === 404) {
+        const value: unknown = await response.json().catch(() => undefined);
+        // Waypoint checks attachment IDs before recording input.
+        if (isRecord(value) && typeof value.detail === "string" && value.detail.startsWith("attachment not found"))
+          throw new ApiError(
+            "rejected",
+            "An attachment expired. Send again to upload it again.",
+            "attachment-missing",
+            404,
+          );
         throw new ApiError("not-found", "This session is unavailable. Start an explicit New Chat; your draft is kept.");
+      }
       if (response.status >= 400 && response.status < 500) {
         let detail = "";
         try {
@@ -212,8 +225,96 @@ export class WaypointClient {
   create(token: string, request: Record<string, unknown>) {
     return this.mutate(token, "/api/sessions", request);
   }
-  input(token: string, id: string, text: string) {
-    return this.mutate(token, `/api/sessions/${encodeURIComponent(id)}/input`, { text, submit: true });
+  input(token: string, id: string, text: string, attachments: string[] = []) {
+    return this.mutate(token, `/api/sessions/${encodeURIComponent(id)}/input`, {
+      text,
+      submit: true,
+      ...(attachments.length ? { attachments } : {}),
+    });
+  }
+  // Uploads are not inputs: an unconfirmed upload can only leave an orphan, so failures stay retryable.
+  async uploadAttachment(token: string, id: string, path: string, size: number, signal?: AbortSignal) {
+    const form = new FormData();
+    form.append("file", await openAsBlob(path, { type: mimeType(path) }), basename(path));
+    const timeout = AbortSignal.timeout(30000 + Math.ceil(size / 262144) * 1000);
+    let response: Response;
+    try {
+      response = await this.request(`${this.apiUrl}/api/sessions/${encodeURIComponent(id)}/attachments`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+        redirect: "error",
+        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+      });
+    } catch {
+      if (signal?.aborted) throw new DOMException("Cancelled", "AbortError");
+      throw new ApiError("unreachable", `Could not upload ${basename(path)}. Check the connection and send again.`);
+    }
+    if (response.status === 401 || response.status === 403)
+      throw new ApiError("expired-token", "Your sign-in expired. Sign in again; your draft is kept.");
+    if (response.status === 404)
+      throw new ApiError("not-found", "This session is unavailable. Start a new chat; your draft is kept.");
+    if (response.status === 413)
+      throw new ApiError("rejected", `${basename(path)} is larger than this server accepts.`, undefined, 413);
+    if (!response.ok)
+      throw new ApiError(
+        "server-error",
+        `Could not upload ${basename(path)}. The server returned HTTP ${response.status}.`,
+      );
+    try {
+      return parseAttachment(await response.json());
+    } catch {
+      throw new ApiError("invalid-response", "The server returned an unexpected upload response.");
+    }
+  }
+  async deleteAttachment(token: string, id: string, attachmentId: string) {
+    const response = await this.request(
+      `${this.apiUrl}/api/sessions/${encodeURIComponent(id)}/attachments/${encodeURIComponent(attachmentId)}`,
+      {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+        redirect: "error",
+        signal: AbortSignal.timeout(this.timeoutMs),
+      },
+    );
+    if (!response.ok && response.status !== 404) throw new ApiError("server-error", "Could not remove the upload.");
+  }
+  attachments(token: string, id: string, signal?: AbortSignal): Promise<string[]> {
+    return this.read(`/api/sessions/${encodeURIComponent(id)}/attachments`, token, signal, (value) => {
+      if (!Array.isArray(value)) throw new Error("Invalid attachment list");
+      return value.map((item) => parseAttachment(item).id);
+    });
+  }
+  async connectTarget(
+    token: string,
+    targetId: string,
+    password: string,
+  ): Promise<{ connected: boolean; detail?: string }> {
+    let response: Response;
+    try {
+      response = await this.request(`${this.apiUrl}/api/launch-targets/${encodeURIComponent(targetId)}/connect`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+        redirect: "error",
+        signal: AbortSignal.timeout(60000),
+      });
+    } catch {
+      throw new ApiError(
+        "unreachable",
+        "Could not reach Waypoint to connect the target. Check the connection and retry.",
+      );
+    }
+    if (response.status === 401 || response.status === 403)
+      throw new ApiError("expired-token", "Your sign-in expired. Sign in again, then connect.");
+    if (response.status === 404) throw new ApiError("not-found", "This execution target is no longer available.");
+    if (response.status === 400) throw new ApiError("rejected", "This execution target does not use a password.");
+    if (!response.ok)
+      throw new ApiError("server-error", `The server returned HTTP ${response.status}. Retry connecting.`);
+    const value: unknown = await response.json().catch(() => undefined);
+    if (!isRecord(value) || typeof value.connected !== "boolean")
+      throw new ApiError("invalid-response", "The server returned an unexpected connection response.");
+    return { connected: value.connected, detail: typeof value.detail === "string" ? value.detail : undefined };
   }
   action(token: string, id: string, action: "interrupt" | "reattach") {
     return this.mutate(token, `/api/sessions/${encodeURIComponent(id)}/${action}`);

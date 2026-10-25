@@ -20,6 +20,7 @@ export interface Agent {
   configOverrides: boolean;
   reattach: boolean;
   planApproval: boolean;
+  attachments: boolean;
   approvalDecisions: string[];
   approvalNote: boolean;
 }
@@ -117,6 +118,9 @@ export function parseMetadata(value: unknown): ServerMetadata {
           : [],
       approvalNote: isRecord(item.agent_capabilities) && item.agent_capabilities.supports_approval_note === true,
       planApproval: isRecord(item.agent_capabilities) && item.agent_capabilities.supports_plan_approval === true,
+      attachments:
+        (isRecord(item.agent_capabilities) && item.agent_capabilities.supports_attachments === true) ||
+        (isRecord(item.capabilities) && item.capabilities.supports_attachments === true),
       reattach:
         isRecord(item.transport_capabilities) && item.transport_capabilities.supports_reattach_after_exit === true,
     })),

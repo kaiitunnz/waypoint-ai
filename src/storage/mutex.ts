@@ -37,7 +37,9 @@ export class ServerMutex {
           if (!isRecord(error) || error.code !== "EEXIST") throw error;
           await this.reclaim(path, owner);
           if (Date.now() - started >= this.waitMs)
-            throw new Error("Another Quick Chat operation is still active for this server. Retry when it finishes.");
+            throw new Error(
+              "Another Quick Chat operation, such as an upload, is still active for this server. Retry when it finishes.",
+            );
           await new Promise((resolve) => setTimeout(resolve, 25));
         }
       }

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { ComposeDraft } from "../domain/compose";
 import { InteractionAction, InteractionDraft, interactionActions } from "../domain/interactions";
 import { ChatDefaults, initialDefaults } from "../domain/quickChat";
 import { isRecord } from "../domain/connections";
@@ -15,6 +16,7 @@ export interface PendingOperation {
   startedAt: number;
   baseline?: number;
   acknowledgedAt?: number;
+  attachments?: string[];
 }
 export interface QuickChatState {
   version: 1;
@@ -25,6 +27,7 @@ export interface QuickChatState {
   drafts: Record<string, string>;
   pending?: PendingOperation;
   interactionDrafts?: Record<string, InteractionDraft>;
+  compose?: Record<string, ComposeDraft>;
 }
 export interface Mutex {
   run<T>(id: string, operation: () => Promise<T>): Promise<T>;
@@ -39,6 +42,37 @@ function isInteractionDraft(value: unknown): boolean {
     (value.note === undefined || isText(value.note)) &&
     textRecord(value.selected, (entry) => Array.isArray(entry) && entry.every(isText)) &&
     textRecord(value.notes, isText)
+  );
+}
+const isNumber = (value: unknown) => typeof value === "number" && Number.isFinite(value);
+function isComposeDraft(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    isText(value.text) &&
+    (value.sessionId === undefined || isText(value.sessionId)) &&
+    Array.isArray(value.context) &&
+    value.context.every(
+      (item) =>
+        isRecord(item) &&
+        isText(item.id) &&
+        ["selection", "clipboard"].includes(String(item.kind)) &&
+        isText(item.text),
+    ) &&
+    Array.isArray(value.files) &&
+    value.files.every(
+      (file) =>
+        isRecord(file) &&
+        isText(file.id) &&
+        isText(file.path) &&
+        isText(file.name) &&
+        isNumber(file.size) &&
+        isNumber(file.modifiedMs) &&
+        (file.upload === undefined ||
+          (isRecord(file.upload) &&
+            isText(file.upload.sessionId) &&
+            isText(file.upload.attachmentId) &&
+            isNumber(file.upload.uploadedAt))),
+    )
   );
 }
 export function decodeQuickChat(raw?: string): QuickChatState {
@@ -93,6 +127,14 @@ export function decodeQuickChat(raw?: string): QuickChatState {
       (!isRecord(data.interactionDrafts) || !Object.values(data.interactionDrafts).every(isInteractionDraft))
     )
       throw new Error();
+    if (data.compose !== undefined && (!isRecord(data.compose) || !Object.values(data.compose).every(isComposeDraft)))
+      throw new Error();
+    if (
+      isRecord(data.pending) &&
+      data.pending.attachments !== undefined &&
+      (!Array.isArray(data.pending.attachments) || !data.pending.attachments.every(isText))
+    )
+      throw new Error();
     if (
       isRecord(data.pending) &&
       data.pending.kind === "interaction" &&
@@ -123,6 +165,11 @@ export class QuickChatStore {
       const persist = () => this.storage.setItem(key, JSON.stringify(state));
       return operation(state, persist);
     });
+  }
+  // Reads without the lock so long operations such as uploads don't block other commands from loading.
+  async read(id: string) {
+    const raw = await this.storage.getItem(`waypoint.quick-chat.${id}`);
+    return raw === undefined ? this.load(id) : decodeQuickChat(raw);
   }
   load(id: string) {
     return this.transaction(id, async (state, persist) => {

@@ -187,7 +187,7 @@ export class InteractionController {
     this.publish({ loading: true, error: undefined, loadError: undefined });
     try {
       await this.queue;
-      const [fresh, saved] = await Promise.all([this.snapshot(), this.store.load(this.connection.id)]);
+      const [fresh, saved] = await Promise.all([this.snapshot(), this.store.read(this.connection.id)]);
       if (!this.active || generation !== this.generation) return;
       this.adopt(fresh, sessionChanges, questionChanges);
       this.publish({
@@ -315,7 +315,7 @@ export class InteractionController {
         settled = true;
       });
     } catch (error) {
-      const saved = await this.store.load(this.connection.id).catch(() => undefined);
+      const saved = await this.store.read(this.connection.id).catch(() => undefined);
       this.publish({
         pending: saved?.pending,
         error: acknowledged ? unsaved : message(error, "Could not send the response."),
