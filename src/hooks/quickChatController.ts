@@ -317,7 +317,9 @@ export class QuickChatController {
           const saved =
             save === this.composeSaves ? await this.store.read(this.connection.id).catch(() => undefined) : undefined;
           this.publish({
-            ...(saved ? { compose: storedParts(saved.compose?.[this.draftKey]) ?? emptyParts() } : {}),
+            ...(saved && save === this.composeSaves
+              ? { compose: storedParts(saved.compose?.[this.draftKey]) ?? emptyParts() }
+              : {}),
             error: error instanceof Error ? error.message : "Could not save draft. Keep this view open and retry.",
           });
           return false;
@@ -785,8 +787,11 @@ export class QuickChatController {
   async allowRetry() {
     await this.reconcile();
     if (this.state.error || !this.state.pending) return;
+    if (this.state.busy) return;
     const operationId = this.state.pending.operationId;
+    this.publish({ busy: true });
     try {
+      await this.queue;
       await this.store.transaction(this.connection.id, async (saved, persist) => {
         if (saved.pending?.operationId !== operationId)
           throw new Error("The pending operation changed. Check the outcome again.");
@@ -797,6 +802,8 @@ export class QuickChatController {
       this.publish({ pending: undefined, notice: undefined });
     } catch (error) {
       this.publish({ error: error instanceof Error ? error.message : "Could not authorize another attempt." });
+    } finally {
+      this.publish({ busy: false });
     }
   }
   async abandonPending() {

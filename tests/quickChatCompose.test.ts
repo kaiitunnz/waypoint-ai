@@ -17,13 +17,28 @@ async function fixture(options: { attachments?: boolean; target?: "password" | "
   const directory = await mkdtemp(join(tmpdir(), "compose-controller-"));
   const values = new Map<string, string>();
   const writes: string[] = [];
-  const storage = { failState: false, failNextState: false };
+  const storage = {
+    failState: false,
+    failNextState: false,
+    failed: false,
+    // Runs once during the first Quick Chat state read after a failed write.
+    afterFailedRead: undefined as (() => void) | undefined,
+  };
   const store = new QuickChatStore(
     {
-      getItem: async (key) => values.get(key),
+      getItem: async (key) => {
+        const value = values.get(key);
+        if (storage.failed && key.startsWith("waypoint.quick-chat.") && storage.afterFailedRead) {
+          storage.failed = false;
+          storage.afterFailedRead();
+          storage.afterFailedRead = undefined;
+        }
+        return value;
+      },
       setItem: async (key, value) => {
         if ((storage.failState || storage.failNextState) && key.startsWith("waypoint.quick-chat.")) {
           storage.failNextState = false;
+          storage.failed = true;
           throw new Error("Storage unavailable");
         }
         writes.push(key);
@@ -481,5 +496,23 @@ test("a failed stage keeps the search-bar text, and a failed discard keeps the d
   assert.equal(await c.discardCompose(), false);
   assert.equal(c.composeText(), "typed in the search bar");
   assert.equal(c.getSnapshot().compose.context.length, 1);
+  await f.close();
+});
+
+test("a save issued while a failed save reads storage is not undone", async () => {
+  const f = await fixture();
+  const c = f.controller();
+  await c.start();
+  let second!: Promise<boolean>;
+  f.storage.failNextState = true;
+  f.storage.afterFailedRead = () => (second = c.stageContext("clipboard", "two"));
+  assert.equal(await c.stageContext("clipboard", "one"), false);
+  assert.equal(await second, true);
+  const saved = (await f.store.read(connection.id)).compose!.quick.context.map((item) => item.text);
+  assert.deepEqual(saved, ["one", "two"]);
+  assert.deepEqual(
+    c.getSnapshot().compose.context.map((item) => item.text),
+    saved,
+  );
   await f.close();
 });
