@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { chatExchanges, chatMarkdown, conversationMarkdown } from "../src/domain/chatPresentation";
+import { chatExchanges, chatMarkdown, conversationMarkdown, previewMessageLimit } from "../src/domain/chatPresentation";
 import { transcript } from "../src/domain/transcript";
 import { parseEvent } from "../src/api/sessions";
 import { eventWire } from "./fixtures/conversation";
@@ -83,4 +83,19 @@ test("a continuous conversation retains every turn in chronological order", () =
   assert.ok(completed.includes("The blue garden is our topic"));
   assert.ok(completed.includes("Flowers come next"));
   assert.ok(!completed.includes("Waiting for a response"));
+});
+
+test("the preview collapses oversized messages and closes a fence it cuts through", () => {
+  const prompt = "p".repeat(5000);
+  const answer = "Intro\n\n```ts\n" + "x".repeat(5000) + "\n```\n\nAfter";
+  const exchanges = chatExchanges(transcript([event(1, "user_input", prompt), event(2, "agent_output", answer)]));
+  const preview = conversationMarkdown(exchanges, false, false, previewMessageLimit);
+  assert.ok(preview.length < 2 * previewMessageLimit + 1000);
+  assert.match(preview, /\n\n_… 1,000 more characters\. Read Conversation at Full Width to see all of it\._/);
+  assert.ok(!/^> .*more characters/m.test(preview), "the note sits outside the quoted prompt");
+  const reply = preview.slice(preview.indexOf("**Waypoint**"));
+  assert.equal((reply.match(/^```/gm) ?? []).length % 2, 0, "the cut code block is closed");
+  assert.match(reply, /more characters/);
+  assert.equal(conversationMarkdown(exchanges), conversationMarkdown(exchanges, false, false, undefined));
+  assert.ok(conversationMarkdown(exchanges).includes("After"), "the full view keeps everything");
 });

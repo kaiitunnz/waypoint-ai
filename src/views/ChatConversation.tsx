@@ -1,7 +1,7 @@
 import { Action, ActionPanel, Detail, Icon, Keyboard, List } from "@raycast/api";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { ServerMetadata } from "../api/contracts";
-import { chatExchanges, chatMarkdown, conversationMarkdown } from "../domain/chatPresentation";
+import { chatExchanges, chatMarkdown, conversationMarkdown, previewMessageLimit } from "../domain/chatPresentation";
 import { transcript } from "../domain/transcript";
 import { isStructured } from "../domain/sessions";
 import { useConversationFeed } from "../hooks/useSessionFeeds";
@@ -172,8 +172,8 @@ export function ChatConversation({
         ? "## This conversation needs Waypoint\n\nIts interface changed. Open it in Waypoint to continue."
         : exchanges.length
           ? readingMode === "conversation"
-            ? conversationMarkdown(exchanges, showActivity, waiting)
-            : chatMarkdown(latest, showActivity, waiting)
+            ? conversationMarkdown(exchanges, showActivity, waiting, previewMessageLimit)
+            : chatMarkdown(latest, showActivity, waiting, previewMessageLimit)
           : emptyMarkdown || "",
       waiting ? "_Working…_" : "",
     ]
