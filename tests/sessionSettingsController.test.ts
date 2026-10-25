@@ -375,3 +375,27 @@ test("a session that starts while the restart is being confirmed is confirmed ag
   assert.match(result.plan.errors[0], /still starting/);
   assert.equal(waypoint.mutations().length, 0);
 });
+
+test("a rejected step whose reload also fails asks for a reload before applying again", async () => {
+  let failing = false;
+  const waypoint = fakeWaypoint({
+    handle: (call) => {
+      if (call.path.endsWith("/model")) {
+        failing = true;
+        return respond({ detail: "model unavailable" }, 400);
+      }
+      if (failing && call.method === "GET") throw new TypeError("connection reset");
+    },
+  });
+  const { draft, plan } = await opened(waypoint, (base) => ({ ...base, title: "Roses", model: "gpt-b" }));
+  const result = await waypoint.controller.apply(draft, plan);
+  assert.ok(result.status === "failed");
+  assert.equal(
+    result.message,
+    "Waypoint rejected the model change: model unavailable Reload Settings before applying again.",
+  );
+  assert.deepEqual(
+    waypoint.controller.plan(result.draft)!.steps.map((step) => step.op),
+    ["model"],
+  );
+});

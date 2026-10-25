@@ -271,11 +271,7 @@ export class SessionSettingsController {
       unsure && step.op === "launch"
         ? "Environment changes may have applied. Check them before adding them again."
         : "",
-      unsure
-        ? next
-          ? "The form shows the session's current settings."
-          : "Reload Settings before applying again."
-        : "",
+      !next ? "Reload Settings before applying again." : unsure ? "The form shows the session's current settings." : "",
     ];
     const result = { applied, message: notes.filter(Boolean).join(" ") };
     this.publish({
