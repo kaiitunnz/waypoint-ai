@@ -24,8 +24,12 @@ Both passes drove Raycast with keystrokes and read the form through macOS access
 | Restart a session on a password-auth SSH target that isn't connected | The form names the target; Connect SSH Target takes the password once; applying again restarts the session                                                              |
 | Change the working directory from a Search Sessions conversation     | The action becomes Start New Chat with These Settings; a New Chat for that server opens in the new folder, and the first send creates the session there                 |
 | Change the working directory from Quick Chat                         | Quick Chat prepares a new conversation in the new folder; the previous session keeps running                                                                            |
+| Type a custom model ID                                               | The model dropdown shows it as a custom choice while typing, and applying sets it on the session                                                                        |
 
-The pass found and fixed the editor losing its state because its parent rebuilt the connection on every render.
+The pass found and fixed:
+
+- The editor losing its state because its parent rebuilt the connection on every render.
+- A typed custom model being reset by the model dropdown on each keystroke.
 
 After Connect SSH Target closes, keyboard focus does not return to a form field, so a shortcut submits only after a field is focused.
 
@@ -41,7 +45,7 @@ Unit and integration tests cover these paths.
 
 ## Automated coverage
 
-`npm run verify` checks formatting, ESLint, strict types, 161 behavior and integration tests, Raycast validation, and build.
+`npm run verify` checks formatting, ESLint, strict types, 164 behavior and integration tests, Raycast validation, and build.
 
 Session settings tests cover:
 
