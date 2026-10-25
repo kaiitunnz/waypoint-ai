@@ -174,10 +174,13 @@ export function parseEvent(value: unknown, sessionId: string): SessionEvent {
     "is_error",
     "tool_input",
     "plan",
-    "attachments",
   ]) {
     if (source[key] !== undefined) metadata[key] = source[key];
   }
+  if (Array.isArray(source.attachments))
+    metadata.attachments = source.attachments.flatMap((item) =>
+      isRecord(item) && typeof item.id === "string" ? [pick(item, ["id", "filename", "kind"])] : [],
+    );
   if (isRecord(source.approval)) metadata.approval = pick(source.approval, ["approval_id"]);
   if (isRecord(source.interaction))
     metadata.interaction = pick(source.interaction, ["kind", "request_id", "title", "body", "plan_item_id"]);

@@ -15,7 +15,9 @@ import {
   reusableUpload,
 } from "../src/domain/compose";
 import { decodeQuickChat } from "../src/storage/quickChat";
-import { metadataWire } from "./fixtures/conversation";
+import { parseEvent } from "../src/api/sessions";
+import { transcript } from "../src/domain/transcript";
+import { eventWire, metadataWire } from "./fixtures/conversation";
 
 test("composed messages keep context verbatim in fences longer than any backtick run", () => {
   assert.equal(composeMessage("  Summarize  ", []), "Summarize");
@@ -158,4 +160,23 @@ test("uploads send multipart files with their image type, and connect reports fa
     server.close();
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("sent attachments keep only their ID, name and kind, and appear under the message", () => {
+  const event = parseEvent(
+    {
+      ...eventWire(1, "user_input", "Look", ""),
+      metadata: {
+        attachments: [{ id: "a1", filename: "shot.png", kind: "image", mime: "image/png", origin: "/private/x" }],
+      },
+    },
+    "demo",
+  );
+  assert.deepEqual(event.metadata.attachments, [{ id: "a1", filename: "shot.png", kind: "image" }]);
+  assert.equal(transcript([event])[0].text, "Look\n\nAttached: shot.png");
+  const only = parseEvent(
+    { ...eventWire(2, "user_input", "", ""), metadata: { attachments: [{ id: "a2", filename: "notes.md" }] } },
+    "demo",
+  );
+  assert.equal(transcript([only])[0].text, "Attached: notes.md");
 });

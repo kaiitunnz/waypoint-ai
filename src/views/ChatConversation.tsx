@@ -52,6 +52,7 @@ function FullConversation({
         response ? (
           <ActionPanel>
             <Action.CopyToClipboard title="Copy Latest Response" content={response} />
+            <Action.Paste title="Paste Latest Response" content={response} />
           </ActionPanel>
         ) : undefined
       }
@@ -69,6 +70,7 @@ export function ChatConversation({
   busy = false,
   revision = 0,
   onPendingChange,
+  hasDraft = false,
   refreshConnections,
   emptyMarkdown,
 }: {
@@ -87,6 +89,7 @@ export function ChatConversation({
   busy?: boolean;
   revision?: number;
   onPendingChange?: () => void;
+  hasDraft?: boolean;
   refreshConnections: () => Promise<void>;
   emptyMarkdown?: string;
 }) {
@@ -201,6 +204,16 @@ export function ChatConversation({
       {!composer?.text.trim() && !status && response && (
         <Action.CopyToClipboard title="Copy Latest Response" content={response} />
       )}
+      {response && (
+        <Action.Paste
+          title="Paste Latest Response"
+          content={response}
+          shortcut={{
+            macOS: { modifiers: ["cmd", "shift"], key: "p" },
+            Windows: { modifiers: ["ctrl", "shift"], key: "p" },
+          }}
+        />
+      )}
       {actions?.(setActive)}
       {composer && attention.length > 0 && attentionActions}
       <ActionPanel.Section title="Conversation">
@@ -313,9 +326,10 @@ export function ChatConversation({
           id="conversation"
           icon={Icon.Message}
           title={session?.title || (sessionId ? "Conversation" : "New conversation")}
-          accessories={
-            turns ? [{ text: `${turns}${state.hasMore ? "+" : ""} ${turns === 1 ? "turn" : "turns"}` }] : undefined
-          }
+          accessories={[
+            ...(hasDraft ? [{ icon: Icon.Pencil, tooltip: "Draft in progress" }] : []),
+            ...(turns ? [{ text: `${turns}${state.hasMore ? "+" : ""} ${turns === 1 ? "turn" : "turns"}` }] : []),
+          ]}
           detail={<List.Item.Detail markdown={renderMarkdown("conversation")} />}
           actions={actionPanel}
         />
