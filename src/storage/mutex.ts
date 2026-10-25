@@ -1,6 +1,6 @@
 import { randomUUID, createHash } from "node:crypto";
-import { mkdir, writeFile, link, unlink, readFile, rename, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, writeFile, link, unlink, readFile, readdir, rename, stat } from "node:fs/promises";
+import { basename, join } from "node:path";
 import { isRecord } from "../domain/connections";
 
 const commandQueues = new Map<string, Promise<unknown>>();
@@ -121,6 +121,14 @@ export class ServerMutex {
     );
     return this.now() - (Number.isFinite(at) ? at : fallback) > this.leaseMs;
   }
+  // A stopped holder never ran its cleanup, so its owner slot is removed with the lock.
+  private async removeOwner(path: string, stale: { pid: number; nonce: string }) {
+    const prefix = `${basename(path)}.${stale.pid}.`;
+    const names = await readdir(this.directory).catch(() => []);
+    for (const name of names)
+      if (name.startsWith(prefix) && (await this.owner(join(this.directory, name)))?.nonce === stale.nonce)
+        await unlink(join(this.directory, name)).catch(() => undefined);
+  }
   private dead(pid: number): boolean {
     try {
       process.kill(pid, 0);
@@ -152,6 +160,7 @@ export class ServerMutex {
         if (current?.nonce === stale.nonce && (await this.stale(path, current))) {
           await unlink(path);
           await unlink(`${path}.${stale.nonce}.heartbeat`).catch(() => undefined);
+          await this.removeOwner(path, stale);
         }
       } finally {
         await unlink(claim).catch(() => undefined);

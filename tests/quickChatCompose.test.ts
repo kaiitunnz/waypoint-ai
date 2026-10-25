@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createHash } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { link, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WaypointClient } from "../src/api/client";
@@ -375,5 +375,17 @@ test("locks without a heartbeat keep the dead-pid rule", async () => {
     new ServerMutex(directory, 80, { now: () => Date.now() + 1e9 }).run("server-a", async () => 1),
     /still active/,
   );
+  await rm(directory, { recursive: true, force: true });
+});
+
+test("reclaiming a stopped holder removes its lock, heartbeat and owner slot", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "mutex-stopped-"));
+  const lock = join(directory, createHash("sha256").update("server-a").digest("hex"));
+  const record = JSON.stringify({ pid: process.pid, nonce: "stopped" });
+  await writeFile(`${lock}.${process.pid}.slot`, record);
+  await link(`${lock}.${process.pid}.slot`, lock);
+  await writeFile(`${lock}.stopped.heartbeat`, "1000");
+  assert.equal(await new ServerMutex(directory, 80, { now: () => 40_000 }).run("server-a", async () => 1), 1);
+  assert.deepEqual(await readdir(directory), []);
   await rm(directory, { recursive: true, force: true });
 });
