@@ -1,6 +1,7 @@
 import { ServerMetadata, Preset } from "../api/contracts";
 import { Session, PendingQuestions, SessionEvent } from "../api/sessions";
 import { latestPlan, pendingApprovals, plansDecisions } from "./interactions";
+import { structuredTransport } from "./sessions";
 
 export interface ChatDefaults {
   mode: "timed" | "continue" | "new";
@@ -48,7 +49,11 @@ export function launchContext(defaults: ChatDefaults, metadata: ServerMetadata) 
   const backend = defaults.agent || preset?.backend || target?.defaultAgent || metadata.defaultAgent;
   const agent = metadata.agents.find((agent) => agent.id === backend);
   const transports = metadata.agents
-    .filter((descriptor) => descriptor.structured && agent?.transports.includes(descriptor.nativeTransport))
+    .filter(
+      (descriptor) =>
+        agent?.transports.includes(descriptor.nativeTransport) &&
+        structuredTransport(metadata, descriptor.nativeTransport),
+    )
     .map((descriptor) => descriptor.nativeTransport);
   const transport =
     defaults.transport ||

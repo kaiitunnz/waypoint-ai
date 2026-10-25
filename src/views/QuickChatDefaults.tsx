@@ -1,6 +1,7 @@
 import { Action, ActionPanel, Form, Icon, Toast, showToast, useNavigation } from "@raycast/api";
 import { useEffect, useRef, useState } from "react";
 import { modelEfforts } from "../domain/modelOptions";
+import { structuredTransport } from "../domain/sessions";
 import { ChatDefaults, launchContext } from "../domain/quickChat";
 import { ServerMetadata } from "../api/contracts";
 import { ModelCatalog } from "../api/models";
@@ -186,9 +187,7 @@ export function QuickChatDefaults({
           .filter(
             (agent) =>
               (!context.target || context.target.agents.includes(agent.id)) &&
-              metadata.agents.some(
-                (descriptor) => descriptor.structured && agent.transports.includes(descriptor.nativeTransport),
-              ),
+              agent.transports.some((transport) => structuredTransport(metadata, transport)),
           )
           .map((agent) => (
             <Form.Dropdown.Item key={agent.id} value={agent.id} title={agent.label} />
