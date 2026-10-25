@@ -3,7 +3,7 @@ import { ModelCatalog } from "../api/models";
 import { Session, UsageSource } from "../api/sessions";
 import { LaunchSettings, TransportOption, UsageProvider } from "../api/settings";
 import { ChatDefaults } from "./quickChat";
-import { modelEfforts } from "./modelOptions";
+import { customModelValue, modelEfforts } from "./modelOptions";
 import { structuredTransport } from "./sessions";
 
 export interface Capabilities extends TransportCapabilities {
@@ -387,11 +387,10 @@ export const defaultValue = "__default__";
 export const toChoice = (value: string | null) => value ?? defaultValue;
 export const fromChoice = (value: string) => (value === defaultValue ? null : value);
 
-export const customModelValue = "__custom__";
+export { customModelValue };
 const listed = (catalog: ModelCatalog | undefined, id: string) => !!catalog?.models.some((model) => model.id === id);
 
-// A model typed in the Custom Model field keeps one dropdown value while it changes; a dropdown whose value briefly
-// matches no item falls back to its first item and would reset the model mid-typing.
+// A typed model keeps `customModelValue` while it changes (see modelOptions).
 export function modelChoice(catalog: ModelCatalog | undefined, baseline: SettingsBaseline, draft: SettingsDraft) {
   if (draft.model === null) return defaultValue;
   return listed(catalog, draft.model) || draft.model === baseline.model ? draft.model : customModelValue;

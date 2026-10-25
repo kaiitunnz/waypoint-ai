@@ -1,6 +1,6 @@
 import { Action, ActionPanel, Form, Icon, Toast, showToast, useNavigation } from "@raycast/api";
 import { useEffect, useRef, useState } from "react";
-import { modelEfforts } from "../domain/modelOptions";
+import { customModelValue, defaultsModelChoice, modelEfforts } from "../domain/modelOptions";
 import { structuredTransport } from "../domain/sessions";
 import { ChatDefaults, launchContext } from "../domain/quickChat";
 import { ServerMetadata } from "../api/contracts";
@@ -35,6 +35,7 @@ export function QuickChatDefaults({
   const profile = values.profile === "__default__" ? "" : values.profile || context.preset?.profile || "";
   const profiles = context.target?.profilesByAgent[context.backend] ?? context.agent?.profiles ?? [];
   const efforts = modelEfforts(models, values.model, context.preset?.model);
+  const modelChoice = defaultsModelChoice(models, values.model);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -196,18 +197,19 @@ export function QuickChatDefaults({
       <Form.Dropdown
         id="model"
         title="Model"
-        value={values.model}
+        value={modelChoice}
         onChange={(value) => {
-          setValues((current) => ({ ...current, model: value, effort: "" }));
+          if (value !== customModelValue) setValues((current) => ({ ...current, model: value, effort: "" }));
         }}
       >
         <Form.Dropdown.Item value="" title="Inherit from preset or server" />
         <Form.Dropdown.Item value="__default__" title="Agent default model" />
-        {values.model &&
-          values.model !== "__default__" &&
-          !models?.models.some((model) => model.id === values.model) && (
-            <Form.Dropdown.Item value={values.model} title={values.model} />
-          )}
+        {(modelChoice === customModelValue || models?.freeText) && (
+          <Form.Dropdown.Item
+            value={customModelValue}
+            title={modelChoice === customModelValue ? `Custom · ${values.model}` : "Custom model (type below)"}
+          />
+        )}
         {models?.models.map((model) => (
           <Form.Dropdown.Item key={model.id} value={model.id} title={model.label} />
         ))}
