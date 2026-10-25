@@ -363,3 +363,15 @@ test("a session that starts before applying blocks the launch change before any 
   assert.match(prepared.message, /still starting/);
   assert.equal(waypoint.mutations().length, 0);
 });
+
+test("a session that starts while the restart is being confirmed is confirmed again", async () => {
+  const waypoint = fakeWaypoint();
+  const { draft, plan } = await opened(waypoint, (base) => ({ ...base, title: "Roses", args: "--slow" }));
+  const ready = await waypoint.controller.prepare(draft, plan);
+  assert.ok(ready.status === "ready");
+  waypoint.world.session = { ...waypoint.world.session, status: "starting" };
+  const result = await waypoint.controller.apply(draft, ready.plan);
+  assert.ok(result.status === "reconfirm");
+  assert.match(result.plan.errors[0], /still starting/);
+  assert.equal(waypoint.mutations().length, 0);
+});

@@ -172,7 +172,9 @@ export function EditSession({
       if (result.status !== "reconfirm") onApplied?.();
       // Restarts can outlast the form; once it's closed, the outcome is reported by toast instead.
       if (result.status === "reconfirm") {
-        const message = "The session changed while you were confirming. Review the updated plan and apply again.";
+        const message =
+          result.plan.errors[0] ??
+          "The session changed while you were confirming. Review the updated plan and apply again.";
         if (mounted.current) return setProblem(message);
         await showToast({ style: Toast.Style.Failure, title: "Changes not applied", message });
         return;

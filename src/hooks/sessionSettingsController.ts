@@ -52,7 +52,7 @@ const lifecycleBusy = "another lifecycle operation is in progress";
 const stillStarting = "cannot change launch settings while the session is STARTING";
 const restoreFailed = "restore failed after applying launch settings";
 
-// `what` names the operation ("the model change"); `retry` says how to try again after connecting a target.
+// `what` names the operation ("the model change"); `retry` is the verb each conflict message ends with.
 export function settingsFailure(error: unknown, what: string, retry: string, targetName?: string): string {
   if (error instanceof ApiError) {
     if (error.kind === "expired-token") return "Your sign-in expired. Sign in again; your changes stay in this form.";
@@ -73,6 +73,9 @@ export function settingsFailure(error: unknown, what: string, retry: string, tar
   return `Waypoint didn't confirm ${what}. It may have applied.`;
 }
 
+// The target to connect when Waypoint refused because its SSH connection is down.
+const sshTarget = (error: unknown, targetId: string) =>
+  error instanceof ApiError && error.serverDetail === "ssh-master-required" ? targetId || undefined : undefined;
 // Launch settings are restart-scoped, so a confirmed restore failure still means they were saved.
 const restoreFailure = (error: unknown) =>
   error instanceof ApiError && error.kind === "rejected" && !!error.serverDetail?.startsWith(restoreFailed);
@@ -216,6 +219,7 @@ export class SessionSettingsController {
       const current = { ...previous, status: session.status };
       const plan = this.plan(draft, current)!;
       if (
+        plan.errors.length > 0 ||
         stepOps(plan) !== stepOps(confirmed) ||
         plan.restartCount > confirmed.restartCount ||
         (plan.interruptsTurn && !confirmed.interruptsTurn)
@@ -276,8 +280,7 @@ export class SessionSettingsController {
     const result = { applied, message: notes.filter(Boolean).join(" ") };
     this.publish({
       result,
-      connectTarget:
-        error instanceof ApiError && error.serverDetail === "ssh-master-required" ? targetId || undefined : undefined,
+      connectTarget: sshTarget(error, targetId),
       reattach: restored,
     });
     // Without fresh settings, the applied steps still leave the draft so they are never sent twice.
@@ -314,8 +317,7 @@ export class SessionSettingsController {
     } catch (error) {
       this.publish({
         result: { applied: [], message: settingsFailure(error, "reattaching", "reattach", this.targetName(targetId)) },
-        connectTarget:
-          error instanceof ApiError && error.serverDetail === "ssh-master-required" ? targetId || undefined : undefined,
+        connectTarget: sshTarget(error, targetId),
       });
     } finally {
       this.publish({ applying: false, restarting: false });
