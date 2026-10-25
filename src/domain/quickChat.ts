@@ -106,6 +106,15 @@ export function createRequest(
   }
   return request;
 }
+// Launch settings without per-attempt tags, for telling whether defaults changed since a session was created.
+export function launchFingerprint(request: Record<string, unknown>): string {
+  const settings = Object.fromEntries(Object.entries(request).filter(([key]) => key !== "tags"));
+  return JSON.stringify(
+    Object.keys(settings)
+      .sort()
+      .map((key) => [key, settings[key]]),
+  );
+}
 export function canReattach(session: Session, metadata: ServerMetadata): boolean {
   return metadata.agents.find((agent) => agent.nativeTransport === session.transport)?.reattach === true;
 }

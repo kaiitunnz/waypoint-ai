@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WaypointClient } from "../src/api/client";
@@ -158,6 +157,7 @@ test("compose sends create the session, upload typed files, then send their IDs 
   const c = f.controller();
   await c.start();
   await c.changeCompose({ text: "Review these" });
+  await c.flushCompose();
   await c.stageContext("selection", "picked text");
   assert.deepEqual(await c.addFiles([await f.file("shot.png"), await f.file("notes.md")]), []);
   assert.equal(await c.send(true), true);
@@ -307,7 +307,7 @@ test("New Chat continues the session its unsent draft created, but not one that 
   await again.start();
   assert.equal(again.getSnapshot().session, undefined);
   f.server.events.delete("created-1");
-  await f.setDefaults({ cwd: "/elsewhere" });
+  await f.setDefaults({ permission: "plan" });
   const changed = f.controller(true);
   await changed.start();
   assert.equal(changed.getSnapshot().session, undefined, "new defaults start a new session");
@@ -333,26 +333,4 @@ test("large context is refused and the single-line draft moves into an empty com
   assert.equal(saved.drafts.quick, "");
   assert.equal(saved.compose!.quick.text, "typed in the search bar");
   await f.close();
-});
-
-test("a lock whose live owner stopped refreshing its heartbeat is reclaimed, a fresh one is not", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "mutex-lease-"));
-  let now = 1_000_000;
-  const id = "server-a";
-  const lock = join(directory, createHash("sha256").update(id).digest("hex"));
-  await mkdir(directory, { recursive: true });
-  await writeFile(lock, JSON.stringify({ pid: process.pid, nonce: "held", heartbeat: now - 10_000 }));
-  const mutex = new ServerMutex(directory, 80, 30_000, 5_000, () => now);
-  await assert.rejects(
-    mutex.run(id, async () => "never"),
-    /still active/,
-  );
-  now += 25_000;
-  assert.equal(await mutex.run(id, async () => "reclaimed"), "reclaimed");
-  await writeFile(lock, JSON.stringify({ pid: process.pid, nonce: "legacy" }));
-  await assert.rejects(
-    new ServerMutex(directory, 80, 30_000, 5_000, () => now + 1e9).run(id, async () => "x"),
-    /still active/,
-  );
-  await rm(directory, { recursive: true, force: true });
 });

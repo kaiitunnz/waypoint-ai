@@ -9,6 +9,7 @@ import {
   createRequest,
   createTag,
   launchContext,
+  launchFingerprint,
   ongoing,
   ownerTag,
   reuseDecision,
@@ -65,6 +66,7 @@ async function fileStats(file: StagedFile): Promise<FileStats> {
 export class QuickChatController {
   private state: QuickChatSnapshot = { loading: true, busy: false, draft: "", revision: 0, compose: emptyCompose() };
   private retry?: Retry;
+  private composeTimer?: ReturnType<typeof setTimeout>;
   private listeners = new Set<() => void>();
   private active = true;
   private generation = 0;
@@ -230,12 +232,8 @@ export class QuickChatController {
         const session = await this.client.session(this.connection.token, bound);
         this.checkOwned(session, saved.installation, metadata);
         // Defaults changed since the session was created: the next send starts a session with the new ones.
-        const context = launchContext(saved.defaults, metadata);
-        if (
-          session.backend !== context.backend ||
-          (session.targetId ?? "") !== saved.defaults.target ||
-          session.cwd !== context.cwd
-        )
+        const launch = saved.compose?.[this.draftKey]?.launch;
+        if (!launch || launch !== launchFingerprint(createRequest(saved.defaults, metadata, saved.installation, "")))
           return undefined;
         const page = await this.client.events(this.connection.token, bound, { cursor: 0 });
         return page.events.some((event) => event.kind === "user_input") ? undefined : session;
@@ -246,6 +244,8 @@ export class QuickChatController {
     return this.boundSession;
   }
   private persistCompose(compose: ComposeDraft) {
+    clearTimeout(this.composeTimer);
+    this.composeTimer = undefined;
     this.publish({ compose });
     const operation = this.queue.then(() =>
       this.store.transaction(this.connection.id, async (saved, persist) => {
@@ -260,9 +260,16 @@ export class QuickChatController {
     );
     return this.queue;
   }
+  // Text edits are saved after a short pause; staging and files save immediately.
   changeCompose(patch: Partial<Pick<ComposeDraft, "text">>) {
     if (this.state.busy) return this.queue;
-    return this.persistCompose({ ...this.state.compose, ...patch });
+    this.publish({ compose: { ...this.state.compose, ...patch } });
+    clearTimeout(this.composeTimer);
+    this.composeTimer = setTimeout(() => void this.flushCompose(), 300);
+    return this.queue;
+  }
+  flushCompose() {
+    return this.composeTimer ? this.persistCompose(this.state.compose) : this.queue;
   }
   // Moves the single-line draft into an empty compose draft so the text isn't sent twice.
   openCompose() {
@@ -411,6 +418,7 @@ export class QuickChatController {
     return ids;
   }
   async send(fromCompose = false) {
+    if (fromCompose) await this.flushCompose();
     const compose = fromCompose ? this.state.compose : undefined;
     const text = compose ? composeMessage(compose.text, compose.context) : this.state.draft.trim();
     if (
@@ -462,8 +470,7 @@ export class QuickChatController {
         }
         if (!session) {
           const defaults = this.state.defaults ?? saved.defaults;
-          const context = launchContext(defaults, metadata);
-          this.checkPolicy(draft?.files ?? [], context.backend, defaults.target || undefined);
+          this.checkPolicy(draft?.files ?? [], launchContext(defaults, metadata).backend, defaults.target || undefined);
           const operationId = randomUUID();
           const request = createRequest(defaults, metadata, saved.installation, operationId);
           saved.pending = { kind: "create", operationId, text, draftKey: this.draftKey, startedAt: this.now() };
@@ -479,7 +486,7 @@ export class QuickChatController {
           }
           saved.pointer = session.id;
           saved.pending = undefined;
-          if (draft) draft.sessionId = session.id;
+          if (draft) Object.assign(draft, { sessionId: session.id, launch: launchFingerprint(request) });
           await persist();
           this.publish({ session });
           this.checkOwned(session, saved.installation, metadata);

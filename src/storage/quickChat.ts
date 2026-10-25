@@ -50,6 +50,7 @@ function isComposeDraft(value: unknown): boolean {
     isRecord(value) &&
     isText(value.text) &&
     (value.sessionId === undefined || isText(value.sessionId)) &&
+    (value.launch === undefined || isText(value.launch)) &&
     Array.isArray(value.context) &&
     value.context.every(
       (item) =>

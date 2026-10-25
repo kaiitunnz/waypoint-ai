@@ -58,6 +58,7 @@ export function ComposeMessage({
     void controller.openCompose();
     return () => {
       mounted.current = false;
+      void controller.flushCompose();
     };
   }, [controller]);
   const draft = state.compose;

@@ -23,6 +23,8 @@ export interface ComposeDraft {
   files: StagedFile[];
   // The session a send created or targeted for this draft before it was acknowledged.
   sessionId?: string;
+  // Fingerprint of the launch settings that created that session.
+  launch?: string;
 }
 export interface AttachmentPolicy {
   images: boolean;
