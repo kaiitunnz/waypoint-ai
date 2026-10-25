@@ -396,6 +396,7 @@ test("missing or foreign pointer requires explicit New Chat and retains draft", 
     });
     const c = f.controller();
     await c.start();
+    assert.match(c.getSnapshot().error!, /no longer on this server\. Choose Start New Chat/);
     await c.send();
     assert.equal(f.sessions.length, 0);
     assert.equal(c.getSnapshot().draft, "Retained");

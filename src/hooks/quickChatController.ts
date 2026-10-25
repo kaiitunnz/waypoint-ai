@@ -175,7 +175,7 @@ export class QuickChatController {
         this.observedPointer = saved.pointer;
         this.observedDefaults = JSON.stringify(saved.defaults);
         if (!this.forceNew && saved.defaults.mode !== "new" && saved.pointer) {
-          const session = await this.client.session(this.connection.token, saved.pointer);
+          const session = await this.savedConversation(saved.pointer);
           this.checkOwned(session, saved.installation, metadata);
           const page = await this.client.events(this.connection.token, session.id);
           const expired =
@@ -217,6 +217,17 @@ export class QuickChatController {
           loading: false,
           error: error instanceof Error ? error.message : "Could not prepare Quick Chat. Retry; the draft is kept.",
         });
+    }
+  }
+  private async savedConversation(id: string) {
+    try {
+      return await this.client.session(this.connection.token, id);
+    } catch (error) {
+      if (error instanceof ApiError && error.kind === "not-found")
+        throw new Error(
+          "Your last Quick Chat conversation is no longer on this server. Choose Start New Chat; your draft is kept.",
+        );
+      throw error;
     }
   }
   private checkOwned(session: Session, installation: string, metadata: ServerMetadata) {
@@ -493,7 +504,7 @@ export class QuickChatController {
           saved.pointer &&
           saved.pointer !== this.observedPointer
         ) {
-          const candidate = await this.client.session(this.connection.token, saved.pointer);
+          const candidate = await this.savedConversation(saved.pointer);
           this.checkOwned(candidate, saved.installation, metadata);
           const page = await this.client.events(this.connection.token, candidate.id);
           if (
