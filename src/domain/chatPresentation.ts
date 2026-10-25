@@ -26,7 +26,8 @@ export function chatMarkdown(exchange: ChatExchange | undefined, showActivity = 
     parts.push(
       `**You**\n\n${plainText(exchange.prompt.text)
         .split("\n")
-        .map((line) => `> ${line}`)
+        // Trailing spaces make hard breaks, so multiline prompts keep their lines inside the quote.
+        .map((line) => `> ${line}  `)
         .join("\n")}`,
     );
     parts.push("---");

@@ -14,7 +14,7 @@ import {
 } from "@raycast/api";
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { ServerMetadata } from "../api/contracts";
-import { ContextKind, attachmentPolicy, contextTitle, formatBytes, isImage } from "../domain/compose";
+import { ContextKind, attachmentPolicy, contextTitle, formatBytes } from "../domain/compose";
 import { QuickChatController } from "../hooks/quickChatController";
 import { ConnectTarget } from "./ConnectTarget";
 
@@ -58,7 +58,6 @@ export function ComposeMessage({
     void controller.openCompose();
     return () => {
       mounted.current = false;
-      void controller.flushCompose();
     };
   }, [controller]);
   const draft = state.compose;
@@ -83,6 +82,7 @@ export function ComposeMessage({
     ? `${session.title || "Conversation"} · ${agent?.label ?? session.backend}`
     : `New conversation · ${agent?.label ?? "Waypoint"}`;
   const elsewhere = draft.files.some((file) => file.upload && file.upload.sessionId !== session?.id);
+  const uploaded = draft.files.length > 0 && draft.files.every((file) => file.upload?.sessionId === session?.id);
   return (
     <Form
       navigationTitle="Compose Message"
@@ -180,10 +180,13 @@ export function ComposeMessage({
           value={draft.files.map((file) => file.path)}
           onChange={async (paths) => {
             if (state.busy) return;
-            const removed = draft.files.filter((file) => !paths.includes(file.path)).map((file) => file.id);
-            if (removed.length) await controller.removeFiles(removed);
+            // Picking again replaces the picker's selection, so a pick only adds; removal is a pure subset.
             const added = paths.filter((path) => !draft.files.some((file) => file.path === path));
-            if (!added.length) return;
+            if (!added.length) {
+              const removed = draft.files.filter((file) => !paths.includes(file.path)).map((file) => file.id);
+              if (removed.length) await controller.removeFiles(removed);
+              return;
+            }
             const problems = await controller.addFiles(added);
             if (problems.length)
               await showToast({
@@ -197,16 +200,17 @@ export function ComposeMessage({
       ) : (
         <Form.Description title="Files" text={policy.reason ?? "Attachments are not available."} />
       )}
-      {draft.files.map((file) => (
+      {draft.files.length > 0 && (
         <Form.Description
-          key={file.id}
           title=""
-          text={`${file.name} · ${isImage(file.path) ? "Image" : "File"} · ${formatBytes(file.size)}${
-            file.upload && file.upload.sessionId === session?.id ? " · Uploaded" : ""
-          }`}
+          text={[
+            `${draft.files.length} ${draft.files.length === 1 ? "file" : "files"} · ${formatBytes(draft.files.reduce((total, file) => total + file.size, 0))}`,
+            elsewhere ? "Will upload again for this conversation" : uploaded ? "Uploaded" : "",
+          ]
+            .filter(Boolean)
+            .join(" · ")}
         />
-      ))}
-      {elsewhere && <Form.Description title="" text="Files will upload again for this conversation." />}
+      )}
     </Form>
   );
 }

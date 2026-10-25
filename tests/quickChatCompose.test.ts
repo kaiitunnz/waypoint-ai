@@ -157,7 +157,6 @@ test("compose sends create the session, upload typed files, then send their IDs 
   const c = f.controller();
   await c.start();
   await c.changeCompose({ text: "Review these" });
-  await c.flushCompose();
   await c.stageContext("selection", "picked text");
   assert.deepEqual(await c.addFiles([await f.file("shot.png"), await f.file("notes.md")]), []);
   assert.equal(await c.send(true), true);

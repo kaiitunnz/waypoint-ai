@@ -66,7 +66,6 @@ async function fileStats(file: StagedFile): Promise<FileStats> {
 export class QuickChatController {
   private state: QuickChatSnapshot = { loading: true, busy: false, draft: "", revision: 0, compose: emptyCompose() };
   private retry?: Retry;
-  private composeTimer?: ReturnType<typeof setTimeout>;
   private listeners = new Set<() => void>();
   private active = true;
   private generation = 0;
@@ -244,8 +243,6 @@ export class QuickChatController {
     return this.boundSession;
   }
   private persistCompose(compose: ComposeDraft) {
-    clearTimeout(this.composeTimer);
-    this.composeTimer = undefined;
     this.publish({ compose });
     const operation = this.queue.then(() =>
       this.store.transaction(this.connection.id, async (saved, persist) => {
@@ -260,16 +257,9 @@ export class QuickChatController {
     );
     return this.queue;
   }
-  // Text edits are saved after a short pause; staging and files save immediately.
   changeCompose(patch: Partial<Pick<ComposeDraft, "text">>) {
     if (this.state.busy) return this.queue;
-    this.publish({ compose: { ...this.state.compose, ...patch } });
-    clearTimeout(this.composeTimer);
-    this.composeTimer = setTimeout(() => void this.flushCompose(), 300);
-    return this.queue;
-  }
-  flushCompose() {
-    return this.composeTimer ? this.persistCompose(this.state.compose) : this.queue;
+    return this.persistCompose({ ...this.state.compose, ...patch });
   }
   // Moves the single-line draft into an empty compose draft so the text isn't sent twice.
   openCompose() {
@@ -418,7 +408,6 @@ export class QuickChatController {
     return ids;
   }
   async send(fromCompose = false) {
-    if (fromCompose) await this.flushCompose();
     const compose = fromCompose ? this.state.compose : undefined;
     const text = compose ? composeMessage(compose.text, compose.context) : this.state.draft.trim();
     if (
