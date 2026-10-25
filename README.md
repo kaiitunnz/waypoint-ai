@@ -89,6 +89,8 @@ The form shows only what the session's agent and interface support: title, model
 
 The top of the form previews what applying does. Inline changes apply at once. Changes that restart the session list how many restarts they cause, that the conversation resumes, and whether a running turn is interrupted; applying them asks for confirmation. Changes apply in the order Waypoint's web app uses. If a later change fails, the form lists the changes that were applied, shows the failure, and reloads the session's current settings; applying again sends only what is still pending.
 
+![Edit Current Session](docs/screenshots/edit-session.jpg)
+
 Environment values are never shown or stored. Each existing variable can be kept, replaced, or removed, and variables Waypoint manages are hidden. Model, effort, and permission changes need a running session: exited sessions offer **Reattach Session**, and starting sessions ask you to wait.
 
 Agent, execution target, and working directory can't change on an existing conversation. Changing them in the form turns the action into **Start New Chat with These Settings**, which saves them as that server's Quick Chat defaults and prepares a new chat; the current conversation keeps its settings. Environment variables for the new chat come from the Quick Chat preset.

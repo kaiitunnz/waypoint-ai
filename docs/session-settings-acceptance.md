@@ -50,3 +50,9 @@ Session settings tests cover:
 - **Environment:** protected keys, and variable validation.
 - **Applying:** the exact request order and bodies; partial success with step-wise replanning; lifecycle, starting, and SSH conflicts; restore failure and reattach; unconfirmed restarts; and settings or capabilities that changed elsewhere.
 - **New chats:** defaults that keep agent-default meanings and only supported arguments, and the next session created with them.
+
+## Screenshots
+
+![Edit Current Session](screenshots/edit-session.jpg)
+
+![Restart confirmation](screenshots/edit-session-restart.jpg)
