@@ -89,3 +89,13 @@ test("waiting attempts heartbeat before linking, so a stopped reclaimer's claim 
   assert.equal(await new ServerMutex(directory, 80, { now: () => 40_000 }).run("server-a", async () => 2), 2);
   await rm(directory, { recursive: true, force: true });
 });
+
+test("released locks leave no heartbeat files, even when a beat is still writing", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "mutex-beats-"));
+  const mutex = new ServerMutex(directory, 2500, { heartbeatMs: 1, queues: new Map() });
+  for (let run = 0; run < 60; run++)
+    await mutex.run("server-a", () => new Promise((resolve) => setTimeout(resolve, 15)));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.deepEqual(await readdir(directory), []);
+  await rm(directory, { recursive: true, force: true });
+});

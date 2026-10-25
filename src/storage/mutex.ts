@@ -63,11 +63,12 @@ export class ServerMutex {
     await writeFile(owner, JSON.stringify({ pid: process.pid, nonce }), { flag: "wx", mode: 0o600 });
     let acquired = false;
     let heartbeat: ReturnType<typeof setInterval> | undefined;
+    let beating: Promise<unknown> = Promise.resolve();
     const started = Date.now();
     try {
       // The heartbeat starts before this record is linked as the lock or a reclaim claim, so a stopped attempt always goes stale.
       await this.beat(path, nonce);
-      heartbeat = setInterval(() => void this.beat(path, nonce), this.heartbeatMs);
+      heartbeat = setInterval(() => (beating = this.beat(path, nonce)), this.heartbeatMs);
       heartbeat.unref?.();
       while (!acquired) {
         try {
@@ -89,6 +90,8 @@ export class ServerMutex {
       return await operation(check);
     } finally {
       clearInterval(heartbeat);
+      // A beat still writing would recreate the heartbeat file after it is removed.
+      await beating;
       if (acquired && (await this.owner(path))?.nonce === nonce) await unlink(path).catch(() => undefined);
       await unlink(`${path}.${nonce}.heartbeat`).catch(() => undefined);
       await unlink(owner).catch(() => undefined);
