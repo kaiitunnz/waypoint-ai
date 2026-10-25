@@ -64,7 +64,6 @@ export class InteractionController {
   private notPending = new Set<string>();
   private generation = 0;
   private active = true;
-  private queue: Promise<unknown> = Promise.resolve();
   constructor(
     private readonly connection: FeedConnection,
     private readonly sessionId: string,
@@ -205,7 +204,6 @@ export class InteractionController {
     const questionChanges = this.questionChanges;
     this.publish({ loading: true, error: undefined, loadError: undefined });
     try {
-      await this.queue;
       const [fresh, saved, stored] = await Promise.all([
         this.snapshot(),
         this.store.read(this.connection.id),
@@ -269,7 +267,6 @@ export class InteractionController {
     let settled = false;
     try {
       if (!cancel) await this.changeDraft(captured, draft);
-      await this.queue;
       await this.store.transaction(this.connection.id, async (saved, persist, fence) => {
         if (saved.pending)
           throw new Error(
@@ -380,7 +377,6 @@ export class InteractionController {
     if (this.state.busy || !this.owns(pending)) return;
     this.publish({ busy: true, error: undefined, notice: undefined });
     try {
-      await this.queue;
       await this.store.transaction(this.connection.id, async (saved, persist) => {
         if (saved.pending?.operationId !== pending.operationId)
           throw new Error("The unconfirmed attempt changed. Check it again.");
