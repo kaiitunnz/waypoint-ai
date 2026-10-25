@@ -26,6 +26,7 @@ import {
   hasCompose,
   isImage,
   maxContextBytes,
+  maxDraftContextBytes,
   reusableUpload,
 } from "../domain/compose";
 import { PendingOperation, QuickChatState, QuickChatStore } from "../storage/quickChat";
@@ -129,9 +130,9 @@ export class QuickChatController {
         this.checkOwned(session, saved.installation, metadata);
         if (this.active && generation === this.generation) this.publish({ session });
         this.prepared = true;
-      } else if (!this.prepared && this.forceNew && (await this.emptyBoundSession(saved, metadata))) {
+      } else if (!this.prepared && this.forceNew) {
         const session = await this.emptyBoundSession(saved, metadata);
-        if (this.active && generation === this.generation) this.publish({ session });
+        if (session && this.active && generation === this.generation) this.publish({ session });
         this.prepared = true;
       } else if (!this.prepared) {
         this.observedPointer = saved.pointer;
@@ -228,6 +229,14 @@ export class QuickChatController {
       try {
         const session = await this.client.session(this.connection.token, bound);
         this.checkOwned(session, saved.installation, metadata);
+        // Defaults changed since the session was created: the next send starts a session with the new ones.
+        const context = launchContext(saved.defaults, metadata);
+        if (
+          session.backend !== context.backend ||
+          (session.targetId ?? "") !== saved.defaults.target ||
+          session.cwd !== context.cwd
+        )
+          return undefined;
         const page = await this.client.events(this.connection.token, bound, { cursor: 0 });
         return page.events.some((event) => event.kind === "user_input") ? undefined : session;
       } catch {
@@ -266,6 +275,11 @@ export class QuickChatController {
     if (this.state.busy) return this.queue;
     if (Buffer.byteLength(text) > maxContextBytes) {
       this.publish({ error: "That text is larger than 256 KB. Attach it as a file instead." });
+      return this.queue;
+    }
+    const staged = this.state.compose.context.reduce((total, item) => total + Buffer.byteLength(item.text), 0);
+    if (staged + Buffer.byteLength(text) > maxDraftContextBytes) {
+      this.publish({ error: "This draft already has 1 MB of context. Remove some before adding more." });
       return this.queue;
     }
     void this.openCompose();

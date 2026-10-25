@@ -32,6 +32,7 @@ export interface AttachmentPolicy {
 
 export const maxUploadBytes = 25 * 1024 * 1024;
 export const maxContextBytes = 256 * 1024;
+export const maxDraftContextBytes = 1024 * 1024;
 // Waypoint sweeps unsent uploads after 24 hours; reuse a reference only well inside that window.
 const reuseWindowMs = 23 * 60 * 60 * 1000;
 const contextTitles: Record<ContextKind, string> = { selection: "Selected text", clipboard: "Clipboard" };
