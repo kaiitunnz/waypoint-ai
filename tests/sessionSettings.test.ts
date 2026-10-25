@@ -203,6 +203,8 @@ test("model and effort choices keep defaults, custom values, and the effort's th
     assert.ok(modelChoices(catalog, baseline, typing).some((choice) => choice.value === customModelValue));
   }
   assert.equal(modelChoice(catalog, baseline, { ...draft, model: "b" }), "b");
+  const free = { ...catalog, freeText: true };
+  assert.ok(modelChoices(free, baseline, { ...draft, model: "b" }).some((choice) => choice.value === customModelValue));
   assert.equal(modelChoice(catalog, baseline, { ...draft, model: null }), "__default__");
   assert.deepEqual(effortChoices(catalog, baseline, { ...draft, model: null }).efforts, ["low", "medium"]);
   assert.deepEqual(effortChoices(catalog, baseline, { ...draft, model: "b" }).efforts, ["low", "high"]);

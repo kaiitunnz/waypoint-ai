@@ -387,7 +387,6 @@ export const defaultValue = "__default__";
 export const toChoice = (value: string | null) => value ?? defaultValue;
 export const fromChoice = (value: string) => (value === defaultValue ? null : value);
 
-// Every option list includes the baseline, so a controlled dropdown never falls back to its first item.
 export const customModelValue = "__custom__";
 const listed = (catalog: ModelCatalog | undefined, id: string) => !!catalog?.models.some((model) => model.id === id);
 
@@ -398,14 +397,17 @@ export function modelChoice(catalog: ModelCatalog | undefined, baseline: Setting
   return listed(catalog, draft.model) || draft.model === baseline.model ? draft.model : customModelValue;
 }
 
+// Every option list includes the baseline, so a controlled dropdown never falls back to its first item.
 export function modelChoices(catalog: ModelCatalog | undefined, baseline: SettingsBaseline, draft: SettingsDraft) {
   const choices: Choice[] = [
     { value: defaultValue, title: catalog?.defaultLabel ? `Default (${catalog.defaultLabel})` : "Default" },
   ];
   if (baseline.model && !listed(catalog, baseline.model))
     choices.push({ value: baseline.model, title: `Custom · ${baseline.model}` });
-  if (modelChoice(catalog, baseline, draft) === customModelValue)
-    choices.push({ value: customModelValue, title: `Custom · ${draft.model}` });
+  // Kept while free text is allowed, so typing through a listed ID doesn't remove the selected item.
+  const custom = modelChoice(catalog, baseline, draft) === customModelValue;
+  if (custom || catalog?.freeText)
+    choices.push({ value: customModelValue, title: custom ? `Custom · ${draft.model}` : "Custom model" });
   for (const model of catalog?.models ?? []) choices.push({ value: model.id, title: model.label });
   return choices;
 }
