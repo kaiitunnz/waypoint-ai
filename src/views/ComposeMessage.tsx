@@ -25,6 +25,7 @@ import {
   maxContextBytes,
   spilledClipboardText,
 } from "../domain/compose";
+import { launchContext } from "../domain/quickChat";
 import { QuickChatController } from "../hooks/quickChatController";
 import { ConnectTarget } from "./ConnectTarget";
 
@@ -92,7 +93,7 @@ export function ComposeMessage({
   }, [controller]);
   const draft = state.compose;
   const session = state.session;
-  const agentId = session?.backend ?? (state.defaults ? state.defaults.agent || metadata.defaultAgent : "");
+  const agentId = session?.backend ?? (state.defaults ? launchContext(state.defaults, metadata).backend : "");
   const agent = metadata.agents.find((entry) => entry.id === agentId);
   const targetId = session ? session.targetId : state.defaults?.target || undefined;
   const policy = attachmentPolicy(
