@@ -65,13 +65,14 @@ export class ServerMutex {
     let heartbeat: ReturnType<typeof setInterval> | undefined;
     const started = Date.now();
     try {
+      // The heartbeat starts before this record is linked as the lock or a reclaim claim, so a stopped attempt always goes stale.
+      await this.beat(path, nonce);
+      heartbeat = setInterval(() => void this.beat(path, nonce), this.heartbeatMs);
+      heartbeat.unref?.();
       while (!acquired) {
         try {
           await link(owner, path);
           acquired = true;
-          await this.beat(path, nonce);
-          heartbeat = setInterval(() => void this.beat(path, nonce), this.heartbeatMs);
-          heartbeat.unref?.();
         } catch (error) {
           if (!isRecord(error) || error.code !== "EEXIST") throw error;
           await this.reclaim(path, owner);

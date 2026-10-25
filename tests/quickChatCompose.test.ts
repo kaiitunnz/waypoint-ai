@@ -505,3 +505,26 @@ test("staging context reports whether it was saved, even after an earlier error"
   );
   await f.close();
 });
+
+test("waiting attempts heartbeat before linking, so a stopped reclaimer's claim goes stale", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "mutex-waiter-"));
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const holding = new ServerMutex(directory, 80, { queues: new Map() }).run("server-a", () => gate);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const waiting = new ServerMutex(directory, 400, { queues: new Map() }).run("server-a", async () => 1);
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.equal((await readdir(directory)).filter((name) => name.endsWith(".heartbeat")).length, 2);
+  release();
+  await holding;
+  assert.equal(await waiting, 1);
+
+  const lock = join(directory, createHash("sha256").update("server-a").digest("hex"));
+  await writeFile(`${lock}.${process.pid}.held`, JSON.stringify({ pid: process.pid, nonce: "held" }));
+  await link(`${lock}.${process.pid}.held`, lock);
+  await writeFile(`${lock}.held.heartbeat`, "1000");
+  await writeFile(`${lock}.reclaim.held`, JSON.stringify({ pid: process.pid, nonce: "claimer" }));
+  await writeFile(`${lock}.claimer.heartbeat`, "1000");
+  assert.equal(await new ServerMutex(directory, 80, { now: () => 40_000 }).run("server-a", async () => 2), 2);
+  await rm(directory, { recursive: true, force: true });
+});
