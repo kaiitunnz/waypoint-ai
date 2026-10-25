@@ -18,10 +18,12 @@ async function fixture(options: { attachments?: boolean; target?: "password" | "
   const directory = await mkdtemp(join(tmpdir(), "compose-controller-"));
   const values = new Map<string, string>();
   const writes: string[] = [];
+  const storage = { failState: false };
   const store = new QuickChatStore(
     {
       getItem: async (key) => values.get(key),
       setItem: async (key, value) => {
+        if (storage.failState && key.startsWith("waypoint.quick-chat.")) throw new Error("Storage unavailable");
         writes.push(key);
         values.set(key, value);
       },
@@ -154,6 +156,7 @@ async function fixture(options: { attachments?: boolean; target?: "password" | "
     });
   return {
     store,
+    storage,
     values,
     writes,
     server,
@@ -461,5 +464,44 @@ test("drafts saved in Quick Chat state before per-key storage are carried over o
   const reopened = f.controller();
   await reopened.start();
   assert.equal(reopened.getSnapshot().draft, "", "a cleared per-key draft wins over the old field");
+  await f.close();
+});
+
+test("a failed draft save shows the saved files again, and the send matches them", async () => {
+  const f = await fixture();
+  const c = f.controller();
+  await c.start();
+  await c.setComposeText("Files");
+  await c.addFiles([await f.file("kept.txt")]);
+  f.storage.failState = true;
+  await c.addFiles([await f.file("unsaved.txt")]);
+  assert.match(c.getSnapshot().error!, /Storage unavailable/);
+  assert.deepEqual(
+    c.getSnapshot().compose.files.map((file) => file.name),
+    ["kept.txt"],
+  );
+  f.storage.failState = false;
+  assert.equal(await c.send(true), true);
+  assert.deepEqual(
+    f.server.uploads.map((upload) => upload.name),
+    ["kept.txt"],
+  );
+  await f.close();
+});
+
+test("staging context reports whether it was saved, even after an earlier error", async () => {
+  const f = await fixture();
+  const c = f.controller();
+  await c.start();
+  assert.equal(await c.stageContext("clipboard", "x".repeat(256 * 1024 + 1)), false);
+  assert.ok(c.getSnapshot().error);
+  assert.equal(await c.stageContext("clipboard", "small"), true);
+  assert.equal(c.getSnapshot().error, undefined);
+  f.storage.failState = true;
+  assert.equal(await c.stageContext("selection", "unsaved"), false);
+  assert.deepEqual(
+    c.getSnapshot().compose.context.map((item) => item.text),
+    ["small"],
+  );
   await f.close();
 });

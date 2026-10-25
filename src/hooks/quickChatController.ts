@@ -299,20 +299,29 @@ export class QuickChatController {
     })();
     return this.boundSession;
   }
-  private persistCompose(compose: ComposeParts) {
+  // Resolves whether the parts were saved; on failure the form shows the saved parts again, since sends use those.
+  private persistCompose(compose: ComposeParts): Promise<boolean> {
     this.publish({ compose });
-    const operation = this.queue.then(() =>
-      this.store.transaction(this.connection.id, async (saved, persist) => {
-        saved.compose = { ...saved.compose, [this.draftKey]: compose };
-        await persist();
-      }),
-    );
-    this.queue = operation.catch((error) =>
-      this.publish({
-        error: error instanceof Error ? error.message : "Could not save draft. Keep this view open and retry.",
-      }),
-    );
-    return this.queue;
+    const result = this.queue
+      .then(() =>
+        this.store.transaction(this.connection.id, async (saved, persist) => {
+          saved.compose = { ...saved.compose, [this.draftKey]: compose };
+          await persist();
+        }),
+      )
+      .then(
+        () => true,
+        async (error) => {
+          const saved = await this.store.read(this.connection.id).catch(() => undefined);
+          this.publish({
+            ...(saved ? { compose: storedParts(saved.compose?.[this.draftKey]) ?? emptyParts() } : {}),
+            error: error instanceof Error ? error.message : "Could not save draft. Keep this view open and retry.",
+          });
+          return false;
+        },
+      );
+    this.queue = result;
+    return result;
   }
   // Moves the single-line draft into an empty compose draft so the text isn't sent twice.
   openCompose() {
@@ -321,17 +330,19 @@ export class QuickChatController {
     void this.changeDraft("");
     return this.replaceComposeText(text);
   }
-  stageContext(kind: ContextKind, text: string) {
-    if (this.state.busy) return this.queue;
+  // Resolves whether the text was staged and saved.
+  async stageContext(kind: ContextKind, text: string): Promise<boolean> {
+    if (this.state.busy) return false;
     if (Buffer.byteLength(text) > maxContextBytes) {
       this.publish({ error: "That text is larger than 256 KB. Attach it as a file instead." });
-      return this.queue;
+      return false;
     }
     const staged = this.state.compose.context.reduce((total, item) => total + Buffer.byteLength(item.text), 0);
     if (staged + Buffer.byteLength(text) > maxDraftContextBytes) {
       this.publish({ error: "This draft already has 1 MB of context. Remove some before adding more." });
-      return this.queue;
+      return false;
     }
+    this.publish({ error: undefined });
     void this.openCompose();
     return this.persistCompose({
       ...this.state.compose,
@@ -435,7 +446,7 @@ export class QuickChatController {
     const stale: { sessionId: string; attachmentId: string }[] = [];
     const protectedIds = new Set(saved.pending?.attachments ?? []);
     for (const [index, file] of draft.files.entries()) {
-      const current = stats.get(file.id)!;
+      const current = stats.get(file.id) ?? (await fileStats(file));
       const unchanged = current.size === file.size && current.modifiedMs === file.modifiedMs;
       const reusable = unchanged ? reusableUpload(file, session.id, this.now()) : undefined;
       if (reusable) {
@@ -466,7 +477,7 @@ export class QuickChatController {
   }
   async send(fromCompose = false) {
     const compose = fromCompose ? { ...this.state.compose, text: this.composeValue } : undefined;
-    const text = compose ? composeMessage(compose.text, compose.context) : this.state.draft.trim();
+    let text = compose ? composeMessage(compose.text, compose.context) : this.state.draft.trim();
     if (
       !this.prepared ||
       this.state.busy ||
@@ -495,6 +506,11 @@ export class QuickChatController {
             [this.draftKey]: storedParts(saved.compose?.[this.draftKey]) ?? composeParts(compose),
           };
         const draft = compose ? saved.compose![this.draftKey] : undefined;
+        // The saved parts are what gets uploaded, so the message and the cleanup after it use them too.
+        if (draft && compose) text = composeMessage(compose.text, draft.context);
+        const sentContext = new Set(draft?.context.map((item) => item.id));
+        const sentFiles = new Set(draft?.files.map((file) => file.id));
+        if (draft && !text && !draft.files.length) throw new Error("This draft has nothing to send.");
         let session = this.state.session;
         if (
           !session &&
@@ -616,8 +632,6 @@ export class QuickChatController {
             cleared = true;
             await this.store.drafts.write(this.composeKey, "");
           }
-          const sentContext = new Set(compose.context.map((item) => item.id));
-          const sentFiles = new Set(compose.files.map((file) => file.id));
           const rest: ComposeParts = {
             context: draft.context.filter((item) => !sentContext.has(item.id)),
             files: draft.files.filter((file) => !sentFiles.has(file.id)),

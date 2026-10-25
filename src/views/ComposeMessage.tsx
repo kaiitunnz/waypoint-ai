@@ -67,8 +67,7 @@ export async function includeContext(controller: QuickChatController, kind: Cont
     });
     return false;
   }
-  await controller.stageContext(kind, text);
-  return !controller.getSnapshot().error;
+  return controller.stageContext(kind, text);
 }
 
 export function ComposeMessage({
