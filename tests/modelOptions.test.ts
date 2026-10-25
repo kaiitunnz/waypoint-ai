@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parseModels } from "../src/api/models";
-import { customModelValue, defaultsModelChoice, modelEfforts } from "../src/domain/modelOptions";
+import { customModelValue, defaultsModelChoice, defaultsModelChoices, modelEfforts } from "../src/domain/modelOptions";
 
 test("effort choices resolve inherited and agent-default models like the frontend", () => {
   const catalog = parseModels({
@@ -40,4 +40,29 @@ test("a model typed into Quick Chat Defaults keeps one dropdown value while it c
     assert.equal(defaultsModelChoice(loaded, "saved-model", "saved-model"), "saved-model");
   }
   assert.equal(defaultsModelChoice(undefined, "typed", "saved-model"), customModelValue);
+});
+
+test("Quick Chat Defaults' model list always holds the current choice and drops a saved model after a reset", () => {
+  const catalog = { models: [{ id: "gpt-5", label: "GPT-5" }], freeText: true, efforts: [] };
+  const values = (loaded: typeof catalog | undefined, model: string, saved: string) =>
+    defaultsModelChoices(loaded, model, saved).map((choice) => choice.value);
+  const cases: [typeof catalog | undefined, string, string][] = [
+    [undefined, "gpt-5", "gpt-5"],
+    [catalog, "gpt-5", "gpt-5"],
+    [undefined, "saved-model", "saved-model"],
+    [catalog, "saved-model", "saved-model"],
+    [catalog, "gpt-5", ""],
+    [catalog, "gpt-5-mini", ""],
+    [catalog, "", "saved-model"],
+  ];
+  for (const [loaded, model, saved] of cases) {
+    const list = values(loaded, model, saved);
+    assert.ok(list.includes(defaultsModelChoice(loaded, model, saved)), `${model} is missing`);
+    assert.equal(new Set(list).size, list.length, `${model} has duplicate values`);
+  }
+  assert.ok(!values(catalog, "", "saved-model").includes("saved-model"));
+  assert.deepEqual(
+    defaultsModelChoices(catalog, "saved-model", "saved-model").find((choice) => choice.value === "saved-model")?.title,
+    "Custom · saved-model",
+  );
 });

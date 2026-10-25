@@ -19,3 +19,27 @@ export function defaultsModelChoice(catalog: ModelCatalog | undefined, model: st
     ? model
     : customModelValue;
 }
+
+// Every list includes the current value, so a controlled dropdown never falls back to its first item. The saved model
+// gets its own item only while selected, so a reset to another agent or target doesn't keep offering it.
+export function defaultsModelChoices(
+  catalog: ModelCatalog | undefined,
+  model: string,
+  saved: string,
+): { value: string; title: string }[] {
+  const choice = defaultsModelChoice(catalog, model, saved);
+  const listed = (id: string) => !!catalog?.models.some((entry) => entry.id === id);
+  const choices = [
+    { value: "", title: "Inherit from preset or server" },
+    { value: "__default__", title: "Agent default model" },
+  ];
+  if (model && model === saved && model !== "__default__" && !listed(model))
+    choices.push({ value: model, title: catalog ? `Custom · ${model}` : model });
+  if (choice === customModelValue || catalog?.freeText)
+    choices.push({
+      value: customModelValue,
+      title: choice === customModelValue ? `Custom · ${model}` : "Custom model (type below)",
+    });
+  for (const entry of catalog?.models ?? []) choices.push({ value: entry.id, title: entry.label });
+  return choices;
+}

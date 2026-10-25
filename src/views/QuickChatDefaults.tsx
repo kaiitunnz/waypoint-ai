@@ -1,6 +1,6 @@
 import { Action, ActionPanel, Form, Icon, Toast, showToast, useNavigation } from "@raycast/api";
 import { useEffect, useRef, useState } from "react";
-import { customModelValue, defaultsModelChoice, modelEfforts } from "../domain/modelOptions";
+import { customModelValue, defaultsModelChoice, defaultsModelChoices, modelEfforts } from "../domain/modelOptions";
 import { structuredTransport } from "../domain/sessions";
 import { ChatDefaults, launchContext } from "../domain/quickChat";
 import { ServerMetadata } from "../api/contracts";
@@ -36,10 +36,6 @@ export function QuickChatDefaults({
   const profiles = context.target?.profilesByAgent[context.backend] ?? context.agent?.profiles ?? [];
   const efforts = modelEfforts(models, values.model, context.preset?.model);
   const modelChoice = defaultsModelChoice(models, values.model, defaults.model);
-  const savedModel =
-    defaults.model && defaults.model !== "__default__" && !models?.models.some((model) => model.id === defaults.model)
-      ? defaults.model
-      : undefined;
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -207,17 +203,8 @@ export function QuickChatDefaults({
             setValues((current) => ({ ...current, model: value, effort: "" }));
         }}
       >
-        <Form.Dropdown.Item value="" title="Inherit from preset or server" />
-        <Form.Dropdown.Item value="__default__" title="Agent default model" />
-        {savedModel && <Form.Dropdown.Item value={savedModel} title={models ? `Custom · ${savedModel}` : savedModel} />}
-        {(modelChoice === customModelValue || models?.freeText) && (
-          <Form.Dropdown.Item
-            value={customModelValue}
-            title={modelChoice === customModelValue ? `Custom · ${values.model}` : "Custom model (type below)"}
-          />
-        )}
-        {models?.models.map((model) => (
-          <Form.Dropdown.Item key={model.id} value={model.id} title={model.label} />
+        {defaultsModelChoices(models, values.model, defaults.model).map((choice) => (
+          <Form.Dropdown.Item key={choice.value} value={choice.value} title={choice.title} />
         ))}
       </Form.Dropdown>
       {models?.freeText && (
