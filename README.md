@@ -37,11 +37,21 @@ The conversation displays loaded user and assistant turns together in chronologi
 
 **Conversation History** opens the detailed event inspector with paired tool activity, filtering, older history, and follow-latest controls.
 
-Pending questions appear above the transcript. Use Open in Waypoint for approvals and answers. Older approval details may be outside the loaded history. Native approvals, answers, and sending to sessions opened from search are planned for subsequent changes.
+Sending to sessions opened from search is planned for a subsequent change.
 
 Reconnects recover missed events and preserve loaded history. Expired sign-in offers reauthentication. The conversation content remains in memory and is not saved to extension storage.
 
 ![Conversation reader](docs/screenshots/session-conversation.png)
+
+## Approvals and questions
+
+Pending approvals, plan approvals, and agent questions appear under **Needs Attention** above the conversation in Quick Chat, the conversation reader, and Conversation History. Review a request to see its context and respond: approvals offer the decisions the agent supports and an optional note where supported; plans accept a note; questions take single or multiple choices, notes, and free-text answers. Answers in progress are saved, so closing the form keeps them. **Cancel Question** tells the agent to continue without an answer; closing the form does not.
+
+A form stays bound to the request it opened. If the request is answered elsewhere or replaced, the form shows that and sends nothing. Requests the agent's interface cannot handle natively, such as unsupported question formats or requests without a stable ID, offer **Open in Waypoint**.
+
+If Waypoint does not confirm a response, nothing is retried. **Check Previous Outcome** shows whether the request is still pending. **Clear Checkpoint** continues once it is resolved; **Allow Another Attempt** warns that responding again can repeat its effect. Until then, other responses and Quick Chat sends on that server wait.
+
+![Approval decisions](docs/screenshots/interaction-approval.jpg)
 
 ## Quick Chat
 

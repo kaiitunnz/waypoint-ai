@@ -8,6 +8,8 @@ import { useConversationFeed } from "../hooks/useSessionFeeds";
 import { ConversationFeed, FeedConnection } from "../hooks/sessionFeeds";
 import { LoadingView, markdownText, sessionSummary, statusIcon } from "../components/SessionPresentation";
 import { ChatConversation } from "./ChatConversation";
+import { InteractionController } from "../hooks/interactionController";
+import { InteractionSection, interactionItemIds } from "./SessionInteraction";
 import { ManageServers } from "./ManageServers";
 import { SignInForm } from "./ServerForm";
 
@@ -106,14 +108,18 @@ export function ConversationContent({
   sessionId,
   metadata,
   refreshConnections,
+  interactions,
 }: {
   connection: FeedConnection;
   sessionId: string;
   metadata: ServerMetadata;
   refreshConnections: () => Promise<void>;
+  interactions: InteractionController;
 }) {
   const [active, setActive] = useState(true);
+  const interactionState = useSyncExternalStore(interactions.subscribe, interactions.getSnapshot);
   const { state, feed } = useConversationFeed(connection, sessionId, active);
+  useEffect(() => feed.subscribe(() => interactions.ingest(feed.getSnapshot(), feed)), [feed, interactions]);
   const [selection, setSelection] = useState<string>();
   const [following, setFollowing] = useState(true);
   const [query, setQuery] = useState("");
@@ -126,8 +132,7 @@ export function ConversationContent({
   const auth = state.error?.kind === "expired-token" || state.stream === "auth-error";
   const canRead = !state.session || isStructured(state.session, metadata);
   const auxiliaryIds = [
-    ...(state.session?.status === "waiting_input" ? ["pending-input"] : []),
-    ...(state.questions?.questions.map((question) => `question:${question.id}`) ?? []),
+    ...interactionItemIds(interactionState, sessionId),
     ...(auth || state.error || state.stream !== "live" ? ["connection-status"] : []),
   ];
   const selectedId =
@@ -183,7 +188,10 @@ export function ConversationContent({
         title="Retry Connection"
         icon={Icon.ArrowClockwise}
         shortcut={Keyboard.Shortcut.Common.Refresh}
-        onAction={() => feed.retry()}
+        onAction={() => {
+          feed.retry();
+          void interactions.refresh();
+        }}
       />
 
       {url ? (
@@ -235,48 +243,7 @@ export function ConversationContent({
         }
       }}
     >
-      {state.session?.status === "waiting_input" && (
-        <List.Section title="Input Needed">
-          <List.Item
-            id="pending-input"
-            title="Awaiting approval or answer"
-            icon={{ source: Icon.ExclamationMark, tintColor: "#F4B860" }}
-            detail={
-              <List.Item.Detail markdown="## Input needed\n\nThis session is awaiting input. Open it in Waypoint to review approvals or questions. Native answers arrive in a later update." />
-            }
-            actions={
-              <ActionPanel>
-                {url && <Action.OpenInBrowser title="Open in Waypoint" url={url} />}
-                {shared}
-              </ActionPanel>
-            }
-          />
-        </List.Section>
-      )}
-      {!!state.questions?.questions.length && (
-        <List.Section title="Pending Questions">
-          {state.questions.questions.map((question) => (
-            <List.Item
-              key={question.id}
-              id={`question:${question.id}`}
-              title={question.event.text || "Question from agent"}
-              subtitle={question.availability}
-              icon={Icon.QuestionMark}
-              detail={
-                <List.Item.Detail
-                  markdown={`## Question · ${markdownText(question.availability)}\n\n${question.event.text}\n\nOpen in Waypoint to answer.`}
-                />
-              }
-              actions={
-                <ActionPanel>
-                  {url && <Action.OpenInBrowser title="Open in Waypoint" url={url} />}
-                  {shared}
-                </ActionPanel>
-              }
-            />
-          ))}
-        </List.Section>
-      )}
+      <InteractionSection controller={interactions} sessionId={sessionId} url={url} trailing={shared} />
       {problem && (
         <List.Section title="Connection">
           <List.Item

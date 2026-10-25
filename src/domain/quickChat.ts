@@ -1,6 +1,6 @@
 import { ServerMetadata, Preset } from "../api/contracts";
 import { Session, PendingQuestions, SessionEvent } from "../api/sessions";
-import { isRecord } from "./connections";
+import { latestPlan, pendingApprovals, plansDecisions } from "./interactions";
 
 export interface ChatDefaults {
   mode: "timed" | "continue" | "new";
@@ -116,38 +116,7 @@ export function ongoing(
   metadata?: ServerMetadata,
 ): boolean {
   if (["starting", "running"].includes(session.status) || questions?.questions.length) return true;
-  const approvals = new Set<string>();
-  let latestPlan: string | undefined;
-  const decidedPlans = new Set<string>();
-  for (const event of events) {
-    const approvalId = typeof event.metadata.approval_id === "string" ? event.metadata.approval_id : "";
-    if (event.kind === "approval_request") approvals.add(approvalId || `sequence:${event.sequence}`);
-    if (
-      event.kind === "system_note" &&
-      (event.metadata.method === "approval.invalidated" ||
-        /(Approval response sent|Approval timed out)/i.test(event.text))
-    ) {
-      if (approvalId) approvals.delete(approvalId);
-      else {
-        const first = approvals.values().next().value;
-        if (first) approvals.delete(first);
-      }
-    }
-    if (
-      event.kind !== "approval_request" &&
-      isRecord(event.metadata.plan) &&
-      typeof event.metadata.plan.id === "string"
-    ) {
-      latestPlan = event.metadata.plan.id;
-      decidedPlans.delete(latestPlan);
-    }
-    if (typeof event.metadata.plan_item_id === "string" && typeof event.metadata.plan_decision === "string")
-      decidedPlans.add(event.metadata.plan_item_id);
-  }
-  const eligiblePlan =
-    session.permissionMode === "plan" &&
-    metadata?.agents.some((agent) => agent.id === session.backend && agent.planApproval);
-  return approvals.size > 0 || (!!eligiblePlan && !!latestPlan && !decidedPlans.has(latestPlan));
+  return pendingApprovals(events).length > 0 || (plansDecisions(session, metadata) && !!latestPlan(events));
 }
 export function reuseDecision(
   defaults: ChatDefaults,

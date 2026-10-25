@@ -7,6 +7,17 @@ import { isStructured } from "../domain/sessions";
 import { useConversationFeed } from "../hooks/useSessionFeeds";
 import { ConversationFeed, FeedConnection } from "../hooks/sessionFeeds";
 import { markdownText, sessionSummary } from "../components/SessionPresentation";
+import { useSessionInteractions } from "../hooks/useSessionInteractions";
+import {
+  InteractionSection,
+  ReviewInteraction,
+  interactionItemIds,
+  UnconfirmedActions,
+  interactionStatus,
+  reviewTitle,
+  unconfirmedFor,
+} from "./SessionInteraction";
+import { sessionUrl } from "../domain/sessions";
 import { ConversationContent } from "./Conversation";
 
 type ReadingMode = "conversation" | "latest";
@@ -57,6 +68,7 @@ export function ChatConversation({
   status,
   busy = false,
   revision = 0,
+  onPendingChange,
   refreshConnections,
   emptyMarkdown,
 }: {
@@ -74,12 +86,25 @@ export function ChatConversation({
   status?: string;
   busy?: boolean;
   revision?: number;
+  onPendingChange?: () => void;
   refreshConnections: () => Promise<void>;
   emptyMarkdown?: string;
 }) {
   const [active, setActive] = useState(true);
   const { state, feed } = useConversationFeed(connection, sessionId ?? "", active && !!sessionId);
+  const { state: interactionState, controller: interactionController } = useSessionInteractions(
+    connection,
+    sessionId,
+    metadata,
+    feed,
+  );
+  const pendingOperation = interactionState.pending?.operationId;
+  useEffect(() => {
+    onPendingChange?.();
+  }, [pendingOperation]);
+  const interactionUrl = sessionId ? sessionUrl(connection.frontendUrl, sessionId) : undefined;
   const [mode, setMode] = useState<ReadingMode>("conversation");
+  const [interactionSelection, setInteractionSelection] = useState<string>();
   const [showActivity, setShowActivity] = useState(false);
   const exchanges = useMemo(() => chatExchanges(transcript(state.events)), [state.events]);
   const session = state.session;
@@ -93,7 +118,22 @@ export function ChatConversation({
       : state.stream === "reconnecting"
         ? "Reconnecting… Your conversation is kept."
         : "");
-  const questions = state.questions?.questions.length;
+  const interactions = interactionState.interactions;
+  const unconfirmed = unconfirmedFor(interactionState, sessionId);
+  const attention = [
+    ...(interactionState.loadError
+      ? [`- **Requests unavailable.** ${markdownText(interactionState.loadError)} Refresh to retry.`]
+      : []),
+    ...(unconfirmed
+      ? [
+          `- **Unconfirmed response.** ${markdownText(interactionState.notice ?? "Check its outcome before responding again.")}`,
+        ]
+      : []),
+    ...interactions.map(
+      (interaction) =>
+        `- **${markdownText(interaction.title)}**${interactionStatus(interaction) ? ` · ${interactionStatus(interaction)}` : ""}`,
+    ),
+  ];
   const context = [
     connection.name,
     session?.model || metadata.agents.find((agent) => agent.id === session?.backend)?.label,
@@ -109,8 +149,13 @@ export function ChatConversation({
 
   useEffect(() => {
     setMode("conversation");
+    setInteractionSelection(undefined);
   }, [sessionId, revision]);
 
+  useEffect(() => {
+    if (interactionSelection && !interactionItemIds(interactionState, sessionId).includes(interactionSelection))
+      setInteractionSelection(undefined);
+  }, [interactionState, interactionSelection, sessionId]);
   const renderMarkdown = (readingMode: ReadingMode) =>
     [
       problem
@@ -119,7 +164,7 @@ export function ChatConversation({
             .map((line) => `> ${markdownText(line)}`)
             .join("\n")}\n\n---`
         : "",
-      questions ? `> **${questions} pending ${questions === 1 ? "question" : "questions"}**\n\n---` : "",
+      attention.length ? `> **Needs attention**\n>\n${attention.map((line) => `> ${line}`).join("\n")}\n\n---` : "",
       unsupported
         ? "## This conversation needs Waypoint\n\nIts interface changed. Open it in Waypoint to continue."
         : exchanges.length
@@ -132,15 +177,32 @@ export function ChatConversation({
       .filter(Boolean)
       .join("\n\n");
 
+  const attentionActions = (
+    <ActionPanel.Section title="Needs Attention">
+      {interactions.map((interaction) => (
+        <ReviewInteraction
+          key={interaction.key}
+          interaction={interaction}
+          controller={interactionController}
+          url={interactionUrl}
+          title={interactions.length > 1 ? `${reviewTitle(interaction)}: ${interaction.title}` : undefined}
+        />
+      ))}
+      {unconfirmed && <UnconfirmedActions controller={interactionController} url={interactionUrl} />}
+    </ActionPanel.Section>
+  );
+  const sendAction = composer?.text.trim() && composer.canSend && (
+    <Action title="Send Message" icon={Icon.ArrowUp} onAction={composer.onSend} />
+  );
   const actionPanel = (
     <ActionPanel>
-      {composer?.text.trim() && composer.canSend && (
-        <Action title="Send Message" icon={Icon.ArrowUp} onAction={composer.onSend} />
-      )}
+      {!composer && attention.length > 0 && attentionActions}
+      {sendAction}
       {!composer?.text.trim() && !status && response && (
         <Action.CopyToClipboard title="Copy Latest Response" content={response} />
       )}
       {actions?.(setActive)}
+      {composer && attention.length > 0 && attentionActions}
       <ActionPanel.Section title="Conversation">
         {turns > 1 && (
           <Action
@@ -180,6 +242,7 @@ export function ChatConversation({
                 sessionId={sessionId}
                 metadata={metadata}
                 refreshConnections={refreshConnections}
+                interactions={interactionController}
               />
             }
             onPush={() => setActive(false)}
@@ -191,7 +254,10 @@ export function ChatConversation({
           title="Refresh Conversation"
           icon={Icon.ArrowClockwise}
           shortcut={Keyboard.Shortcut.Common.Refresh}
-          onAction={() => feed.retry()}
+          onAction={() => {
+            feed.retry();
+            void interactionController.refresh();
+          }}
         />
         {session && (
           <Action.Push
@@ -225,11 +291,20 @@ export function ChatConversation({
       searchBarAccessory={composer.accessory}
       isShowingDetail
       isLoading={busy || (!!sessionId && state.loading)}
-      selectedItemId={mode}
+      selectedItemId={interactionSelection ?? mode}
       onSelectionChange={(id) => {
-        if (id === "conversation" || id === "latest") setMode(id);
+        if (id === "conversation" || id === "latest") {
+          setInteractionSelection(undefined);
+          setMode(id);
+        } else if (id?.startsWith("interaction:")) setInteractionSelection(id);
       }}
     >
+      <InteractionSection
+        controller={interactionController}
+        sessionId={sessionId}
+        url={interactionUrl}
+        leading={sendAction}
+      />
       <List.Section
         title="Conversation"
         subtitle={session?.status === "running" ? "Working…" : session?.status.replaceAll("_", " ")}

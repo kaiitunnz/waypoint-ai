@@ -176,8 +176,8 @@ test("reuse interaction evidence follows Waypoint approval queue and latest plan
     })),
   });
   const planning = { ...session, permissionMode: "plan" };
-  const oldPlan = event(1, "assistant_message", "Old plan", { plan: { id: "old" } });
-  const newPlan = event(2, "assistant_message", "New plan", { plan: { id: "new" } });
+  const oldPlan = event(1, "system_note", "Old plan", { item_type: "plan", plan: { id: "old", text: "Old plan" } });
+  const newPlan = event(2, "system_note", "New plan", { item_type: "plan", plan: { id: "new", text: "New plan" } });
   const decided = event(3, "system_note", "Accepted", { plan_item_id: "new", plan_decision: "accept" });
   assert.equal(ongoing(planning, undefined, [oldPlan, newPlan, decided], catalog), false);
   assert.equal(ongoing(planning, undefined, [newPlan, event(3, "user_input", "More detail")], catalog), true);
@@ -185,7 +185,11 @@ test("reuse interaction evidence follows Waypoint approval queue and latest plan
     ongoing(
       planning,
       undefined,
-      [newPlan, decided, event(4, "agent_output", "Revised", { plan: { id: "new" } })],
+      [
+        newPlan,
+        decided,
+        event(4, "system_note", "Revised", { item_type: "plan", plan: { id: "new", text: "Revised" } }),
+      ],
       catalog,
     ),
     true,

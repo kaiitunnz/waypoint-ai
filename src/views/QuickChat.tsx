@@ -93,7 +93,10 @@ function QuickChatView({
     />
   );
   if (state.loading && !state.session) return <LoadingView title="Preparing your chat…" />;
-  const status = state.error || (state.pending ? state.notice || "Previous attempt unconfirmed." : undefined);
+  // The conversation's own Needs Attention section covers a checkpoint for one of its requests.
+  const ownInteraction = state.pending?.kind === "interaction" && state.pending.sessionId === state.session?.id;
+  const status =
+    state.error || (state.pending && !ownInteraction ? state.notice || "Previous attempt unconfirmed." : undefined);
   if (metadata)
     return (
       <ChatConversation
@@ -119,6 +122,7 @@ function QuickChatView({
         status={status || undefined}
         busy={state.busy}
         revision={state.revision}
+        onPendingChange={() => void controller.syncPending()}
       />
     );
   const context = metadata && state.defaults ? launchContext(state.defaults, metadata) : undefined;
@@ -182,9 +186,35 @@ function QuickChatActions({
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const metadata = state.metadata;
   const url = state.session ? sessionUrl(connection.frontendUrl, state.session.id) : connection.frontendUrl;
+  const interaction = state.pending?.kind === "interaction";
   return (
     <>
-      {state.pending && (
+      {interaction && state.pending?.sessionId !== state.session?.id && (
+        <>
+          <Action
+            title="Check Previous Outcome"
+            icon={Icon.MagnifyingGlass}
+            shortcut={Keyboard.Shortcut.Common.OpenWith}
+            onAction={() => controller.reconcile()}
+          />
+          <Action
+            title="Clear Unconfirmed Response"
+            icon={Icon.ArrowClockwise}
+            onAction={async () => {
+              if (
+                await confirmAlert({
+                  title: "Clear the unconfirmed response?",
+                  message:
+                    "It may already have reached the agent. Responding again can repeat its effect. Nothing is resent automatically.",
+                  primaryAction: { title: "Clear", style: Alert.ActionStyle.Destructive },
+                })
+              )
+                await controller.abandonPending();
+            }}
+          />
+        </>
+      )}
+      {state.pending && !interaction && (
         <>
           <Action
             title="Check Previous Outcome"
