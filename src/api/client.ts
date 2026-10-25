@@ -5,6 +5,7 @@ import { mimeType } from "../domain/compose";
 import { ModelCatalog, parseModels } from "./models";
 import { isRecord } from "../domain/connections";
 import { parseMetadata, ServerMetadata } from "./contracts";
+import { LaunchSettings, UsageProvider, parseLaunchSettings, parseUsageProviders } from "./settings";
 import { Session, EventsPage, parseAttachment, parseSession, parseSessions, parseEventsPage } from "./sessions";
 
 export type ApiErrorKind =
@@ -162,14 +163,19 @@ export class WaypointClient {
       options.cursor !== undefined ? this.timeoutMs * 5 : undefined,
     );
   }
-  async mutate(token: string, path: string, body?: Record<string, unknown>): Promise<Session> {
+  async mutate(
+    token: string,
+    path: string,
+    body?: Record<string, unknown>,
+    options: { method?: "POST" | "PATCH"; timeoutMs?: number } = {},
+  ): Promise<Session> {
     try {
       const response = await this.request(`${this.apiUrl}${path}`, {
-        method: "POST",
+        method: options.method ?? "POST",
         headers: { Authorization: `Bearer ${token}`, ...(body ? { "Content-Type": "application/json" } : {}) },
         body: body ? JSON.stringify(body) : undefined,
         redirect: "error",
-        signal: AbortSignal.timeout(this.timeoutMs),
+        signal: AbortSignal.timeout(options.timeoutMs ?? this.timeoutMs),
       });
       if (response.status === 401 || response.status === 403)
         throw new ApiError("expired-token", "Your sign-in expired. Sign in again; the draft is kept.");
@@ -190,6 +196,7 @@ export class WaypointClient {
         try {
           const value: unknown = await response.json();
           if (isRecord(value) && typeof value.detail === "string") detail = value.detail;
+          else if (isRecord(value) && Array.isArray(value.detail)) detail = "invalid value";
         } catch {
           /* HTTP status still establishes rejection. */
         }
@@ -319,8 +326,27 @@ export class WaypointClient {
       throw new ApiError("invalid-response", "The server returned an unexpected connection response.");
     return { connected: value.connected, detail: typeof value.detail === "string" ? value.detail : undefined };
   }
-  action(token: string, id: string, action: "interrupt" | "reattach") {
-    return this.mutate(token, `/api/sessions/${encodeURIComponent(id)}/${action}`);
+  action(token: string, id: string, action: "interrupt" | "reattach", timeoutMs?: number) {
+    return this.mutate(token, `/api/sessions/${encodeURIComponent(id)}/${action}`, undefined, { timeoutMs });
+  }
+  launchSettings(token: string, id: string, signal?: AbortSignal): Promise<LaunchSettings> {
+    return this.read(`/api/sessions/${encodeURIComponent(id)}/launch-settings`, token, signal, parseLaunchSettings);
+  }
+  usageProviders(token: string, signal?: AbortSignal): Promise<UsageProvider[]> {
+    return this.read("/api/usage-provider-options", token, signal, parseUsageProviders);
+  }
+  // One settings change. Restarting changes take longer than ordinary requests, so callers pass their timeout.
+  updateSetting(
+    token: string,
+    id: string,
+    setting: "title" | "launch-settings" | "mode" | "model" | "effort" | "usage-limit-source",
+    body: Record<string, unknown>,
+    timeoutMs?: number,
+  ): Promise<Session> {
+    return this.mutate(token, `/api/sessions/${encodeURIComponent(id)}/${setting}`, body, {
+      method: ["title", "launch-settings", "usage-limit-source"].includes(setting) ? "PATCH" : "POST",
+      timeoutMs,
+    });
   }
   // Some agents report upstream failures as HTTP 400 after the response may have been delivered, so a
   // 400 is definitive only when its detail proves Waypoint rejected it before dispatch.
