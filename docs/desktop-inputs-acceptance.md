@@ -49,7 +49,7 @@ Unit and integration tests cover these paths.
 
 ## Automated coverage
 
-`npm run verify` checks formatting, ESLint, strict types, 134 behavior and integration tests, Raycast validation, and build.
+`npm run verify` checks formatting, ESLint, strict types, 135 behavior and integration tests, Raycast validation, and build.
 
 Desktop input tests cover:
 
