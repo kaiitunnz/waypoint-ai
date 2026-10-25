@@ -1,21 +1,26 @@
 import { Action, ActionPanel, Form, Icon, Toast, showToast, useNavigation } from "@raycast/api";
-import { useState, useSyncExternalStore } from "react";
-import { ServerMetadata } from "../api/contracts";
-import { QuickChatController } from "../hooks/quickChatController";
+import { useState } from "react";
+import { ExecutionTarget } from "../api/contracts";
 
-export function ConnectTarget({ controller, metadata }: { controller: QuickChatController; metadata: ServerMetadata }) {
-  const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
-  const target = metadata.targets.find((entry) => entry.id === state.sshTarget);
+export function ConnectTarget({
+  target,
+  connect,
+  submitTitle = "Connect",
+}: {
+  target?: ExecutionTarget;
+  connect: (password: string) => Promise<{ connected: boolean; detail?: string }>;
+  submitTitle?: string;
+}) {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string>();
   const { pop } = useNavigation();
-  const connect = async () => {
+  const submit = async () => {
     if (!password || busy) return;
     setBusy(true);
     setProblem(undefined);
     try {
-      const result = await controller.connectTarget(password);
+      const result = await connect(password);
       if (!result.connected) {
         setProblem(result.detail?.trim() || "The target rejected the password.");
         return;
@@ -35,7 +40,7 @@ export function ConnectTarget({ controller, metadata }: { controller: QuickChatC
       isLoading={busy}
       actions={
         <ActionPanel>
-          {target && <Action.SubmitForm title="Connect and Retry" icon={Icon.Lock} onSubmit={connect} />}
+          {target && <Action.SubmitForm title={submitTitle} icon={Icon.Lock} onSubmit={submit} />}
         </ActionPanel>
       }
     >

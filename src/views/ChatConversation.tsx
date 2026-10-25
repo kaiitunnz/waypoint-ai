@@ -19,6 +19,7 @@ import {
 } from "./SessionInteraction";
 import { sessionUrl } from "../domain/sessions";
 import { ConversationContent } from "./Conversation";
+import { EditSession, NewChatOption } from "./EditSession";
 
 type ReadingMode = "conversation" | "latest";
 
@@ -73,6 +74,7 @@ export function ChatConversation({
   hasDraft = false,
   refreshConnections,
   emptyMarkdown,
+  settings,
 }: {
   connection: FeedConnection;
   sessionId?: string;
@@ -92,6 +94,8 @@ export function ChatConversation({
   hasDraft?: boolean;
   refreshConnections: () => Promise<void>;
   emptyMarkdown?: string;
+  // Quick Chat hides editing while a send is unsettled and offers starting a new chat with changed settings.
+  settings?: { available: boolean; newChat?: NewChatOption };
 }) {
   const [active, setActive] = useState(true);
   const { state, feed } = useConversationFeed(connection, sessionId ?? "", active && !!sessionId);
@@ -272,6 +276,26 @@ export function ChatConversation({
             void interactionController.refresh();
           }}
         />
+        {session && !unsupported && settings?.available !== false && (
+          <Action.Push
+            title="Edit Current Session"
+            icon={Icon.Gear}
+            shortcut={{
+              macOS: { modifiers: ["cmd", "shift"], key: "," },
+              Windows: { modifiers: ["ctrl", "shift"], key: "," },
+            }}
+            target={
+              <EditSession
+                connection={connection}
+                sessionId={session.id}
+                newChat={settings?.newChat}
+                onApplied={() => feed.retry()}
+              />
+            }
+            onPush={() => setActive(false)}
+            onPop={() => setActive(true)}
+          />
+        )}
         {session && (
           <Action.Push
             title="Conversation Details"

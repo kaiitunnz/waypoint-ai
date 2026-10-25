@@ -3,12 +3,13 @@ import { useMemo, useState } from "react";
 import { useConnections } from "../hooks/useConnections";
 import { useSessionsFeed } from "../hooks/useSessionFeeds";
 import { FeedConnection } from "../hooks/sessionFeeds";
-import { connectionStore } from "../storage/raycast";
+import { connectionStore, quickChatStore } from "../storage/raycast";
 import { SessionFilter, visibleSessions, isStructured, sessionUrl } from "../domain/sessions";
 import { LoadingView, SessionDetail, statusIcon } from "../components/SessionPresentation";
 import { ManageServers } from "./ManageServers";
 import { SignInForm } from "./ServerForm";
 import { ConversationScreen } from "./Conversation";
+import { QuickChat } from "./QuickChat";
 
 export function SearchSessions() {
   const { state, error, refresh } = useConnections();
@@ -205,6 +206,15 @@ function SessionsBrowser({
                               connectionId={connection.id}
                               sessionId={session.id}
                               metadata={state.metadata}
+                              newChat={{
+                                start: async (build) => {
+                                  await quickChatStore.transaction(connection.id, async (saved, persist) => {
+                                    saved.defaults = build(saved.defaults);
+                                    await persist();
+                                  });
+                                  return <QuickChat forceNew connectionId={connection.id} />;
+                                },
+                              }}
                             />
                           }
                           onPush={() => setActive(false)}
