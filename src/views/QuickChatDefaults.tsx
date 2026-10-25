@@ -35,7 +35,11 @@ export function QuickChatDefaults({
   const profile = values.profile === "__default__" ? "" : values.profile || context.preset?.profile || "";
   const profiles = context.target?.profilesByAgent[context.backend] ?? context.agent?.profiles ?? [];
   const efforts = modelEfforts(models, values.model, context.preset?.model);
-  const modelChoice = defaultsModelChoice(models, values.model);
+  const modelChoice = defaultsModelChoice(models, values.model, defaults.model);
+  const savedModel =
+    defaults.model && defaults.model !== "__default__" && !models?.models.some((model) => model.id === defaults.model)
+      ? defaults.model
+      : undefined;
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -199,11 +203,13 @@ export function QuickChatDefaults({
         title="Model"
         value={modelChoice}
         onChange={(value) => {
-          if (value !== customModelValue) setValues((current) => ({ ...current, model: value, effort: "" }));
+          if (value !== customModelValue && value !== values.model)
+            setValues((current) => ({ ...current, model: value, effort: "" }));
         }}
       >
         <Form.Dropdown.Item value="" title="Inherit from preset or server" />
         <Form.Dropdown.Item value="__default__" title="Agent default model" />
+        {savedModel && <Form.Dropdown.Item value={savedModel} title={models ? `Custom · ${savedModel}` : savedModel} />}
         {(modelChoice === customModelValue || models?.freeText) && (
           <Form.Dropdown.Item
             value={customModelValue}

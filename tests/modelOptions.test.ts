@@ -29,10 +29,15 @@ test("a model typed into Quick Chat Defaults keeps one dropdown value while it c
     freeText: true,
     efforts: [],
   };
-  assert.equal(defaultsModelChoice(catalog, ""), "");
-  assert.equal(defaultsModelChoice(catalog, "__default__"), "__default__");
-  assert.equal(defaultsModelChoice(catalog, "gpt-5"), "gpt-5");
+  assert.equal(defaultsModelChoice(catalog, "", ""), "");
+  assert.equal(defaultsModelChoice(catalog, "__default__", ""), "__default__");
+  assert.equal(defaultsModelChoice(catalog, "gpt-5", ""), "gpt-5");
   for (const typed of ["g", "gpt-5-m", "gpt-5-mini"])
-    assert.equal(defaultsModelChoice(catalog, typed), customModelValue);
-  assert.equal(defaultsModelChoice(undefined, "saved-model"), customModelValue);
+    assert.equal(defaultsModelChoice(catalog, typed, ""), customModelValue);
+  // A saved model keeps its own value whether or not the catalog has loaded or lists it.
+  for (const loaded of [undefined, catalog]) {
+    assert.equal(defaultsModelChoice(loaded, "gpt-5", "gpt-5"), "gpt-5");
+    assert.equal(defaultsModelChoice(loaded, "saved-model", "saved-model"), "saved-model");
+  }
+  assert.equal(defaultsModelChoice(undefined, "typed", "saved-model"), customModelValue);
 });

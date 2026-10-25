@@ -12,9 +12,10 @@ export function modelEfforts(catalog: ModelCatalog | undefined, selected: string
 // matches no item falls back to its first item and would reset the model mid-typing.
 export const customModelValue = "__custom__";
 
-// Quick Chat Defaults' model dropdown value: "" inherits and "__default__" is the agent default.
-export function defaultsModelChoice(catalog: ModelCatalog | undefined, model: string): string {
-  return !model || model === "__default__" || catalog?.models.some((entry) => entry.id === model)
+// Quick Chat Defaults' model dropdown value: "" inherits and "__default__" is the agent default. The saved model keeps
+// its own value, so loading the catalog never changes the selection.
+export function defaultsModelChoice(catalog: ModelCatalog | undefined, model: string, saved: string): string {
+  return !model || model === "__default__" || model === saved || catalog?.models.some((entry) => entry.id === model)
     ? model
     : customModelValue;
 }
