@@ -9,11 +9,22 @@ export interface ChatExchange {
 // Raycast lays out the side panel's markdown again on every render, so the preview collapses oversized messages.
 export const previewMessageLimit = 4000;
 
+// The fence a markdown snippet leaves open, if any.
+function openFence(text: string) {
+  let open: string | undefined;
+  for (const [, marker] of text.matchAll(/^ {0,3}(`{3,}|~{3,})/gm)) {
+    if (!open) open = marker;
+    else if (marker[0] === open[0] && marker.length >= open.length) open = undefined;
+  }
+  return open;
+}
+
 function clip(text: string, limit?: number, markdown = false) {
   if (limit === undefined || text.length <= limit) return text;
   const shown = text.slice(0, limit);
   // An unclosed fence would swallow the rest of the preview.
-  return markdown && (shown.match(/^\s*(```|~~~)/gm)?.length ?? 0) % 2 ? `${shown}\n\`\`\`` : shown;
+  const fence = markdown ? openFence(shown) : undefined;
+  return fence ? `${shown}\n${fence}` : shown;
 }
 const more = (text: string, limit?: number) =>
   limit !== undefined && text.length > limit

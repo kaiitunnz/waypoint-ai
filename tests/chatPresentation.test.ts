@@ -99,3 +99,12 @@ test("the preview collapses oversized messages and closes a fence it cuts throug
   assert.equal(conversationMarkdown(exchanges), conversationMarkdown(exchanges, false, false, undefined));
   assert.ok(conversationMarkdown(exchanges).includes("After"), "the full view keeps everything");
 });
+
+test("a clipped reply closes its open fence with the marker that opened it", () => {
+  for (const marker of ["~~~", "````"]) {
+    const answer = `Intro\n\n${marker}text\n${"x".repeat(5000)}\n${marker}`;
+    const exchanges = chatExchanges(transcript([event(1, "user_input", "Q"), event(2, "agent_output", answer)]));
+    const reply = conversationMarkdown(exchanges, false, false, previewMessageLimit);
+    assert.ok(reply.includes(`${"x".repeat(100)}\n${marker}\n\n_… `), marker);
+  }
+});
