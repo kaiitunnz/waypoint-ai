@@ -82,7 +82,8 @@ export function ComposeMessage({
     ? `${session.title || "Conversation"} · ${agent?.label ?? session.backend}`
     : `New conversation · ${agent?.label ?? "Waypoint"}`;
   const elsewhere = draft.files.some((file) => file.upload && file.upload.sessionId !== session?.id);
-  const uploaded = draft.files.length > 0 && draft.files.every((file) => file.upload?.sessionId === session?.id);
+  const uploaded =
+    !!session && draft.files.length > 0 && draft.files.every((file) => file.upload?.sessionId === session.id);
   return (
     <Form
       navigationTitle="Compose Message"
