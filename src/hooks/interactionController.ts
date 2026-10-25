@@ -257,7 +257,7 @@ export class InteractionController {
     try {
       if (!cancel) await this.changeDraft(captured, draft);
       await this.queue;
-      await this.store.transaction(this.connection.id, async (saved, persist) => {
+      await this.store.transaction(this.connection.id, async (saved, persist, fence) => {
         if (saved.pending)
           throw new Error(
             saved.pending.kind === "interaction"
@@ -288,6 +288,7 @@ export class InteractionController {
         await persist();
         let session: Session;
         try {
+          await fence();
           session = await this.client.interaction(
             this.connection.token,
             this.sessionId,

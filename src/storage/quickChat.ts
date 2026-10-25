@@ -30,7 +30,7 @@ export interface QuickChatState {
   compose?: Record<string, ComposeDraft>;
 }
 export interface Mutex {
-  run<T>(id: string, operation: () => Promise<T>): Promise<T>;
+  run<T>(id: string, operation: (check: () => Promise<void>) => Promise<T>): Promise<T>;
 }
 const textRecord = (value: unknown, valid: (entry: unknown) => boolean) =>
   value === undefined || (isRecord(value) && Object.values(value).every(valid));
@@ -158,13 +158,17 @@ export class QuickChatStore {
   ) {}
   transaction<T>(
     connectionId: string,
-    operation: (state: QuickChatState, persist: () => Promise<void>) => Promise<T>,
+    operation: (state: QuickChatState, persist: () => Promise<void>, fence: () => Promise<void>) => Promise<T>,
   ): Promise<T> {
-    return this.mutex.run(connectionId, async () => {
+    return this.mutex.run(connectionId, async (check) => {
       const key = `waypoint.quick-chat.${connectionId}`;
       const state = decodeQuickChat(await this.storage.getItem(key));
-      const persist = () => this.storage.setItem(key, JSON.stringify(state));
-      return operation(state, persist);
+      // Every write first proves this transaction still holds the server lock.
+      const persist = async () => {
+        await check();
+        await this.storage.setItem(key, JSON.stringify(state));
+      };
+      return operation(state, persist, check);
     });
   }
   // Reads without the lock so long operations such as uploads don't block other commands from loading.

@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WaypointClient } from "../src/api/client";
 import { QuickChatController } from "../src/hooks/quickChatController";
-import { ServerMutex } from "../src/storage/mutex";
-import { QuickChatStore } from "../src/storage/quickChat";
+import { LockLostError, ServerMutex } from "../src/storage/mutex";
+import { QuickChatStore, decodeQuickChat } from "../src/storage/quickChat";
 import { eventWire, metadataWire, sessionWire } from "./fixtures/conversation";
 
 const respond = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
@@ -332,4 +333,47 @@ test("large context is refused and the single-line draft moves into an empty com
   assert.equal(saved.drafts.quick, "");
   assert.equal(saved.compose!.quick.text, "typed in the search bar");
   await f.close();
+});
+
+test("a live-pid lock with a stale heartbeat is reclaimed and its fenced holder can no longer write", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "mutex-lease-"));
+  let now = 1_000_000;
+  const values = new Map<string, string>();
+  const storage = {
+    getItem: async (key: string) => values.get(key),
+    setItem: async (key: string, value: string) => void values.set(key, value),
+  };
+  const clock = () => now;
+  // Separate queues model two commands; a long heartbeat interval stands in for a holder whose work stopped.
+  const stalled = new QuickChatStore(
+    storage,
+    new ServerMutex(directory, 80, { heartbeatMs: 3_600_000, now: clock, queues: new Map() }),
+  );
+  const other = new QuickChatStore(storage, new ServerMutex(directory, 80, { now: clock, queues: new Map() }));
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const holder = stalled.transaction("server-a", async (state, persist) => {
+    await gate;
+    state.drafts.quick = "late write";
+    await persist();
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  await assert.rejects(other.draft("server-a", "quick", "blocked"), /still active/, "a fresh heartbeat keeps the lock");
+  now += 31_000;
+  await other.draft("server-a", "quick", "reclaimed");
+  release();
+  await assert.rejects(holder, LockLostError);
+  assert.equal(decodeQuickChat(values.get("waypoint.quick-chat.server-a")).drafts.quick, "reclaimed");
+  await rm(directory, { recursive: true, force: true });
+});
+
+test("locks without a heartbeat keep the dead-pid rule", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "mutex-legacy-"));
+  const lock = join(directory, createHash("sha256").update("server-a").digest("hex"));
+  await writeFile(lock, JSON.stringify({ pid: process.pid, nonce: "legacy" }));
+  await assert.rejects(
+    new ServerMutex(directory, 80, { now: () => Date.now() + 1e9 }).run("server-a", async () => 1),
+    /still active/,
+  );
+  await rm(directory, { recursive: true, force: true });
 });

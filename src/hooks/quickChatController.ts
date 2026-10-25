@@ -373,6 +373,7 @@ export class QuickChatController {
     stats: Map<string, FileStats>,
     saved: QuickChatState,
     persist: () => Promise<void>,
+    fence: () => Promise<void>,
   ): Promise<string[]> {
     const draft = saved.compose![this.draftKey];
     const ids: string[] = [];
@@ -389,6 +390,7 @@ export class QuickChatController {
       if (file.upload && file.upload.sessionId !== session.id && !protectedIds.has(file.upload.attachmentId))
         stale.push(file.upload);
       this.publish({ upload: `Uploading ${file.name} (${index + 1} of ${draft.files.length})` });
+      await fence();
       const attachment = await this.client.uploadAttachment(this.connection.token, session.id, file.path, current.size);
       Object.assign(file, current, {
         upload: { sessionId: session.id, attachmentId: attachment.id, uploadedAt: this.now() },
@@ -427,7 +429,7 @@ export class QuickChatController {
       await this.queue;
       const stats = new Map<string, FileStats>();
       for (const file of compose?.files ?? []) stats.set(file.id, await fileStats(file));
-      await this.store.transaction(this.connection.id, async (saved, persist) => {
+      await this.store.transaction(this.connection.id, async (saved, persist, fence) => {
         if (saved.pending)
           throw new Error("Another operation has an unconfirmed outcome. Check the outcome before sending.");
         await this.verifyConnection();
@@ -510,7 +512,7 @@ export class QuickChatController {
           this.checkPolicy(draft.files, session.backend, session.targetId);
           draft.sessionId = session.id;
         }
-        let attachments = draft ? await this.upload(session, stats, saved, persist) : [];
+        let attachments = draft ? await this.upload(session, stats, saved, persist, fence) : [];
         const before = await this.client.events(this.connection.token, session.id);
         const baseline = before.events.reduce((max, event) => Math.max(max, event.id ?? 0), 0);
         for (let attempt = 0; ; attempt++) {
@@ -526,6 +528,7 @@ export class QuickChatController {
           };
           await persist();
           try {
+            await fence();
             session = await this.client.input(this.connection.token, session.id, text, attachments);
             break;
           } catch (error) {
@@ -540,7 +543,7 @@ export class QuickChatController {
             for (const file of draft.files)
               if (file.upload && !present.has(file.upload.attachmentId)) file.upload = undefined;
             await persist();
-            attachments = await this.upload(session, stats, saved, persist);
+            attachments = await this.upload(session, stats, saved, persist, fence);
           }
         }
         saved.pending!.acknowledgedAt = this.now();
