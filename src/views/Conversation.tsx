@@ -8,6 +8,7 @@ import { useConversationFeed } from "../hooks/useSessionFeeds";
 import { ConversationFeed, FeedConnection } from "../hooks/sessionFeeds";
 import { LoadingView, markdownText, sessionSummary, statusIcon } from "../components/SessionPresentation";
 import { ChatConversation } from "./ChatConversation";
+import { NewChatOption } from "./EditSession";
 import { InteractionController } from "../hooks/interactionController";
 import { InteractionSection, interactionItemIds } from "./SessionInteraction";
 import { ManageServers } from "./ManageServers";
@@ -17,10 +18,12 @@ export function ConversationScreen({
   connectionId,
   sessionId,
   metadata,
+  newChat,
 }: {
   connectionId: string;
   sessionId: string;
   metadata: ServerMetadata;
+  newChat?: NewChatOption;
 }) {
   const { state, error, refresh } = useConnections();
   if (!state && !error) return <LoadingView title="Loading connection…" />;
@@ -49,6 +52,7 @@ export function ConversationScreen({
       sessionId={sessionId}
       metadata={metadata}
       refreshConnections={refresh}
+      settings={{ available: true, newChat }}
       actions={(setActive) => (
         <>
           {connection.frontendUrl && (

@@ -279,6 +279,18 @@ export class QuickChatController {
       revision: this.state.revision + 1,
     });
   }
+  // Sends build their create request from the published defaults, so they are replaced before the reset.
+  async startNewChatWith(defaults: ChatDefaults) {
+    if (this.state.busy || this.state.pending)
+      throw new Error("A message is being sent or needs checking. Start the new chat when it finishes.");
+    await this.store.defaults(this.connection.id, defaults);
+    this.publish({ defaults });
+    await this.newChat();
+    this.publish({
+      notice:
+        "Quick Chat defaults updated. A new conversation starts on send; the previous one keeps its own settings.",
+    });
+  }
   // A session a New Chat send created for this draft but never delivered input to is continued, not replaced.
   private boundSession?: Promise<Session | undefined>;
   private emptyBoundSession(saved: QuickChatState, metadata: ServerMetadata) {

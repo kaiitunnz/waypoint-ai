@@ -1,4 +1,11 @@
 import { isRecord } from "../domain/connections";
+import { Profile } from "./contracts";
+
+export interface UsageSource {
+  kind: "plugin" | "usage_provider";
+  providerId?: string;
+  accountKey?: string;
+}
 
 export interface Session {
   id: string;
@@ -13,7 +20,12 @@ export interface Session {
   pinnedAt?: string;
   lastEventAt: string;
   model?: string;
+  // The selection as stored; null means the agent default. `model` above is the resolved display name.
+  modelSelection: string | null;
+  effort: string | null;
   permissionMode?: string;
+  profile?: Profile;
+  usageSource: UsageSource;
   targetId?: string;
   context?: { used: number; limit?: number };
   tokens?: number;
@@ -81,7 +93,21 @@ export function parseSession(value: unknown): Session {
     pinnedAt: optionalText(value.pinned_at),
     lastEventAt: text(value.last_event_at ?? value.updated_at),
     model: optionalText(value.resolved_model) ?? optionalText(value.model),
+    modelSelection: optionalText(value.model) ?? null,
+    effort: optionalText(value.effort) ?? null,
     permissionMode: optionalText(value.permission_mode),
+    profile:
+      typeof value.account_profile_id === "string"
+        ? { id: value.account_profile_id, label: optionalText(value.account_profile_label) ?? value.account_profile_id }
+        : undefined,
+    usageSource:
+      value.usage_limit_source === "usage_provider"
+        ? {
+            kind: "usage_provider",
+            providerId: optionalText(value.usage_provider_id),
+            accountKey: optionalText(value.usage_provider_account_key),
+          }
+        : { kind: "plugin" },
     targetId: optionalText(value.launch_target_id),
     context: used !== undefined ? { used, limit: number(context?.context_window_tokens) } : undefined,
     tokens: number(usage?.display_total_tokens),

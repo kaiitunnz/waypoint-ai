@@ -125,7 +125,13 @@ export function ComposeMessage({
             <Action.Push
               title="Connect SSH Target"
               icon={Icon.Lock}
-              target={<ConnectTarget controller={controller} metadata={metadata} />}
+              target={
+                <ConnectTarget
+                  target={metadata.targets.find((entry) => entry.id === state.sshTarget)}
+                  connect={(password) => controller.connectTarget(password)}
+                  submitTitle="Connect and Retry"
+                />
+              }
             />
           )}
           {!state.busy && (

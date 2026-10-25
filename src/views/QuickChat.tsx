@@ -27,9 +27,10 @@ import { SignInForm } from "./ServerForm";
 import { ManageServers } from "./ManageServers";
 import { LoadingView } from "../components/SessionPresentation";
 
-export function QuickChat({ forceNew = false }: { forceNew?: boolean }) {
+// A pinned connection opens that server without changing the saved server selection.
+export function QuickChat({ forceNew = false, connectionId }: { forceNew?: boolean; connectionId?: string }) {
   const { state, error, refresh } = useConnections();
-  const [selected, setSelected] = useState<string>();
+  const [selected, setSelected] = useState(connectionId);
   if (!state && !error) return <LoadingView title="Loading Quick Chat…" />;
   const connection =
     state?.connections.find((item) => item.id === (selected ?? state.activeId ?? state.defaultId)) ??
@@ -138,6 +139,12 @@ function QuickChatView({
         revision={state.revision}
         onPendingChange={() => void controller.syncPending()}
         hasDraft={state.hasDraft}
+        settings={{
+          available: !state.busy && !state.pending,
+          newChat: state.defaults
+            ? { start: (build) => controller.startNewChatWith(build(state.defaults!)) }
+            : undefined,
+        }}
       />
     );
   const context = metadata && state.defaults ? launchContext(state.defaults, metadata) : undefined;
@@ -248,7 +255,13 @@ function QuickChatActions({
         <Action.Push
           title="Connect SSH Target"
           icon={Icon.Lock}
-          target={<ConnectTarget controller={controller} metadata={metadata} />}
+          target={
+            <ConnectTarget
+              target={metadata.targets.find((entry) => entry.id === state.sshTarget)}
+              connect={(password) => controller.connectTarget(password)}
+              submitTitle="Connect and Retry"
+            />
+          }
         />
       )}
       {interaction && state.pending?.sessionId !== state.session?.id && (

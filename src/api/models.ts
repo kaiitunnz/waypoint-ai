@@ -2,6 +2,7 @@ import { isRecord } from "../domain/connections";
 export interface ModelCatalog {
   models: { id: string; label: string; efforts?: string[] }[];
   defaultModel?: string;
+  defaultLabel?: string;
   freeText: boolean;
   efforts: string[];
 }
@@ -20,6 +21,7 @@ export function parseModels(value: unknown): ModelCatalog {
       };
     }),
     defaultModel: typeof value.default_model_id === "string" ? value.default_model_id : undefined,
+    defaultLabel: typeof value.default_model_label === "string" ? value.default_model_label : undefined,
     freeText: value.supports_free_text === true,
     efforts: strings(value.effort_levels),
   };

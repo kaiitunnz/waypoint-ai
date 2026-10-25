@@ -81,6 +81,20 @@ Files and images can be attached when the agent accepts attachments. They upload
 
 When a send needs a password-auth SSH target that is not connected, **Connect SSH Target** asks for its password. Waypoint uses it once to connect, then the send or reattach continues. The password is not saved.
 
+## Editing a session
+
+**Edit Current Session** (⌘⇧,) changes the open conversation's own settings, separate from Quick Chat Defaults, which shape future chats. It opens from Quick Chat, New Chat, and conversations opened in Search Sessions, and loads the session's current settings and capabilities from Waypoint each time.
+
+The form shows only what the session's agent and interface support: title, model, effort, permission mode, account profile, interface, custom arguments, configuration overrides, environment variables, and usage source. Terminal interfaces stay in Waypoint, since Raycast shows structured conversations only.
+
+The top of the form previews what applying does. Inline changes apply at once. Changes that restart the session list how many restarts they cause, that the conversation resumes, and whether a running turn is interrupted; applying them asks for confirmation. Changes apply in the order Waypoint's web app uses. If a later change fails, the form lists the changes that were applied, shows the failure, and reloads the session's current settings; applying again sends only what is still pending.
+
+![Edit Current Session](docs/screenshots/edit-session.jpg)
+
+Environment values are never shown or stored. Each existing variable can be kept, replaced, or removed, and variables Waypoint manages are hidden. Model, effort, and permission changes need a running session: exited sessions offer **Reattach Session**, and starting sessions ask you to wait.
+
+Agent, execution target, and working directory can't change on an existing conversation. Changing them in the form turns the action into **Start New Chat with These Settings**, which saves them as that server's Quick Chat defaults and prepares a new chat; the current conversation keeps its settings. Environment variables for the new chat come from the Quick Chat preset.
+
 ## Development
 
 Use Node.js 22 or newer and npm. Raycast is required to run the extension.
@@ -100,4 +114,4 @@ The gate checks formatting, ESLint, strict TypeScript, behavior and HTTP integra
 
 Source is organized into thin command entries, `api/`, `domain/`, `storage/`, `hooks/`, `views/`, and `components/`. Tests compile into an ignored temporary build directory using the installed TypeScript compiler and Node's test runner.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contributor guidance and [connection acceptance](docs/server-connections-acceptance.md), [conversation acceptance](docs/session-conversations-acceptance.md), [Quick Chat acceptance](docs/quick-chat-acceptance.md), [session interactions acceptance](docs/session-interactions-acceptance.md), and [desktop inputs acceptance](docs/desktop-inputs-acceptance.md) for runtime coverage.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contributor guidance and [connection acceptance](docs/server-connections-acceptance.md), [conversation acceptance](docs/session-conversations-acceptance.md), [Quick Chat acceptance](docs/quick-chat-acceptance.md), [session interactions acceptance](docs/session-interactions-acceptance.md), [desktop inputs acceptance](docs/desktop-inputs-acceptance.md), and [session settings acceptance](docs/session-settings-acceptance.md) for runtime coverage.

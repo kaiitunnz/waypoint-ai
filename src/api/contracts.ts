@@ -5,6 +5,23 @@ export interface Profile {
   label: string;
 }
 
+export interface PermissionMode extends Profile {
+  requiresRestart: boolean;
+}
+
+// Capabilities of a transport, read from the catalog entry whose native transport it is.
+export interface TransportCapabilities {
+  structured: boolean;
+  liveTerminal: boolean;
+  modelInline: boolean;
+  modelRestart: boolean;
+  effortInline: boolean;
+  effortRestart: boolean;
+  permissionInline: boolean;
+  permissionRestart: boolean;
+  interruptsTurn: boolean;
+}
+
 export interface Agent {
   id: string;
   label: string;
@@ -14,8 +31,9 @@ export interface Agent {
   structured: boolean;
   profiles: Profile[];
   modelSource: string;
-  permissions: Profile[];
+  permissions: PermissionMode[];
   efforts: string[];
+  transportCapabilities: TransportCapabilities;
   customArgs: boolean;
   configOverrides: boolean;
   reattach: boolean;
@@ -85,6 +103,25 @@ function profiles(value: unknown): Profile[] {
   return records(value).map((item) => ({ id: string(item.id), label: string(item.label) }));
 }
 
+function transportCapabilities(item: Record<string, unknown>): TransportCapabilities {
+  const caps = isRecord(item.transport_capabilities)
+    ? item.transport_capabilities
+    : isRecord(item.capabilities)
+      ? item.capabilities
+      : {};
+  return {
+    structured: caps.is_structured === true,
+    liveTerminal: caps.live_terminal === true,
+    modelInline: caps.supports_set_model_inline === true,
+    modelRestart: caps.supports_set_model_with_restart === true,
+    effortInline: caps.supports_set_effort_inline === true,
+    effortRestart: caps.supports_set_effort_with_restart === true,
+    permissionInline: caps.supports_set_permission_mode_inline === true,
+    permissionRestart: caps.supports_set_permission_mode_with_restart === true,
+    interruptsTurn: caps.settings_change_interrupts_turn === true,
+  };
+}
+
 export function parseMetadata(value: unknown): ServerMetadata {
   if (!isRecord(value) || value.authenticated !== true) throw new Error("Invalid authenticated response");
   return {
@@ -97,15 +134,21 @@ export function parseMetadata(value: unknown): ServerMetadata {
       transport: string(item.default_transport ?? item.transport_id),
       nativeTransport: string(item.transport_id ?? item.default_transport),
       transports: strings(item.supported_transports ?? [item.transport_id]),
-      structured: isRecord(item.transport_capabilities)
-        ? item.transport_capabilities.is_structured === true
-        : isRecord(item.capabilities) && item.capabilities.is_structured === true,
+      // Raycast renders structured events only; a live terminal pane needs Waypoint.
+      structured: transportCapabilities(item).structured && !transportCapabilities(item).liveTerminal,
       modelSource:
         isRecord(item.agent_capabilities) && typeof item.agent_capabilities.model_source === "string"
           ? item.agent_capabilities.model_source
           : "unknown",
       profiles: profiles(item.account_profiles),
-      permissions: profiles(isRecord(item.agent_capabilities) ? item.agent_capabilities.permission_modes : undefined),
+      permissions: records(
+        isRecord(item.agent_capabilities) ? item.agent_capabilities.permission_modes : undefined,
+      ).map((mode) => ({
+        id: string(mode.id),
+        label: string(mode.label),
+        requiresRestart: mode.requires_session_restart === true,
+      })),
+      transportCapabilities: transportCapabilities(item),
       efforts:
         isRecord(item.agent_capabilities) && Array.isArray(item.agent_capabilities.effort_levels)
           ? strings(item.agent_capabilities.effort_levels)
