@@ -17,12 +17,13 @@ import {
 } from "../domain/quickChat";
 import { isStructured } from "../domain/sessions";
 import {
-  ComposeDraft,
+  ComposeParts,
   ContextKind,
   StagedFile,
   attachmentPolicy,
   composeMessage,
-  emptyCompose,
+  composeParts,
+  emptyParts,
   fileProblem,
   hasCompose,
   isImage,
@@ -30,6 +31,7 @@ import {
   maxDraftContextBytes,
   reusableUpload,
 } from "../domain/compose";
+import { draftKeys } from "../storage/drafts";
 import { PendingOperation, QuickChatState, QuickChatStore } from "../storage/quickChat";
 import { FeedConnection } from "./sessionFeeds";
 
@@ -44,7 +46,11 @@ export interface QuickChatSnapshot {
   notice?: string;
   pending?: PendingOperation;
   revision: number;
-  compose: ComposeDraft;
+  // Staged context and files. The message text is form-local; read it with composeText().
+  compose: ComposeParts;
+  // Bumped whenever the controller replaces the message text, so the form reads it again.
+  composeEpoch: number;
+  hasDraft: boolean;
   upload?: string;
   // A password-auth SSH target that must be connected before the failed operation can be retried.
   sshTarget?: string;
@@ -52,6 +58,7 @@ export interface QuickChatSnapshot {
 type Retry = "send" | "compose" | "reattach";
 type FileStats = { size: number; modifiedMs: number };
 
+const storedParts = (stored?: ComposeParts) => stored && composeParts(stored);
 const attachmentIds = (value: unknown): string[] =>
   Array.isArray(value)
     ? value.flatMap((item) => (typeof item === "object" && item && typeof item.id === "string" ? [item.id] : []))
@@ -64,7 +71,16 @@ async function fileStats(file: StagedFile): Promise<FileStats> {
   return { size: stats!.size, modifiedMs: stats!.mtimeMs };
 }
 export class QuickChatController {
-  private state: QuickChatSnapshot = { loading: true, busy: false, draft: "", revision: 0, compose: emptyCompose() };
+  private state: QuickChatSnapshot = {
+    loading: true,
+    busy: false,
+    draft: "",
+    revision: 0,
+    compose: emptyParts(),
+    composeEpoch: 0,
+    hasDraft: false,
+  };
+  private composeValue = "";
   private retry?: Retry;
   private listeners = new Set<() => void>();
   private active = true;
@@ -75,6 +91,8 @@ export class QuickChatController {
   private draftLoaded = false;
   private queue: Promise<unknown> = Promise.resolve();
   private readonly draftKey: string;
+  private readonly lineKey: string;
+  private readonly composeKey: string;
   constructor(
     private readonly connection: FeedConnection,
     private readonly store: QuickChatStore,
@@ -84,9 +102,12 @@ export class QuickChatController {
     private readonly now = Date.now,
   ) {
     this.draftKey = forceNew ? "new" : "quick";
+    this.lineKey = draftKeys.line(connection.id, this.draftKey);
+    this.composeKey = draftKeys.compose(connection.id, this.draftKey);
   }
   canSend = () => this.prepared && !this.state.loading && !this.state.busy && !this.state.pending;
   getSnapshot = () => this.state;
+  composeText = () => this.composeValue;
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
     return () => {
@@ -95,7 +116,9 @@ export class QuickChatController {
   };
   private publish(patch: Partial<QuickChatSnapshot>) {
     if (!this.active) return;
-    this.state = { ...this.state, ...patch };
+    const next = { ...this.state, ...patch };
+    next.hasDraft = hasCompose({ ...next.compose, text: this.composeValue });
+    this.state = next;
     this.listeners.forEach((listener) => listener());
   }
   stop() {
@@ -108,11 +131,24 @@ export class QuickChatController {
     this.publish({ loading: true, error: undefined });
     try {
       await this.queue;
-      const saved = await this.store.read(this.connection.id);
+      const [saved, line, text] = await Promise.all([
+        this.store.read(this.connection.id),
+        this.store.drafts.read(this.lineKey),
+        this.store.drafts.read(this.composeKey),
+      ]);
       if (!this.active || generation !== this.generation) return;
+      if (!this.draftLoaded) {
+        // Drafts saved before per-key storage are carried over once.
+        const legacyLine = saved.drafts[this.draftKey];
+        const legacyText = saved.compose?.[this.draftKey]?.text;
+        if (line === undefined && legacyLine) void this.saveDraft(this.lineKey, legacyLine);
+        if (text === undefined && legacyText) void this.saveDraft(this.composeKey, legacyText);
+        this.composeValue = text ?? legacyText ?? "";
+      }
       this.publish({
-        draft: this.draftLoaded ? this.state.draft : (saved.drafts[this.draftKey] ?? ""),
-        compose: this.draftLoaded ? this.state.compose : (saved.compose?.[this.draftKey] ?? emptyCompose()),
+        draft: this.draftLoaded ? this.state.draft : (line ?? saved.drafts[this.draftKey] ?? ""),
+        compose: this.draftLoaded ? this.state.compose : (storedParts(saved.compose?.[this.draftKey]) ?? emptyParts()),
+        composeEpoch: this.draftLoaded ? this.state.composeEpoch : this.state.composeEpoch + 1,
         defaults: saved.defaults,
         pending: saved.pending,
       });
@@ -197,15 +233,25 @@ export class QuickChatController {
         "This conversation cannot be resumed by its current interface. Choose Start New Chat; your draft is kept.",
       );
   }
+  private saveDraft(key: string, text: string) {
+    return this.store.drafts
+      .write(key, text)
+      .catch(() => this.publish({ error: "Could not save draft. Keep this view open and retry." }));
+  }
   changeDraft(text: string) {
     this.publish({ draft: text });
-    const operation = this.queue.then(() => this.store.draft(this.connection.id, this.draftKey, text));
-    this.queue = operation.catch((error) =>
-      this.publish({
-        error: error instanceof Error ? error.message : "Could not save draft. Keep this view open and retry.",
-      }),
-    );
-    return this.queue;
+    return this.saveDraft(this.lineKey, text);
+  }
+  // Keystrokes stay in the form; only a change in whether a draft exists is published.
+  setComposeText(text: string) {
+    this.composeValue = text;
+    if (hasCompose({ ...this.state.compose, text }) !== this.state.hasDraft) this.publish({});
+    return this.saveDraft(this.composeKey, text);
+  }
+  private replaceComposeText(text: string) {
+    this.composeValue = text;
+    this.publish({ composeEpoch: this.state.composeEpoch + 1 });
+    return this.saveDraft(this.composeKey, text);
   }
   async newChat() {
     if (this.state.busy || this.state.pending) return;
@@ -242,7 +288,7 @@ export class QuickChatController {
     })();
     return this.boundSession;
   }
-  private persistCompose(compose: ComposeDraft) {
+  private persistCompose(compose: ComposeParts) {
     this.publish({ compose });
     const operation = this.queue.then(() =>
       this.store.transaction(this.connection.id, async (saved, persist) => {
@@ -257,16 +303,12 @@ export class QuickChatController {
     );
     return this.queue;
   }
-  changeCompose(patch: Partial<Pick<ComposeDraft, "text">>) {
-    if (this.state.busy) return this.queue;
-    return this.persistCompose({ ...this.state.compose, ...patch });
-  }
   // Moves the single-line draft into an empty compose draft so the text isn't sent twice.
   openCompose() {
-    if (this.state.busy || hasCompose(this.state.compose) || !this.state.draft.trim()) return this.queue;
+    if (this.state.busy || this.state.hasDraft || !this.state.draft.trim()) return Promise.resolve();
     const text = this.state.draft;
     void this.changeDraft("");
-    return this.persistCompose({ ...this.state.compose, text });
+    return this.replaceComposeText(text);
   }
   stageContext(kind: ContextKind, text: string) {
     if (this.state.busy) return this.queue;
@@ -321,7 +363,7 @@ export class QuickChatController {
     try {
       await this.queue;
       const doomed = await this.store.transaction(this.connection.id, async (saved, persist) => {
-        const draft = saved.compose?.[this.draftKey] ?? this.state.compose;
+        const draft = storedParts(saved.compose?.[this.draftKey]) ?? this.state.compose;
         const removed = draft.files.filter((file) => ids.includes(file.id));
         const next = { ...draft, files: draft.files.filter((file) => !ids.includes(file.id)) };
         saved.compose = { ...saved.compose, [this.draftKey]: next };
@@ -348,7 +390,9 @@ export class QuickChatController {
   }
   async discardCompose() {
     await this.removeFiles(this.state.compose.files.map((file) => file.id));
-    if (!this.state.error) await this.persistCompose(emptyCompose());
+    if (this.state.error) return;
+    await this.persistCompose(emptyParts());
+    await this.replaceComposeText("");
   }
   private checkPolicy(files: StagedFile[], agentId: string | undefined, targetId: string | undefined) {
     if (!files.length) return;
@@ -410,7 +454,7 @@ export class QuickChatController {
     return ids;
   }
   async send(fromCompose = false) {
-    const compose = fromCompose ? this.state.compose : undefined;
+    const compose = fromCompose ? { ...this.state.compose, text: this.composeValue } : undefined;
     const text = compose ? composeMessage(compose.text, compose.context) : this.state.draft.trim();
     if (
       !this.prepared ||
@@ -423,7 +467,8 @@ export class QuickChatController {
       return false;
     const metadata = this.state.metadata;
     let sent = false;
-    let remaining = emptyCompose();
+    let remaining = emptyParts();
+    let cleared = false;
     this.publish({ busy: true, error: undefined, notice: undefined, sshTarget: undefined });
     try {
       await this.queue;
@@ -433,7 +478,11 @@ export class QuickChatController {
         if (saved.pending)
           throw new Error("Another operation has an unconfirmed outcome. Check the outcome before sending.");
         await this.verifyConnection();
-        if (compose) saved.compose = { ...saved.compose, [this.draftKey]: saved.compose?.[this.draftKey] ?? compose };
+        if (compose)
+          saved.compose = {
+            ...saved.compose,
+            [this.draftKey]: storedParts(saved.compose?.[this.draftKey]) ?? composeParts(compose),
+          };
         const draft = compose ? saved.compose![this.draftKey] : undefined;
         let session = this.state.session;
         if (
@@ -548,24 +597,32 @@ export class QuickChatController {
         }
         saved.pending!.acknowledgedAt = this.now();
         saved.sentAt[session.id] = saved.pending!.acknowledgedAt;
+        // Sent text is cleared before the checkpoint, so a crash in between still blocks a duplicate send.
+        // Text edited during the send differs from what was sent and is kept.
         if (draft && compose) {
+          if (this.composeValue === compose.text) {
+            this.composeValue = "";
+            cleared = true;
+            await this.store.drafts.write(this.composeKey, "");
+          }
           const sentContext = new Set(compose.context.map((item) => item.id));
           const sentFiles = new Set(compose.files.map((file) => file.id));
-          const rest = {
-            text: draft.text === compose.text ? "" : draft.text,
+          const rest: ComposeParts = {
             context: draft.context.filter((item) => !sentContext.has(item.id)),
             files: draft.files.filter((file) => !sentFiles.has(file.id)),
           };
-          if (hasCompose(rest)) saved.compose![this.draftKey] = rest;
+          if (rest.context.length || rest.files.length) saved.compose![this.draftKey] = rest;
           else delete saved.compose![this.draftKey];
-          remaining = saved.compose![this.draftKey] ?? emptyCompose();
-        } else if (saved.drafts[this.draftKey]?.trim() === text) saved.drafts[this.draftKey] = "";
+          remaining = saved.compose![this.draftKey] ?? emptyParts();
+        } else if (this.state.draft.trim() === text) await this.store.drafts.write(this.lineKey, "");
         saved.pending = undefined;
         await persist();
         sent = true;
         this.publish({
           session,
-          ...(compose ? { compose: remaining } : { draft: this.state.draft.trim() === text ? "" : this.state.draft }),
+          ...(compose
+            ? { compose: remaining, ...(cleared ? { composeEpoch: this.state.composeEpoch + 1 } : {}) }
+            : { draft: this.state.draft.trim() === text ? "" : this.state.draft }),
           pending: undefined,
           revision: this.state.revision + 1,
           notice: "Message accepted by Waypoint.",
@@ -575,7 +632,7 @@ export class QuickChatController {
       const saved = await this.store.read(this.connection.id).catch(() => undefined);
       this.publish({
         pending: saved?.pending,
-        ...(saved?.compose?.[this.draftKey] ? { compose: saved.compose[this.draftKey] } : {}),
+        ...(saved?.compose?.[this.draftKey] ? { compose: composeParts(saved.compose[this.draftKey]) } : {}),
         error: error instanceof Error ? error.message : "Send failed. Your draft is kept.",
       });
     } finally {
@@ -694,7 +751,7 @@ export class QuickChatController {
     const draft = saved.compose?.[this.draftKey];
     if (!ids.size || !draft) return;
     for (const file of draft.files) if (file.upload && ids.has(file.upload.attachmentId)) file.upload = undefined;
-    this.publish({ compose: structuredClone(draft) });
+    this.publish({ compose: composeParts(structuredClone(draft)) });
   }
   async allowRetry() {
     await this.reconcile();

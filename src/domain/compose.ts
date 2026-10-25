@@ -19,14 +19,17 @@ export interface StagedFile {
   modifiedMs: number;
   upload?: UploadReference;
 }
-export interface ComposeDraft {
-  text: string;
+// Staged parts that sends and their checkpoints track; the message text is stored separately as a draft.
+export interface ComposeParts {
   context: ContextItem[];
   files: StagedFile[];
   // The session a send created or targeted for this draft before it was acknowledged.
   sessionId?: string;
   // Fingerprint of the launch settings that created that session.
   launch?: string;
+}
+export interface ComposeDraft extends ComposeParts {
+  text: string;
 }
 export interface AttachmentPolicy {
   images: boolean;
@@ -41,7 +44,13 @@ export const maxDraftContextBytes = 1024 * 1024;
 const reuseWindowMs = 23 * 60 * 60 * 1000;
 const contextTitles: Record<ContextKind, string> = { selection: "Selected text", clipboard: "Clipboard" };
 
-export const emptyCompose = (): ComposeDraft => ({ text: "", context: [], files: [] });
+export const emptyParts = (): ComposeParts => ({ context: [], files: [] });
+export const composeParts = ({ context, files, sessionId, launch }: ComposeParts): ComposeParts => ({
+  context,
+  files,
+  ...(sessionId ? { sessionId } : {}),
+  ...(launch ? { launch } : {}),
+});
 export const hasCompose = (draft?: ComposeDraft) =>
   !!draft && (!!draft.text.trim() || draft.context.length > 0 || draft.files.length > 0);
 export const contextTitle = (kind: ContextKind) => contextTitles[kind];

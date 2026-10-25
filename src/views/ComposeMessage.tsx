@@ -15,7 +15,7 @@ import {
 } from "@raycast/api";
 import { open } from "node:fs/promises";
 import { join } from "node:path";
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ServerMetadata } from "../api/contracts";
 import {
   ContextKind,
@@ -78,6 +78,9 @@ export function ComposeMessage({
   metadata: ServerMetadata;
 }) {
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
+  // The text stays in the form so keystrokes don't re-render the views beneath it.
+  const [text, setText] = useState(controller.composeText);
+  useEffect(() => setText(controller.composeText()), [controller, state.composeEpoch]);
   const { pop } = useNavigation();
   const mounted = useRef(true);
   useEffect(() => {
@@ -195,8 +198,11 @@ export function ComposeMessage({
         id="message"
         title="Message"
         placeholder="Write a message"
-        value={draft.text}
-        onChange={(text) => void controller.changeCompose({ text })}
+        value={text}
+        onChange={(value) => {
+          setText(value);
+          void controller.setComposeText(value);
+        }}
       />
       {draft.context.map((item) => (
         <Form.Description key={item.id} title={contextTitle(item.kind)} text={preview(item.text)} />

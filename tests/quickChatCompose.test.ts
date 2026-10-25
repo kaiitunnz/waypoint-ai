@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { WaypointClient } from "../src/api/client";
 import { QuickChatController } from "../src/hooks/quickChatController";
 import { LockLostError, ServerMutex } from "../src/storage/mutex";
+import { draftKeys } from "../src/storage/drafts";
 import { QuickChatStore, decodeQuickChat } from "../src/storage/quickChat";
 import { eventWire, metadataWire, sessionWire } from "./fixtures/conversation";
 
@@ -16,8 +17,15 @@ const connection = { id: "server-a", apiUrl: "http://localhost", name: "A", toke
 async function fixture(options: { attachments?: boolean; target?: "password" | "key" } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "compose-controller-"));
   const values = new Map<string, string>();
+  const writes: string[] = [];
   const store = new QuickChatStore(
-    { getItem: async (key) => values.get(key), setItem: async (key, value) => void values.set(key, value) },
+    {
+      getItem: async (key) => values.get(key),
+      setItem: async (key, value) => {
+        writes.push(key);
+        values.set(key, value);
+      },
+    },
     new ServerMutex(directory),
   );
   const metadata = {
@@ -52,6 +60,7 @@ async function fixture(options: { attachments?: boolean; target?: "password" | "
     expire: undefined as string | undefined,
     sshRequired: false,
     connects: [] as string[],
+    beforeInput: undefined as (() => void) | undefined,
   };
   let uploads = 0;
   const client = new WaypointClient(connection.apiUrl, async (url, init) => {
@@ -118,6 +127,7 @@ async function fixture(options: { attachments?: boolean; target?: "password" | "
       }
       const missing = (body.attachments ?? []).find((item: string) => !server.stored.get(id)!.has(item));
       if (missing) return respond({ detail: `attachment not found: ${missing}` }, 404);
+      server.beforeInput?.();
       server.inputs.push({ session: id, text: body.text, attachments: body.attachments });
       return respond({ session });
     }
@@ -144,6 +154,8 @@ async function fixture(options: { attachments?: boolean; target?: "password" | "
     });
   return {
     store,
+    values,
+    writes,
     server,
     client,
     controller,
@@ -157,7 +169,7 @@ test("compose sends create the session, upload typed files, then send their IDs 
   const f = await fixture();
   const c = f.controller();
   await c.start();
-  await c.changeCompose({ text: "Review these" });
+  await c.setComposeText("Review these");
   await c.stageContext("selection", "picked text");
   assert.deepEqual(await c.addFiles([await f.file("shot.png"), await f.file("notes.md")]), []);
   assert.equal(await c.send(true), true);
@@ -172,7 +184,9 @@ test("compose sends create the session, upload typed files, then send their IDs 
       attachments: ["att-1", "att-2"],
     },
   ]);
-  assert.deepEqual(c.getSnapshot().compose, { text: "", context: [], files: [] });
+  assert.deepEqual(c.getSnapshot().compose, { context: [], files: [] });
+  assert.equal(c.composeText(), "");
+  assert.equal(await f.store.drafts.read(draftKeys.compose(connection.id, "quick")), "");
   assert.equal((await f.store.load(connection.id)).compose?.quick, undefined);
   await f.close();
 });
@@ -327,11 +341,10 @@ test("large context is refused and the single-line draft moves into an empty com
   for (const item of c.getSnapshot().compose.context) await c.removeContext(item.id);
   await c.changeDraft("typed in the search bar");
   await c.openCompose();
-  assert.equal(c.getSnapshot().compose.text, "typed in the search bar");
+  assert.equal(c.composeText(), "typed in the search bar");
   assert.equal(c.getSnapshot().draft, "");
-  const saved = await f.store.load(connection.id);
-  assert.equal(saved.drafts.quick, "");
-  assert.equal(saved.compose!.quick.text, "typed in the search bar");
+  assert.equal(await f.store.drafts.read(draftKeys.line(connection.id, "quick")), "");
+  assert.equal(await f.store.drafts.read(draftKeys.compose(connection.id, "quick")), "typed in the search bar");
   await f.close();
 });
 
@@ -358,9 +371,14 @@ test("a live-pid lock with a stale heartbeat is reclaimed and its fenced holder 
     await persist();
   });
   await new Promise((resolve) => setTimeout(resolve, 20));
-  await assert.rejects(other.draft("server-a", "quick", "blocked"), /still active/, "a fresh heartbeat keeps the lock");
+  const write = (text: string) =>
+    other.transaction("server-a", async (state, persist) => {
+      state.drafts.quick = text;
+      await persist();
+    });
+  await assert.rejects(write("blocked"), /still active/, "a fresh heartbeat keeps the lock");
   now += 31_000;
-  await other.draft("server-a", "quick", "reclaimed");
+  await write("reclaimed");
   release();
   await assert.rejects(holder, LockLostError);
   assert.equal(decodeQuickChat(values.get("waypoint.quick-chat.server-a")).drafts.quick, "reclaimed");
@@ -388,4 +406,60 @@ test("reclaiming a stopped holder removes its lock, heartbeat and owner slot", a
   assert.equal(await new ServerMutex(directory, 80, { now: () => 40_000 }).run("server-a", async () => 1), 1);
   assert.deepEqual(await readdir(directory), []);
   await rm(directory, { recursive: true, force: true });
+});
+
+test("compose keystrokes publish only when a draft appears or empties, and never write Quick Chat state", async () => {
+  const f = await fixture();
+  const c = f.controller();
+  await c.start();
+  let published = 0;
+  c.subscribe(() => published++);
+  f.writes.length = 0;
+  for (const text of ["H", "He", "Hel", "Hell", "Hello"]) await c.setComposeText(text);
+  assert.equal(published, 1, "only the first keystroke creates a draft");
+  assert.equal(c.getSnapshot().hasDraft, true);
+  await c.setComposeText("");
+  assert.equal(published, 2);
+  assert.equal(c.getSnapshot().hasDraft, false);
+  assert.ok(f.writes.every((key) => key === draftKeys.compose(connection.id, "quick")));
+  assert.equal(await f.store.drafts.read(draftKeys.compose(connection.id, "quick")), "");
+  await f.close();
+});
+
+test("text typed while a send is in flight is kept; text that was sent is cleared", async () => {
+  const f = await fixture();
+  const c = f.controller();
+  await c.start();
+  await c.setComposeText("First message");
+  f.server.beforeInput = () => void c.setComposeText("Typed during send");
+  assert.equal(await c.send(true), true);
+  assert.equal(f.server.inputs[0].text, "First message");
+  assert.equal(c.composeText(), "Typed during send");
+  assert.equal(await f.store.drafts.read(draftKeys.compose(connection.id, "quick")), "Typed during send");
+  f.server.beforeInput = undefined;
+  const epoch = c.getSnapshot().composeEpoch;
+  assert.equal(await c.send(true), true);
+  assert.equal(c.composeText(), "");
+  assert.ok(c.getSnapshot().composeEpoch > epoch, "the form is told to read the cleared text");
+  await f.close();
+});
+
+test("drafts saved in Quick Chat state before per-key storage are carried over once", async () => {
+  const f = await fixture();
+  await f.store.transaction(connection.id, async (state, persist) => {
+    state.drafts.quick = "old line";
+    state.compose = { quick: { text: "old compose", context: [], files: [] } };
+    await persist();
+  });
+  const c = f.controller();
+  await c.start();
+  assert.equal(c.getSnapshot().draft, "old line");
+  assert.equal(c.composeText(), "old compose");
+  assert.equal(await f.store.drafts.read(draftKeys.line(connection.id, "quick")), "old line");
+  assert.equal(await f.store.drafts.read(draftKeys.compose(connection.id, "quick")), "old compose");
+  await c.changeDraft("");
+  const reopened = f.controller();
+  await reopened.start();
+  assert.equal(reopened.getSnapshot().draft, "", "a cleared per-key draft wins over the old field");
+  await f.close();
 });

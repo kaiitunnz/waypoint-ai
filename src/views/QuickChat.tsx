@@ -22,7 +22,7 @@ import { QuickChatController } from "../hooks/quickChatController";
 import { QuickChatDefaults } from "./QuickChatDefaults";
 import { ComposeMessage, includeContext } from "./ComposeMessage";
 import { ConnectTarget } from "./ConnectTarget";
-import { ContextKind, hasCompose } from "../domain/compose";
+import { ContextKind } from "../domain/compose";
 import { SignInForm } from "./ServerForm";
 import { ManageServers } from "./ManageServers";
 import { LoadingView } from "../components/SessionPresentation";
@@ -137,7 +137,7 @@ function QuickChatView({
         busy={state.busy}
         revision={state.revision}
         onPendingChange={() => void controller.syncPending()}
-        hasDraft={hasCompose(state.compose)}
+        hasDraft={state.hasDraft}
       />
     );
   const context = metadata && state.defaults ? launchContext(state.defaults, metadata) : undefined;
