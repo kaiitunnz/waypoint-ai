@@ -212,6 +212,9 @@ test("model and effort choices keep defaults, custom values, and the effort's th
   assert.ok(effortChoices(catalog, baseline, { ...draft, model: "c" }).choices.some((c) => c.value === "turbo"));
   assert.equal(effortForModel(catalog, "a", "high"), null);
   assert.equal(effortForModel(catalog, "b", "high"), "high");
+  // Typing "c2" passes through "c", which has no efforts; recomputing from the chosen effort brings it back.
+  assert.equal(effortForModel(catalog, "c", "medium"), null);
+  assert.equal(effortForModel(catalog, "c2", "medium"), "medium");
 });
 
 test("dropdown choices always include the current value so nothing changes on open", () => {

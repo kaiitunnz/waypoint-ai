@@ -73,11 +73,17 @@ export function EditSession({
   const [busy, setBusy] = useState(false);
   const { pop, push } = useNavigation();
   const mounted = useRef(true);
+  // The effort last chosen in the form; a custom model typed through a listed ID mustn't drop it for good.
+  const effortIntent = useRef<string | null | undefined>(undefined);
   const { baseline, metadata, caps } = state;
+  const replaceDraft = (next: SettingsDraft) => {
+    effortIntent.current = undefined;
+    setDraft(next);
+  };
   useEffect(() => {
     mounted.current = true;
     controller.attach();
-    void controller.load().then((loaded) => loaded && setDraft(settingsDraft(loaded)));
+    void controller.load().then((loaded) => loaded && replaceDraft(settingsDraft(loaded)));
     return () => {
       mounted.current = false;
       controller.stop();
@@ -99,7 +105,7 @@ export function EditSession({
               <Action
                 title="Reload Settings"
                 icon={Icon.ArrowClockwise}
-                onAction={() => void controller.load().then((loaded) => loaded && setDraft(settingsDraft(loaded)))}
+                onAction={() => void controller.load().then((loaded) => loaded && replaceDraft(settingsDraft(loaded)))}
               />
             </ActionPanel>
           ) : undefined
@@ -120,8 +126,9 @@ export function EditSession({
       metadata.agents.find((agent) => agent.nativeTransport === baseline.transport)?.reattach === true);
   const setModel = (model: string | null) => {
     if (model === draft.model) return;
-    const effort = effortForModel(state.catalog, model, draft.effort);
-    setEffortReset(effort !== draft.effort);
+    if (effortIntent.current === undefined) effortIntent.current = draft.effort;
+    const effort = effortForModel(state.catalog, model, effortIntent.current);
+    setEffortReset(effort !== effortIntent.current);
     update({ model, effort });
   };
   const update = (patch: Partial<SettingsDraft>) => {
@@ -155,7 +162,7 @@ export function EditSession({
       }
       const prepared = await controller.prepare(draft, plan);
       if (prepared.status !== "ready") {
-        setDraft(prepared.draft);
+        replaceDraft(prepared.draft);
         return setProblem(prepared.message);
       }
       const restart = prepared.plan.restartCount > 0 || prepared.plan.interruptsTurn;
@@ -180,7 +187,7 @@ export function EditSession({
         return;
       }
       if (result.status === "failed") {
-        if (mounted.current) return setDraft(result.draft);
+        if (mounted.current) return replaceDraft(result.draft);
         await showToast({
           style: Toast.Style.Failure,
           title: result.applied.length ? "Some changes weren't applied" : "Changes not applied",
@@ -205,7 +212,10 @@ export function EditSession({
   async function reload() {
     const previous = baseline!;
     const next = await controller.load();
-    if (next) setDraft((current) => current && rebaseDraft(current, previous, next));
+    if (next) {
+      effortIntent.current = undefined;
+      setDraft((current) => current && rebaseDraft(current, previous, next));
+    }
   }
 
   const submitTitle =
@@ -317,6 +327,7 @@ export function EditSession({
           }
           onChange={(value) => {
             setEffortReset(false);
+            effortIntent.current = fromChoice(value);
             update({ effort: fromChoice(value) });
           }}
         >

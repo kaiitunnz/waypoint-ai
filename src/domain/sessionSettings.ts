@@ -407,7 +407,7 @@ export function modelChoices(catalog: ModelCatalog | undefined, baseline: Settin
   // Kept while free text is allowed, so typing through a listed ID doesn't remove the selected item.
   const custom = modelChoice(catalog, baseline, draft) === customModelValue;
   if (custom || catalog?.freeText)
-    choices.push({ value: customModelValue, title: custom ? `Custom · ${draft.model}` : "Custom model" });
+    choices.push({ value: customModelValue, title: custom ? `Custom · ${draft.model}` : "Custom model (type below)" });
   for (const model of catalog?.models ?? []) choices.push({ value: model.id, title: model.label });
   return choices;
 }
