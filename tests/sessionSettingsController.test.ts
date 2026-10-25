@@ -313,3 +313,53 @@ test("an unconfirmed restart waits for the session to settle and doesn't resend 
   assert.equal(result.draft.env.API_TOKEN.op, "keep");
   assert.equal(result.draft.args, "--slow");
 });
+
+test("applied steps leave the draft even when the reload after a failure also fails", async () => {
+  let failing = false;
+  const waypoint = fakeWaypoint({
+    handle: (call) => {
+      if (call.path.endsWith("/model")) {
+        failing = true;
+        throw new TypeError("connection reset");
+      }
+      if (failing && call.method === "GET") throw new TypeError("connection reset");
+    },
+  });
+  const { draft, plan } = await opened(waypoint, (base) => ({
+    ...base,
+    model: "gpt-b",
+    env: { ...base.env, API_TOKEN: { op: "replace", value: "secret" } },
+  }));
+  const result = await waypoint.controller.apply(draft, plan);
+  assert.ok(result.status === "failed");
+  assert.deepEqual(result.applied, ["launch settings"]);
+  assert.match(result.message, /didn't confirm the model change.*Reload Settings before applying again/s);
+  assert.equal(result.draft.env.API_TOKEN.op, "keep");
+  assert.deepEqual(
+    waypoint.controller.plan(result.draft)!.steps.map((step) => step.op),
+    ["model"],
+  );
+});
+
+test("reattaching an SSH session that needs its password offers to connect", async () => {
+  const waypoint = fakeWaypoint({
+    session: { launch_target_id: "box", status: "exited" },
+    launch: { launch_target_id: "box" },
+    handle: (call) => (call.path.endsWith("/reattach") ? respond({ detail: "ssh-master-required" }, 409) : undefined),
+  });
+  await waypoint.controller.load();
+  await waypoint.controller.reattach();
+  const snapshot = waypoint.controller.getSnapshot();
+  assert.equal(snapshot.connectTarget, "box");
+  assert.equal(snapshot.result?.message, "Connect Box to restart this session, then reattach.");
+});
+
+test("a session that starts before applying blocks the launch change before any request", async () => {
+  const waypoint = fakeWaypoint();
+  const { draft, plan } = await opened(waypoint, (base) => ({ ...base, args: "--slow" }));
+  waypoint.world.session = { ...waypoint.world.session, status: "starting" };
+  const prepared = await waypoint.controller.prepare(draft, plan);
+  assert.ok(prepared.status === "changed");
+  assert.match(prepared.message, /still starting/);
+  assert.equal(waypoint.mutations().length, 0);
+});
