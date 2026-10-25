@@ -538,3 +538,18 @@ test("sent text leaves the form and search bar before its draft is saved empty",
   assert.deepEqual(seen, [`compose epoch=${epoch + 1} text=`, "line draft="]);
   await f.close();
 });
+
+test("files picked as a send starts are not saved over what it sent", async () => {
+  const f = await fixture();
+  const c = f.controller();
+  await c.start();
+  await c.setComposeText("Sending");
+  await c.stageContext("clipboard", "sent once");
+  const adding = c.addFiles([await f.file("late.txt")]);
+  const sending = c.send(true);
+  assert.deepEqual(await adding, ["A message is being sent. Add the files again when it finishes."]);
+  assert.equal(await sending, true);
+  assert.equal((await f.store.read(connection.id)).compose?.quick, undefined);
+  assert.deepEqual(f.server.uploads, []);
+  await f.close();
+});

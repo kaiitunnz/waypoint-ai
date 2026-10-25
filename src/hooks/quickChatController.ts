@@ -386,6 +386,8 @@ export class QuickChatController {
         problems.push(error instanceof Error ? error.message : `${file.name} cannot be attached.`);
       }
     }
+    // A send that started meanwhile owns the draft; saving this snapshot would bring back what it sent.
+    if (this.state.busy) return [...problems, "A message is being sent. Add the files again when it finishes."];
     await this.persistCompose({ ...this.state.compose, files });
     return problems;
   }
