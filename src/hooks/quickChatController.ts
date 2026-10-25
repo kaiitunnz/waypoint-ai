@@ -503,7 +503,6 @@ export class QuickChatController {
       return false;
     const metadata = this.state.metadata;
     let sent = false;
-    let cleared = false;
     this.publish({ busy: true, error: undefined, notice: undefined, sshTarget: undefined });
     try {
       await this.queue;
@@ -635,25 +634,26 @@ export class QuickChatController {
         }
         saved.pending!.acknowledgedAt = this.now();
         saved.sentAt[session.id] = saved.pending!.acknowledgedAt;
-        // Sent text is cleared before the checkpoint, so a crash in between still blocks a duplicate send.
-        // Text edited during the send differs from what was sent and is kept.
+        // Sent text is cleared on screen first, so a keystroke can't bring it back, and in storage before the
+        // checkpoint, so a crash in between still blocks a duplicate send. Text edited during the send is kept.
         if (draft && compose) {
           if (this.composeValue === compose.text) {
             this.composeValue = "";
-            cleared = true;
+            this.publish({ composeEpoch: this.state.composeEpoch + 1 });
             await this.store.drafts.write(this.composeKey, "");
           }
           // Staging waits for the send, so everything in the saved parts was sent.
           delete saved.compose![this.draftKey];
-        } else if (this.state.draft.trim() === text) await this.store.drafts.write(this.lineKey, "");
+        } else if (this.state.draft.trim() === text) {
+          this.publish({ draft: "" });
+          await this.store.drafts.write(this.lineKey, "");
+        }
         saved.pending = undefined;
         await persist();
         sent = true;
         this.publish({
           session,
-          ...(compose
-            ? { compose: emptyParts(), ...(cleared ? { composeEpoch: this.state.composeEpoch + 1 } : {}) }
-            : { draft: this.state.draft.trim() === text ? "" : this.state.draft }),
+          ...(compose ? { compose: emptyParts() } : {}),
           pending: undefined,
           revision: this.state.revision + 1,
           notice: "Message accepted by Waypoint.",

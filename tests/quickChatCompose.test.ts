@@ -23,6 +23,7 @@ async function fixture(options: { attachments?: boolean; target?: "password" | "
     failed: false,
     // Runs once during the first Quick Chat state read after a failed write.
     afterFailedRead: undefined as (() => void) | undefined,
+    beforeWrite: undefined as ((key: string, value: string) => void) | undefined,
   };
   const store = new QuickChatStore(
     {
@@ -41,6 +42,7 @@ async function fixture(options: { attachments?: boolean; target?: "password" | "
           storage.failed = true;
           throw new Error("Storage unavailable");
         }
+        storage.beforeWrite?.(key, value);
         writes.push(key);
         values.set(key, value);
       },
@@ -514,5 +516,25 @@ test("a save issued while a failed save reads storage is not undone", async () =
     c.getSnapshot().compose.context.map((item) => item.text),
     saved,
   );
+  await f.close();
+});
+
+test("sent text leaves the form and search bar before its draft is saved empty", async () => {
+  const f = await fixture();
+  const c = f.controller();
+  await c.start();
+  const seen: string[] = [];
+  f.storage.beforeWrite = (key, value) => {
+    if (key === draftKeys.compose(connection.id, "quick") && value === "")
+      seen.push(`compose epoch=${c.getSnapshot().composeEpoch} text=${c.composeText()}`);
+    if (key === draftKeys.line(connection.id, "quick") && value === "")
+      seen.push(`line draft=${c.getSnapshot().draft}`);
+  };
+  await c.setComposeText("Composed");
+  const epoch = c.getSnapshot().composeEpoch;
+  assert.equal(await c.send(true), true);
+  await c.changeDraft("Typed");
+  assert.equal(await c.send(), true);
+  assert.deepEqual(seen, [`compose epoch=${epoch + 1} text=`, "line draft="]);
   await f.close();
 });
