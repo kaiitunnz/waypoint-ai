@@ -410,7 +410,7 @@ test("a request event during a history-less refresh triggers a follow-up history
   f.setReadGate(new Promise<void>((resolve) => (release = resolve)));
   const c = f.controller();
   const starting = c.start();
-  while (!f.server.queries.includes("agent?messages=40")) await new Promise((resolve) => setTimeout(resolve, 5));
+  while (!f.server.queries.includes("agent")) await new Promise((resolve) => setTimeout(resolve, 5));
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.ok(!f.server.queries.includes("agent?cursor=0"), "the first refresh skipped history");
   f.server.events.push(approval(1));

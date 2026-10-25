@@ -145,14 +145,17 @@ export class WaypointClient {
     options: { before?: number; cursor?: number } = {},
     signal?: AbortSignal,
   ): Promise<EventsPage> {
+    // Pages use the server's message page size, the same one Waypoint's web app uses.
     const query = new URLSearchParams(
       options.cursor !== undefined
         ? { cursor: String(options.cursor) }
-        : { messages: "40", ...(options.before !== undefined ? { before_sequence: String(options.before) } : {}) },
-    );
+        : options.before !== undefined
+          ? { before_sequence: String(options.before) }
+          : {},
+    ).toString();
     // Cursor reads return every later event in one response, so they get more time.
     return this.read(
-      `/api/sessions/${encodeURIComponent(id)}/events?${query}`,
+      `/api/sessions/${encodeURIComponent(id)}/events${query ? `?${query}` : ""}`,
       token,
       signal,
       (value) => parseEventsPage(value, id),
