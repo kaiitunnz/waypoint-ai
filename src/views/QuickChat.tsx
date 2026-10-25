@@ -1,4 +1,15 @@
-import { Action, ActionPanel, Alert, Icon, Keyboard, List, Toast, confirmAlert, showToast } from "@raycast/api";
+import {
+  Action,
+  ActionPanel,
+  Alert,
+  Icon,
+  Keyboard,
+  List,
+  Toast,
+  confirmAlert,
+  showToast,
+  useNavigation,
+} from "@raycast/api";
 import { useState, useSyncExternalStore } from "react";
 import { useConnections } from "../hooks/useConnections";
 import { useQuickChat } from "../hooks/useQuickChat";
@@ -9,6 +20,9 @@ import { sessionUrl } from "../domain/sessions";
 import { ChatConversation } from "./ChatConversation";
 import { QuickChatController } from "../hooks/quickChatController";
 import { QuickChatDefaults } from "./QuickChatDefaults";
+import { ComposeMessage, includeContext } from "./ComposeMessage";
+import { ConnectTarget } from "./ConnectTarget";
+import { ContextKind } from "../domain/compose";
 import { SignInForm } from "./ServerForm";
 import { ManageServers } from "./ManageServers";
 import { LoadingView } from "../components/SessionPresentation";
@@ -123,6 +137,7 @@ function QuickChatView({
         busy={state.busy}
         revision={state.revision}
         onPendingChange={() => void controller.syncPending()}
+        hasDraft={state.hasDraft}
       />
     );
   const context = metadata && state.defaults ? launchContext(state.defaults, metadata) : undefined;
@@ -187,8 +202,55 @@ function QuickChatActions({
   const metadata = state.metadata;
   const url = state.session ? sessionUrl(connection.frontendUrl, state.session.id) : connection.frontendUrl;
   const interaction = state.pending?.kind === "interaction";
+  const { push } = useNavigation();
+  const compose = metadata && <ComposeMessage controller={controller} metadata={metadata} />;
+  const include = async (kind: ContextKind) => {
+    if (compose && (await includeContext(controller, kind))) push(compose);
+  };
   return (
     <>
+      {compose && (
+        <ActionPanel.Section>
+          <Action.Push
+            title="Compose Message"
+            icon={Icon.Pencil}
+            shortcut={{
+              macOS: { modifiers: ["cmd", "shift"], key: "m" },
+              Windows: { modifiers: ["ctrl", "shift"], key: "m" },
+            }}
+            target={compose}
+          />
+          {!state.busy && (
+            <>
+              <Action
+                title="Include Selected Text"
+                icon={Icon.Text}
+                shortcut={{
+                  macOS: { modifiers: ["cmd", "shift"], key: "e" },
+                  Windows: { modifiers: ["ctrl", "shift"], key: "e" },
+                }}
+                onAction={() => include("selection")}
+              />
+              <Action
+                title="Include Clipboard"
+                icon={Icon.Clipboard}
+                shortcut={{
+                  macOS: { modifiers: ["cmd", "shift"], key: "v" },
+                  Windows: { modifiers: ["ctrl", "shift"], key: "v" },
+                }}
+                onAction={() => include("clipboard")}
+              />
+            </>
+          )}
+        </ActionPanel.Section>
+      )}
+      {state.sshTarget && metadata && (
+        <Action.Push
+          title="Connect SSH Target"
+          icon={Icon.Lock}
+          target={<ConnectTarget controller={controller} metadata={metadata} />}
+        />
+      )}
       {interaction && state.pending?.sessionId !== state.session?.id && (
         <>
           <Action

@@ -14,6 +14,7 @@ export interface Session {
   lastEventAt: string;
   model?: string;
   permissionMode?: string;
+  targetId?: string;
   context?: { used: number; limit?: number };
   tokens?: number;
   rateLimits: { label: string; percent: number }[];
@@ -81,6 +82,7 @@ export function parseSession(value: unknown): Session {
     lastEventAt: text(value.last_event_at ?? value.updated_at),
     model: optionalText(value.resolved_model) ?? optionalText(value.model),
     permissionMode: optionalText(value.permission_mode),
+    targetId: optionalText(value.launch_target_id),
     context: used !== undefined ? { used, limit: number(context?.context_window_tokens) } : undefined,
     tokens: number(usage?.display_total_tokens),
     rateLimits: Array.isArray(limits?.windows)
@@ -96,6 +98,24 @@ export function parseSession(value: unknown): Session {
           Object.entries(value.tags).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
         )
       : {},
+  };
+}
+
+export interface Attachment {
+  id: string;
+  filename: string;
+  kind: "image" | "file";
+  size: number;
+}
+
+export function parseAttachment(value: unknown): Attachment {
+  if (!isRecord(value) || typeof value.id !== "string" || !value.id || typeof value.filename !== "string")
+    throw new Error("Invalid attachment");
+  return {
+    id: value.id,
+    filename: value.filename,
+    kind: value.kind === "image" ? "image" : "file",
+    size: number(value.size) ?? 0,
   };
 }
 
@@ -154,10 +174,13 @@ export function parseEvent(value: unknown, sessionId: string): SessionEvent {
     "is_error",
     "tool_input",
     "plan",
-    "attachments",
   ]) {
     if (source[key] !== undefined) metadata[key] = source[key];
   }
+  if (Array.isArray(source.attachments))
+    metadata.attachments = source.attachments.flatMap((item) =>
+      isRecord(item) && typeof item.id === "string" ? [pick(item, ["id", "filename", "kind"])] : [],
+    );
   if (isRecord(source.approval)) metadata.approval = pick(source.approval, ["approval_id"]);
   if (isRecord(source.interaction))
     metadata.interaction = pick(source.interaction, ["kind", "request_id", "title", "body", "plan_item_id"]);

@@ -14,7 +14,8 @@ import {
   sessionInteractions,
 } from "../domain/interactions";
 import { mergeEvents, newerQuestions } from "../domain/transcript";
-import { QuickChatStore, PendingOperation } from "../storage/quickChat";
+import { draftKeys } from "../storage/drafts";
+import { QuickChatStore, PendingOperation, isInteractionDraft } from "../storage/quickChat";
 import { FeedConnection, ConversationSnapshot } from "./sessionFeeds";
 import { isStructured } from "../domain/sessions";
 
@@ -63,7 +64,6 @@ export class InteractionController {
   private notPending = new Set<string>();
   private generation = 0;
   private active = true;
-  private queue: Promise<unknown> = Promise.resolve();
   constructor(
     private readonly connection: FeedConnection,
     private readonly sessionId: string,
@@ -111,6 +111,24 @@ export class InteractionController {
   }
   draftKey(interaction: Interaction) {
     return `${this.sessionId}:${interaction.key}:${interaction.signature}`;
+  }
+  private get draftsKey() {
+    return draftKeys.interactions(this.connection.id, this.sessionId);
+  }
+  private async readDrafts(): Promise<Record<string, InteractionDraft> | undefined> {
+    const raw = await this.store.drafts.read(this.draftsKey);
+    if (raw === undefined) return undefined;
+    try {
+      const value: unknown = JSON.parse(raw);
+      if (value && typeof value === "object" && !Array.isArray(value))
+        return Object.fromEntries(Object.entries(value).filter(([, draft]) => isInteractionDraft(draft)));
+    } catch {
+      /* An unreadable draft record is replaced by the next edit. */
+    }
+    return {};
+  }
+  private saveDrafts(drafts: Record<string, InteractionDraft>) {
+    return this.store.drafts.write(this.draftsKey, JSON.stringify(drafts));
   }
   start() {
     this.active = true;
@@ -186,15 +204,23 @@ export class InteractionController {
     const questionChanges = this.questionChanges;
     this.publish({ loading: true, error: undefined, loadError: undefined });
     try {
-      await this.queue;
-      const [fresh, saved] = await Promise.all([this.snapshot(), this.store.load(this.connection.id)]);
+      const [fresh, saved, stored] = await Promise.all([
+        this.snapshot(),
+        this.store.read(this.connection.id),
+        this.readDrafts(),
+      ]);
       if (!this.active || generation !== this.generation) return;
       this.adopt(fresh, sessionChanges, questionChanges);
+      // Drafts saved before per-session storage are carried over once.
+      const legacy = Object.fromEntries(
+        Object.entries(saved.interactionDrafts ?? {}).filter(([key]) => key.startsWith(`${this.sessionId}:`)),
+      );
+      if (stored === undefined && Object.keys(legacy).length) void this.saveDrafts(legacy).catch(() => undefined);
       this.publish({
         loading: false,
         pending: saved.pending,
         ...(saved.pending?.operationId !== this.state.pending?.operationId ? { outcome: undefined } : {}),
-        drafts: { ...saved.interactionDrafts, ...this.state.drafts },
+        drafts: { ...(stored ?? legacy), ...this.state.drafts },
       });
       await this.prune();
     } catch (error) {
@@ -219,34 +245,19 @@ export class InteractionController {
     const prefix = `${this.sessionId}:`;
     const keep = (key: string, pending?: PendingOperation) =>
       !key.startsWith(prefix) || open.has(key.slice(prefix.length, key.lastIndexOf(":"))) || pending?.draftKey === key;
-    const operation = this.queue.then(() =>
-      this.store.transaction(this.connection.id, async (saved, persist) => {
-        const drafts = saved.interactionDrafts ?? {};
-        const stale = Object.keys(drafts).filter((key) => !keep(key, saved.pending));
-        if (!stale.length) return;
-        stale.forEach((key) => delete drafts[key]);
-        await persist();
-      }),
+    const drafts = Object.fromEntries(
+      Object.entries(this.state.drafts).filter(([key]) => keep(key, this.state.pending)),
     );
-    this.queue = operation.catch(() => undefined);
-    await this.queue;
-    this.publish({
-      drafts: Object.fromEntries(Object.entries(this.state.drafts).filter(([key]) => keep(key, this.state.pending))),
-    });
+    if (Object.keys(drafts).length === Object.keys(this.state.drafts).length) return;
+    this.publish({ drafts });
+    await this.saveDrafts(drafts).catch(() => undefined);
   }
   changeDraft(interaction: Interaction, draft: InteractionDraft) {
     const key = this.draftKey(interaction);
     this.publish({ drafts: { ...this.state.drafts, [key]: draft } });
-    const operation = this.queue.then(() =>
-      this.store.transaction(this.connection.id, async (saved, persist) => {
-        saved.interactionDrafts = { ...saved.interactionDrafts, [key]: draft };
-        await persist();
-      }),
-    );
-    this.queue = operation.catch(() =>
+    return this.saveDrafts(this.state.drafts).catch(() =>
       this.publish({ error: "Could not save this response. Keep this form open and retry." }),
     );
-    return this.queue;
   }
   async submit(captured: Interaction, draft: InteractionDraft, cancel = false): Promise<boolean> {
     if (this.state.busy || this.state.loading) return false;
@@ -256,8 +267,7 @@ export class InteractionController {
     let settled = false;
     try {
       if (!cancel) await this.changeDraft(captured, draft);
-      await this.queue;
-      await this.store.transaction(this.connection.id, async (saved, persist) => {
+      await this.store.transaction(this.connection.id, async (saved, persist, fence) => {
         if (saved.pending)
           throw new Error(
             saved.pending.kind === "interaction"
@@ -288,6 +298,7 @@ export class InteractionController {
         await persist();
         let session: Session;
         try {
+          await fence();
           session = await this.client.interaction(
             this.connection.token,
             this.sessionId,
@@ -309,13 +320,16 @@ export class InteractionController {
         acknowledged = true;
         this.session = session;
         this.sessionChanges++;
+        // The answered draft is removed before the checkpoint, so a crash in between still reports it unconfirmed.
+        const drafts = { ...this.state.drafts };
+        delete drafts[draftKey];
+        await this.saveDrafts(drafts);
         saved.pending = undefined;
-        if (saved.interactionDrafts) delete saved.interactionDrafts[draftKey];
         await persist();
         settled = true;
       });
     } catch (error) {
-      const saved = await this.store.load(this.connection.id).catch(() => undefined);
+      const saved = await this.store.read(this.connection.id).catch(() => undefined);
       this.publish({
         pending: saved?.pending,
         error: acknowledged ? unsaved : message(error, "Could not send the response."),
@@ -363,7 +377,6 @@ export class InteractionController {
     if (this.state.busy || !this.owns(pending)) return;
     this.publish({ busy: true, error: undefined, notice: undefined });
     try {
-      await this.queue;
       await this.store.transaction(this.connection.id, async (saved, persist) => {
         if (saved.pending?.operationId !== pending.operationId)
           throw new Error("The unconfirmed attempt changed. Check it again.");

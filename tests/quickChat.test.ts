@@ -8,6 +8,7 @@ import { parseMetadata } from "../src/api/contracts";
 import { WaypointClient } from "../src/api/client";
 import { parseSession, parseEvent } from "../src/api/sessions";
 import { createRequest, initialDefaults, ongoing, reuseDecision } from "../src/domain/quickChat";
+import { draftKeys } from "../src/storage/drafts";
 import { QuickChatStore, decodeQuickChat } from "../src/storage/quickChat";
 import { ServerMutex } from "../src/storage/mutex";
 import { QuickChatController } from "../src/hooks/quickChatController";
@@ -34,8 +35,8 @@ async function fixture() {
         return values.get(key);
       },
       setItem: async (key, value) => {
-        const state = JSON.parse(value);
-        if (failFinalWrite && !state.pending && Object.keys(state.sentAt).length) {
+        const state = key.startsWith("waypoint.quick-chat.") ? JSON.parse(value) : undefined;
+        if (failFinalWrite && state && !state.pending && Object.keys(state.sentAt).length) {
           failFinalWrite = false;
           throw new Error("Storage unavailable");
         }
@@ -395,6 +396,7 @@ test("missing or foreign pointer requires explicit New Chat and retains draft", 
     });
     const c = f.controller();
     await c.start();
+    assert.match(c.getSnapshot().error!, /no longer on this server\. Choose Start New Chat/);
     await c.send();
     assert.equal(f.sessions.length, 0);
     assert.equal(c.getSnapshot().draft, "Retained");
@@ -416,18 +418,18 @@ test("missing or foreign pointer requires explicit New Chat and retains draft", 
   }
 });
 
-test("drafts and defaults round trip per server; corrupt versions are never replaced", async () => {
+test("drafts are stored per server and key; corrupt Quick Chat state is never replaced", async () => {
   const f = await fixture();
   try {
-    await f.store.draft("a", "quick", "A");
-    await f.store.draft("b", "quick", "B");
-    await f.store.draft("a", "new", "New draft");
-    assert.equal((await f.store.load("a")).drafts.quick, "A");
-    assert.equal((await f.store.load("a")).drafts.new, "New draft");
-    assert.equal((await f.store.load("b")).drafts.quick, "B");
+    await f.store.drafts.write(draftKeys.line("a", "quick"), "A");
+    await f.store.drafts.write(draftKeys.line("b", "quick"), "B");
+    await f.store.drafts.write(draftKeys.line("a", "new"), "New draft");
+    assert.equal(await f.store.drafts.read(draftKeys.line("a", "quick")), "A");
+    assert.equal(await f.store.drafts.read(draftKeys.line("a", "new")), "New draft");
+    assert.equal(await f.store.drafts.read(draftKeys.line("b", "quick")), "B");
     assert.throws(() => decodeQuickChat('{"version":2}'), /could not be read/);
     f.values.set("waypoint.quick-chat.corrupt", '{"version":2}');
-    await assert.rejects(f.store.draft("corrupt", "quick", "replace"), /could not be read/);
+    await assert.rejects(f.store.defaults("corrupt", decodeQuickChat().defaults), /could not be read/);
     assert.equal(f.values.get("waypoint.quick-chat.corrupt"), '{"version":2}');
   } finally {
     await f.close();
@@ -680,7 +682,7 @@ test("a late acknowledged input persists after the view closes", async () => {
   }
 });
 
-test("a failed final storage write cannot cause an acknowledged input to be resent on reopen", async () => {
+test("a failed final storage write keeps the checkpoint and never offers the acknowledged text again", async () => {
   const f = await fixture();
   try {
     const c = f.controller();
@@ -693,7 +695,7 @@ test("a failed final storage write cannot cause an acknowledged input to be rese
     await reopened.start();
     await reopened.send();
     assert.equal(f.requests.filter((request) => request.path.endsWith("/input")).length, 1);
-    assert.equal(reopened.getSnapshot().draft, "Accepted before storage failed");
+    assert.equal(reopened.getSnapshot().draft, "");
   } finally {
     await f.close();
   }
@@ -759,7 +761,7 @@ test("refresh waits for queued draft writes instead of restoring old text", asyn
     await c.start();
     await saving;
     assert.equal(c.getSnapshot().draft, "New text");
-    assert.equal((await f.store.load(connection.id)).drafts.quick, "New text");
+    assert.equal(await f.store.drafts.read(draftKeys.line(connection.id, "quick")), "New text");
   } finally {
     await f.close();
   }
@@ -785,7 +787,7 @@ test("an edit during a delayed refresh remains the visible and saved draft", asy
     await refreshing;
     await saving;
     assert.equal(c.getSnapshot().draft, "Edited during refresh");
-    assert.equal((await f.store.load(connection.id)).drafts.quick, "Edited during refresh");
+    assert.equal(await f.store.drafts.read(draftKeys.line(connection.id, "quick")), "Edited during refresh");
   } finally {
     await f.close();
   }

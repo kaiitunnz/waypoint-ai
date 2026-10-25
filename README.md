@@ -55,7 +55,7 @@ If Waypoint does not confirm a response, nothing is retried. **Check Previous Ou
 
 ## Quick Chat
 
-Type in the top message field and press Enter to send. Follow-ups continue the same Waypoint session. The transcript keeps loaded turns together in chronological order, alongside the draft. The conversation row shows its turn count; Latest Response is an optional focused view. Sending returns to the continuous conversation. Activity details, response copying, full-width reading, and session information are available in Actions.
+Type in the top message field and press Enter to send. Follow-ups continue the same Waypoint session. The transcript keeps loaded turns together in chronological order, alongside the draft. The conversation row shows its turn count; Latest Response is an optional focused view. Sending returns to the continuous conversation. Activity details, copying or pasting the latest response, full-width reading, and session information are available in Actions. The side panel shows the first 4,000 characters of a very long message; full-width reading shows all of it.
 
 ![Quick Chat](docs/screenshots/quick-chat.jpg)
 
@@ -65,7 +65,21 @@ Defaults apply to new conversations. Choose the server preset, execution target,
 
 Drafts survive closing the command. Reopening catches up with Waypoint without resending. Rejected sends keep the draft and an already-created session. **Interrupt Session** is explicit; exited sessions reattach before sending when their transport supports it.
 
+Sends to one server run one at a time across extension commands. A command waits a few seconds for another one's send to finish; a command that stopped mid-send releases the server after 30 seconds.
+
 An unconfirmed operation blocks further sends. **Check Previous Outcome** inspects the session and history without resending. Matching recorded input does not establish agent delivery. **Allow Explicit Retry** warns that another attempt may duplicate work. **Abandon Attempt and Start New Chat** discards the local checkpoint after confirmation; existing sessions keep running. Coordination covers extension commands on this computer, not other devices.
+
+## Composing messages
+
+**Compose Message** opens a multiline form for the current Quick Chat or New Chat destination, which it names at the top. Text already typed in the message field moves into an empty draft. Each saved server keeps one compose draft for Quick Chat and one for New Chat; closing the form keeps it, and **Discard Draft** removes it.
+
+**Include Selected Text** and **Include Clipboard** read the selection or clipboard once and stage it in the form, where it can be reviewed or removed before sending. Each item is sent verbatim in a fenced block after the message. An item can be up to 256 KB, and a draft can hold up to 1 MB.
+
+Files and images can be attached when the agent accepts attachments. They upload to Waypoint when you send, up to 25 MB each, and the message carries the uploaded files. Agents on a remote execution target receive only the files Waypoint can deliver there: OpenCode takes files and images, Claude Code takes images, and other agents take none. If a send fails, the draft keeps its files, and uploads that are still valid are reused on retry.
+
+![Compose Message](docs/screenshots/compose-message.jpg)
+
+When a send needs a password-auth SSH target that is not connected, **Connect SSH Target** asks for its password. Waypoint uses it once to connect, then the send or reattach continues. The password is not saved.
 
 ## Development
 
@@ -86,4 +100,4 @@ The gate checks formatting, ESLint, strict TypeScript, behavior and HTTP integra
 
 Source is organized into thin command entries, `api/`, `domain/`, `storage/`, `hooks/`, `views/`, and `components/`. Tests compile into an ignored temporary build directory using the installed TypeScript compiler and Node's test runner.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contributor guidance and [connection acceptance](docs/server-connections-acceptance.md) [conversation acceptance](docs/session-conversations-acceptance.md), and [Quick Chat acceptance](docs/quick-chat-acceptance.md) for runtime coverage.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contributor guidance and [connection acceptance](docs/server-connections-acceptance.md), [conversation acceptance](docs/session-conversations-acceptance.md), [Quick Chat acceptance](docs/quick-chat-acceptance.md), [session interactions acceptance](docs/session-interactions-acceptance.md), and [desktop inputs acceptance](docs/desktop-inputs-acceptance.md) for runtime coverage.

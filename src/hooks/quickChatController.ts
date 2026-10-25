@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { stat } from "node:fs/promises";
 import { ApiError, WaypointClient } from "../api/client";
 import { ServerMetadata } from "../api/contracts";
 import { Session } from "../api/sessions";
@@ -7,13 +8,31 @@ import {
   canReattach,
   createRequest,
   createTag,
+  launchContext,
+  launchFingerprint,
   ongoing,
   ownerTag,
   reuseDecision,
   roleTag,
 } from "../domain/quickChat";
 import { isStructured } from "../domain/sessions";
-import { PendingOperation, QuickChatStore } from "../storage/quickChat";
+import {
+  ComposeParts,
+  ContextKind,
+  StagedFile,
+  attachmentPolicy,
+  composeMessage,
+  composeParts,
+  emptyParts,
+  fileProblem,
+  hasCompose,
+  isImage,
+  maxContextBytes,
+  maxDraftContextBytes,
+  reusableUpload,
+} from "../domain/compose";
+import { draftKeys } from "../storage/drafts";
+import { PendingOperation, QuickChatState, QuickChatStore } from "../storage/quickChat";
 import { FeedConnection } from "./sessionFeeds";
 
 export interface QuickChatSnapshot {
@@ -27,9 +46,43 @@ export interface QuickChatSnapshot {
   notice?: string;
   pending?: PendingOperation;
   revision: number;
+  // Staged context and files. The message text is form-local; read it with composeText().
+  compose: ComposeParts;
+  // Bumped whenever the controller replaces the message text, so the form reads it again.
+  composeEpoch: number;
+  hasDraft: boolean;
+  upload?: string;
+  // A password-auth SSH target that must be connected before the failed operation can be retried.
+  sshTarget?: string;
+}
+type Retry = "send" | "compose" | "reattach";
+type FileStats = { size: number; modifiedMs: number };
+
+const storedParts = (stored?: ComposeParts) => stored && composeParts(stored);
+const attachmentIds = (value: unknown): string[] =>
+  Array.isArray(value)
+    ? value.flatMap((item) => (typeof item === "object" && item && typeof item.id === "string" ? [item.id] : []))
+    : [];
+
+async function fileStats(file: StagedFile): Promise<FileStats> {
+  const stats = await stat(file.path).catch(() => undefined);
+  const problem = fileProblem(stats && { isFile: stats.isFile(), size: stats.size });
+  if (problem) throw new Error(`${file.name}: ${problem}`);
+  return { size: stats!.size, modifiedMs: stats!.mtimeMs };
 }
 export class QuickChatController {
-  private state: QuickChatSnapshot = { loading: true, busy: false, draft: "", revision: 0 };
+  private state: QuickChatSnapshot = {
+    loading: true,
+    busy: false,
+    draft: "",
+    revision: 0,
+    compose: emptyParts(),
+    composeEpoch: 0,
+    hasDraft: false,
+  };
+  private composeValue = "";
+  private composeSaves = 0;
+  private retry?: Retry;
   private listeners = new Set<() => void>();
   private active = true;
   private generation = 0;
@@ -39,6 +92,8 @@ export class QuickChatController {
   private draftLoaded = false;
   private queue: Promise<unknown> = Promise.resolve();
   private readonly draftKey: string;
+  private readonly lineKey: string;
+  private readonly composeKey: string;
   constructor(
     private readonly connection: FeedConnection,
     private readonly store: QuickChatStore,
@@ -48,9 +103,12 @@ export class QuickChatController {
     private readonly now = Date.now,
   ) {
     this.draftKey = forceNew ? "new" : "quick";
+    this.lineKey = draftKeys.line(connection.id, this.draftKey);
+    this.composeKey = draftKeys.compose(connection.id, this.draftKey);
   }
   canSend = () => this.prepared && !this.state.loading && !this.state.busy && !this.state.pending;
   getSnapshot = () => this.state;
+  composeText = () => this.composeValue;
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
     return () => {
@@ -59,7 +117,9 @@ export class QuickChatController {
   };
   private publish(patch: Partial<QuickChatSnapshot>) {
     if (!this.active) return;
-    this.state = { ...this.state, ...patch };
+    const next = { ...this.state, ...patch };
+    next.hasDraft = hasCompose({ ...next.compose, text: this.composeValue });
+    this.state = next;
     this.listeners.forEach((listener) => listener());
   }
   stop() {
@@ -72,10 +132,24 @@ export class QuickChatController {
     this.publish({ loading: true, error: undefined });
     try {
       await this.queue;
-      const saved = await this.store.load(this.connection.id);
+      const [saved, line, text] = await Promise.all([
+        this.store.read(this.connection.id),
+        this.store.drafts.read(this.lineKey),
+        this.store.drafts.read(this.composeKey),
+      ]);
       if (!this.active || generation !== this.generation) return;
+      if (!this.draftLoaded) {
+        // Drafts saved before per-key storage are carried over once.
+        const legacyLine = saved.drafts[this.draftKey];
+        const legacyText = saved.compose?.[this.draftKey]?.text;
+        if (line === undefined && legacyLine) void this.saveDraft(this.lineKey, legacyLine);
+        if (text === undefined && legacyText) void this.saveDraft(this.composeKey, legacyText);
+        this.composeValue = text ?? legacyText ?? "";
+      }
       this.publish({
-        draft: this.draftLoaded ? this.state.draft : (saved.drafts[this.draftKey] ?? ""),
+        draft: this.draftLoaded ? this.state.draft : (line ?? saved.drafts[this.draftKey] ?? ""),
+        compose: this.draftLoaded ? this.state.compose : (storedParts(saved.compose?.[this.draftKey]) ?? emptyParts()),
+        composeEpoch: this.draftLoaded ? this.state.composeEpoch : this.state.composeEpoch + 1,
         defaults: saved.defaults,
         pending: saved.pending,
       });
@@ -94,11 +168,15 @@ export class QuickChatController {
         this.checkOwned(session, saved.installation, metadata);
         if (this.active && generation === this.generation) this.publish({ session });
         this.prepared = true;
+      } else if (!this.prepared && this.forceNew) {
+        const session = await this.emptyBoundSession(saved, metadata);
+        if (session && this.active && generation === this.generation) this.publish({ session });
+        this.prepared = true;
       } else if (!this.prepared) {
         this.observedPointer = saved.pointer;
         this.observedDefaults = JSON.stringify(saved.defaults);
         if (!this.forceNew && saved.defaults.mode !== "new" && saved.pointer) {
-          const session = await this.client.session(this.connection.token, saved.pointer);
+          const session = await this.savedConversation(saved.pointer);
           this.checkOwned(session, saved.installation, metadata);
           const page = await this.client.events(this.connection.token, session.id);
           const expired =
@@ -142,6 +220,17 @@ export class QuickChatController {
         });
     }
   }
+  private async savedConversation(id: string) {
+    try {
+      return await this.client.session(this.connection.token, id);
+    } catch (error) {
+      if (error instanceof ApiError && error.kind === "not-found")
+        throw new Error(
+          "Your last Quick Chat conversation is no longer on this server. Choose Start New Chat; your draft is kept.",
+        );
+      throw error;
+    }
+  }
   private checkOwned(session: Session, installation: string, metadata: ServerMetadata) {
     if (session.tags[ownerTag] !== installation || session.tags[roleTag] !== "quick-chat")
       throw new Error(
@@ -156,15 +245,25 @@ export class QuickChatController {
         "This conversation cannot be resumed by its current interface. Choose Start New Chat; your draft is kept.",
       );
   }
+  private saveDraft(key: string, text: string) {
+    return this.store.drafts
+      .write(key, text)
+      .catch(() => this.publish({ error: "Could not save draft. Keep this view open and retry." }));
+  }
   changeDraft(text: string) {
     this.publish({ draft: text });
-    const operation = this.queue.then(() => this.store.draft(this.connection.id, this.draftKey, text));
-    this.queue = operation.catch((error) =>
-      this.publish({
-        error: error instanceof Error ? error.message : "Could not save draft. Keep this view open and retry.",
-      }),
-    );
-    return this.queue;
+    return this.saveDraft(this.lineKey, text);
+  }
+  // Keystrokes stay in the form; only a change in whether a draft exists is published.
+  setComposeText(text: string) {
+    this.composeValue = text;
+    if (hasCompose({ ...this.state.compose, text }) !== this.state.hasDraft) this.publish({});
+    return this.saveDraft(this.composeKey, text);
+  }
+  private replaceComposeText(text: string) {
+    this.composeValue = text;
+    this.publish({ composeEpoch: this.state.composeEpoch + 1 });
+    return this.saveDraft(this.composeKey, text);
   }
   async newChat() {
     if (this.state.busy || this.state.pending) return;
@@ -180,25 +279,250 @@ export class QuickChatController {
       revision: this.state.revision + 1,
     });
   }
-  async send() {
+  // A session a New Chat send created for this draft but never delivered input to is continued, not replaced.
+  private boundSession?: Promise<Session | undefined>;
+  private emptyBoundSession(saved: QuickChatState, metadata: ServerMetadata) {
+    const bound = saved.compose?.[this.draftKey]?.sessionId;
+    if (!bound || saved.sentAt[bound] !== undefined) return Promise.resolve(undefined);
+    this.boundSession ??= (async () => {
+      try {
+        const session = await this.client.session(this.connection.token, bound);
+        this.checkOwned(session, saved.installation, metadata);
+        // Defaults changed since the session was created: the next send starts a session with the new ones.
+        const launch = saved.compose?.[this.draftKey]?.launch;
+        if (!launch || launch !== launchFingerprint(createRequest(saved.defaults, metadata, saved.installation, "")))
+          return undefined;
+        const page = await this.client.events(this.connection.token, bound, { cursor: 0 });
+        return page.events.some((event) => event.kind === "user_input") ? undefined : session;
+      } catch {
+        return undefined;
+      }
+    })();
+    return this.boundSession;
+  }
+  // Resolves whether the parts were saved. Sends use the saved parts, so when the latest save fails the form shows those again.
+  private persistCompose(compose: ComposeParts): Promise<boolean> {
+    const save = ++this.composeSaves;
+    this.publish({ compose });
+    const result = this.queue
+      .then(() =>
+        this.store.transaction(this.connection.id, async (saved, persist) => {
+          saved.compose = { ...saved.compose, [this.draftKey]: compose };
+          await persist();
+        }),
+      )
+      .then(
+        () => true,
+        async (error) => {
+          const saved =
+            save === this.composeSaves ? await this.store.read(this.connection.id).catch(() => undefined) : undefined;
+          this.publish({
+            ...(saved && save === this.composeSaves
+              ? { compose: storedParts(saved.compose?.[this.draftKey]) ?? emptyParts() }
+              : {}),
+            error: error instanceof Error ? error.message : "Could not save draft. Keep this view open and retry.",
+          });
+          return false;
+        },
+      );
+    this.queue = result;
+    return result;
+  }
+  // Moves the single-line draft into an empty compose draft so the text isn't sent twice.
+  openCompose() {
+    return this.state.busy || this.state.hasDraft ? Promise.resolve() : this.moveLineDraft();
+  }
+  private moveLineDraft() {
+    const text = this.state.draft;
+    if (!text.trim()) return Promise.resolve();
+    void this.changeDraft("");
+    return this.replaceComposeText(text);
+  }
+  // Resolves whether the text was staged and saved.
+  async stageContext(kind: ContextKind, text: string): Promise<boolean> {
+    if (this.state.busy) return false;
+    if (Buffer.byteLength(text) > maxContextBytes) {
+      this.publish({ error: "That text is larger than 256 KB. Attach it as a file instead." });
+      return false;
+    }
+    const staged = this.state.compose.context.reduce((total, item) => total + Buffer.byteLength(item.text), 0);
+    if (staged + Buffer.byteLength(text) > maxDraftContextBytes) {
+      this.publish({ error: "This draft already has 1 MB of context. Remove some before adding more." });
+      return false;
+    }
+    this.publish({ error: undefined });
+    const move = !this.state.hasDraft;
+    const saved = await this.persistCompose({
+      ...this.state.compose,
+      context: [...this.state.compose.context, { id: randomUUID(), kind, text }],
+    });
+    if (saved && move) await this.moveLineDraft();
+    return saved;
+  }
+  removeContext(id: string) {
+    if (this.state.busy) return this.queue;
+    return this.persistCompose({
+      ...this.state.compose,
+      context: this.state.compose.context.filter((item) => item.id !== id),
+    });
+  }
+  async addFiles(paths: string[]): Promise<string[]> {
+    if (this.state.busy) return [];
+    const problems: string[] = [];
+    const files = [...this.state.compose.files];
+    for (const path of paths) {
+      if (files.some((file) => file.path === path)) continue;
+      const file: StagedFile = {
+        id: randomUUID(),
+        path,
+        name: path.split(/[\\/]/).pop() || path,
+        size: 0,
+        modifiedMs: 0,
+      };
+      try {
+        const stats = await fileStats(file);
+        files.push({ ...file, ...stats });
+      } catch (error) {
+        problems.push(error instanceof Error ? error.message : `${file.name} cannot be attached.`);
+      }
+    }
+    // A send that started meanwhile owns the draft; saving this snapshot would bring back what it sent.
+    if (this.state.busy) return [...problems, "A message is being sent. Add the files again when it finishes."];
+    await this.persistCompose({ ...this.state.compose, files });
+    return problems;
+  }
+  // Resolves whether the files were removed.
+  async removeFiles(ids: string[]): Promise<boolean> {
+    if (this.state.busy) return false;
+    this.publish({ busy: true, error: undefined });
+    try {
+      await this.queue;
+      const doomed = await this.store.transaction(this.connection.id, async (saved, persist) => {
+        const draft = storedParts(saved.compose?.[this.draftKey]) ?? this.state.compose;
+        const removed = draft.files.filter((file) => ids.includes(file.id));
+        const next = { ...draft, files: draft.files.filter((file) => !ids.includes(file.id)) };
+        saved.compose = { ...saved.compose, [this.draftKey]: next };
+        await persist();
+        this.publish({ compose: next });
+        // A pending send may already have delivered these uploads; only unreferenced ones are deleted.
+        const protectedIds = new Set(saved.pending?.attachments ?? []);
+        return removed.flatMap((file) =>
+          file.upload && !protectedIds.has(file.upload.attachmentId) ? [file.upload] : [],
+        );
+      });
+      await Promise.all(
+        doomed.map((upload) =>
+          this.client
+            .deleteAttachment(this.connection.token, upload.sessionId, upload.attachmentId)
+            .catch(() => undefined),
+        ),
+      );
+      return true;
+    } catch (error) {
+      this.publish({ error: error instanceof Error ? error.message : "Could not remove the file." });
+      return false;
+    } finally {
+      this.publish({ busy: false });
+    }
+  }
+  // Resolves whether the whole draft was discarded.
+  async discardCompose(): Promise<boolean> {
+    if (!(await this.removeFiles(this.state.compose.files.map((file) => file.id)))) return false;
+    if (!(await this.persistCompose(emptyParts()))) return false;
+    await this.replaceComposeText("");
+    return true;
+  }
+  private checkPolicy(files: StagedFile[], agentId: string | undefined, targetId: string | undefined) {
+    if (!files.length) return;
+    const metadata = this.state.metadata!;
+    const agent = metadata.agents.find((entry) => entry.id === agentId);
+    const remote = !!targetId && metadata.targets.some((target) => target.id === targetId);
+    const policy = attachmentPolicy(agentId ?? "", agent?.attachments === true, remote);
+    const blocked = files.find((file) => !(isImage(file.path) ? policy.images : policy.files));
+    if (blocked) throw new Error(`${blocked.name}: ${policy.reason ?? "This file cannot be attached here."}`);
+  }
+  private sshFailure(error: unknown, targetId: string | undefined, retry: Retry) {
+    const target = this.state.metadata?.targets.find((entry) => entry.id === targetId);
+    if (error instanceof ApiError && error.detail === "ssh-master-required" && target?.auth === "password") {
+      this.retry = retry;
+      this.publish({ sshTarget: target.id });
+      return new ApiError("rejected", `Connect ${target.name} to continue. Your draft is kept.`, error.detail, 409);
+    }
+    return error;
+  }
+  private async upload(
+    session: Session,
+    stats: Map<string, FileStats>,
+    saved: QuickChatState,
+    persist: () => Promise<void>,
+    fence: () => Promise<void>,
+  ): Promise<string[]> {
+    const draft = saved.compose![this.draftKey];
+    const ids: string[] = [];
+    const stale: { sessionId: string; attachmentId: string }[] = [];
+    const protectedIds = new Set(saved.pending?.attachments ?? []);
+    for (const [index, file] of draft.files.entries()) {
+      const current = stats.get(file.id) ?? (await fileStats(file));
+      const unchanged = current.size === file.size && current.modifiedMs === file.modifiedMs;
+      const reusable = unchanged ? reusableUpload(file, session.id, this.now()) : undefined;
+      if (reusable) {
+        ids.push(reusable.attachmentId);
+        continue;
+      }
+      if (file.upload && file.upload.sessionId !== session.id && !protectedIds.has(file.upload.attachmentId))
+        stale.push(file.upload);
+      this.publish({ upload: `Uploading ${file.name} (${index + 1} of ${draft.files.length})` });
+      await fence();
+      const attachment = await this.client.uploadAttachment(this.connection.token, session.id, file.path, current.size);
+      Object.assign(file, current, {
+        upload: { sessionId: session.id, attachmentId: attachment.id, uploadedAt: this.now() },
+      });
+      await persist();
+      this.publish({ compose: structuredClone(draft) });
+      ids.push(attachment.id);
+    }
+    this.publish({ upload: undefined });
+    await Promise.all(
+      stale.map((upload) =>
+        this.client
+          .deleteAttachment(this.connection.token, upload.sessionId, upload.attachmentId)
+          .catch(() => undefined),
+      ),
+    );
+    return ids;
+  }
+  async send(fromCompose = false) {
+    const compose = fromCompose ? { ...this.state.compose, text: this.composeValue } : undefined;
+    let text = compose ? composeMessage(compose.text, compose.context) : this.state.draft.trim();
     if (
       !this.prepared ||
       this.state.busy ||
       this.state.loading ||
-      !this.state.draft.trim() ||
+      (!text && !compose?.files.length) ||
       this.state.pending ||
       !this.state.metadata
     )
-      return;
-    const text = this.state.draft.trim();
+      return false;
     const metadata = this.state.metadata;
-    this.publish({ busy: true, error: undefined, notice: undefined });
+    let sent = false;
+    this.publish({ busy: true, error: undefined, notice: undefined, sshTarget: undefined });
     try {
       await this.queue;
-      await this.store.transaction(this.connection.id, async (saved, persist) => {
+      const stats = new Map<string, FileStats>();
+      for (const file of compose?.files ?? []) stats.set(file.id, await fileStats(file));
+      await this.store.transaction(this.connection.id, async (saved, persist, fence) => {
         if (saved.pending)
           throw new Error("Another operation has an unconfirmed outcome. Check the outcome before sending.");
         await this.verifyConnection();
+        if (compose)
+          saved.compose = {
+            ...saved.compose,
+            [this.draftKey]: storedParts(saved.compose?.[this.draftKey]) ?? composeParts(compose),
+          };
+        const draft = compose ? saved.compose![this.draftKey] : undefined;
+        // The saved parts are what gets uploaded, so the message uses them too.
+        if (draft && compose) text = composeMessage(compose.text, draft.context);
+        if (draft && !text && !draft.files.length) throw new Error("This draft has nothing to send.");
         let session = this.state.session;
         if (
           !session &&
@@ -208,7 +532,7 @@ export class QuickChatController {
           saved.pointer &&
           saved.pointer !== this.observedPointer
         ) {
-          const candidate = await this.client.session(this.connection.token, saved.pointer);
+          const candidate = await this.savedConversation(saved.pointer);
           this.checkOwned(candidate, saved.installation, metadata);
           const page = await this.client.events(this.connection.token, candidate.id);
           if (
@@ -224,13 +548,10 @@ export class QuickChatController {
             session = candidate;
         }
         if (!session) {
+          const defaults = this.state.defaults ?? saved.defaults;
+          this.checkPolicy(draft?.files ?? [], launchContext(defaults, metadata).backend, defaults.target || undefined);
           const operationId = randomUUID();
-          const request = createRequest(
-            this.state.defaults ?? saved.defaults,
-            metadata,
-            saved.installation,
-            operationId,
-          );
+          const request = createRequest(defaults, metadata, saved.installation, operationId);
           saved.pending = { kind: "create", operationId, text, draftKey: this.draftKey, startedAt: this.now() };
           await persist();
           try {
@@ -240,10 +561,11 @@ export class QuickChatController {
               saved.pending = undefined;
               await persist();
             }
-            throw error;
+            throw this.sshFailure(error, defaults.target || undefined, fromCompose ? "compose" : "send");
           }
           saved.pointer = session.id;
           saved.pending = undefined;
+          if (draft) Object.assign(draft, { sessionId: session.id, launch: launchFingerprint(request) });
           await persist();
           this.publish({ session });
           this.checkOwned(session, saved.installation, metadata);
@@ -268,62 +590,107 @@ export class QuickChatController {
               saved.pending = undefined;
               await persist();
             }
-            throw error;
+            throw this.sshFailure(error, session.targetId, fromCompose ? "compose" : "send");
           }
           saved.pending = undefined;
           await persist();
           this.publish({ session });
         }
+        if (draft) {
+          this.checkPolicy(draft.files, session.backend, session.targetId);
+          draft.sessionId = session.id;
+        }
+        let attachments = draft ? await this.upload(session, stats, saved, persist, fence) : [];
         const before = await this.client.events(this.connection.token, session.id);
         const baseline = before.events.reduce((max, event) => Math.max(max, event.id ?? 0), 0);
-        saved.pending = {
-          kind: "input",
-          operationId: randomUUID(),
-          sessionId: session.id,
-          text,
-          draftKey: this.draftKey,
-          startedAt: this.now(),
-          baseline,
-        };
-        await persist();
-        try {
-          session = await this.client.input(this.connection.token, session.id, text);
-        } catch (error) {
-          if (error instanceof ApiError && error.kind !== "uncertain") {
-            saved.pending = undefined;
+        for (let attempt = 0; ; attempt++) {
+          saved.pending = {
+            kind: "input",
+            operationId: randomUUID(),
+            sessionId: session.id,
+            text,
+            draftKey: this.draftKey,
+            startedAt: this.now(),
+            baseline,
+            ...(attachments.length ? { attachments } : {}),
+          };
+          await persist();
+          try {
+            await fence();
+            session = await this.client.input(this.connection.token, session.id, text, attachments);
+            break;
+          } catch (error) {
+            if (error instanceof ApiError && error.kind !== "uncertain") {
+              saved.pending = undefined;
+              await persist();
+            }
+            // Waypoint rejects unknown attachment IDs before recording input, so one refresh is safe.
+            if (!(error instanceof ApiError && error.detail === "attachment-missing" && draft && attempt === 0))
+              throw this.sshFailure(error, session.targetId, fromCompose ? "compose" : "send");
+            const present = new Set(await this.client.attachments(this.connection.token, session.id));
+            for (const file of draft.files)
+              if (file.upload && !present.has(file.upload.attachmentId)) file.upload = undefined;
             await persist();
+            attachments = await this.upload(session, stats, saved, persist, fence);
           }
-          throw error;
         }
-        saved.pending.acknowledgedAt = this.now();
-        saved.sentAt[session.id] = saved.pending.acknowledgedAt;
-        if (saved.drafts[this.draftKey]?.trim() === text) saved.drafts[this.draftKey] = "";
+        saved.pending!.acknowledgedAt = this.now();
+        saved.sentAt[session.id] = saved.pending!.acknowledgedAt;
+        // Sent text is cleared on screen first, so a keystroke can't bring it back, and in storage before the
+        // checkpoint, so a crash in between still blocks a duplicate send. Text edited during the send is kept.
+        if (draft && compose) {
+          if (this.composeValue === compose.text) {
+            this.composeValue = "";
+            this.publish({ composeEpoch: this.state.composeEpoch + 1 });
+            await this.store.drafts.write(this.composeKey, "");
+          }
+          // Staging waits for the send, so everything in the saved parts was sent.
+          delete saved.compose![this.draftKey];
+        } else if (this.state.draft.trim() === text) {
+          this.publish({ draft: "" });
+          await this.store.drafts.write(this.lineKey, "");
+        }
         saved.pending = undefined;
         await persist();
+        sent = true;
         this.publish({
           session,
-          draft: this.state.draft.trim() === text ? "" : this.state.draft,
+          ...(compose ? { compose: emptyParts() } : {}),
           pending: undefined,
           revision: this.state.revision + 1,
           notice: "Message accepted by Waypoint.",
         });
       });
     } catch (error) {
-      const saved = await this.store.load(this.connection.id).catch(() => undefined);
+      const saved = await this.store.read(this.connection.id).catch(() => undefined);
       this.publish({
         pending: saved?.pending,
+        ...(saved?.compose?.[this.draftKey] ? { compose: composeParts(saved.compose[this.draftKey]) } : {}),
         error: error instanceof Error ? error.message : "Send failed. Your draft is kept.",
       });
     } finally {
-      this.publish({ busy: false });
+      this.publish({ busy: false, upload: undefined });
     }
+    return sent;
+  }
+  async connectTarget(password: string): Promise<{ connected: boolean; detail?: string }> {
+    const target = this.state.sshTarget;
+    if (!target) return { connected: false, detail: "No execution target needs a connection." };
+    const result = await this.client.connectTarget(this.connection.token, target, password);
+    if (!result.connected) return result;
+    this.publish({ sshTarget: undefined, error: undefined });
+    const retry = this.retry;
+    this.retry = undefined;
+    if (retry === "reattach") await this.action("reattach");
+    else if (retry) await this.send(retry === "compose");
+    return result;
   }
   // Session interactions share this checkpoint; follow changes made outside this controller.
   async syncPending() {
     if (this.state.busy) return;
     try {
       await this.queue;
-      const saved = await this.store.load(this.connection.id);
+      const saved = await this.store.read(this.connection.id);
       if (saved.pending?.operationId === this.state.pending?.operationId) return;
       this.publish({
         pending: saved.pending,
@@ -384,8 +751,12 @@ export class QuickChatController {
         } else {
           const session = await this.client.session(this.connection.token, pending.sessionId!);
           const page = await this.client.events(this.connection.token, session.id, { cursor: pending.baseline ?? 0 });
+          const expected = [...(pending.attachments ?? [])].sort().join(",");
           const recorded = page.events.some(
-            (event) => event.kind === "user_input" && event.text.trim() === pending.text,
+            (event) =>
+              event.kind === "user_input" &&
+              event.text.trim() === pending.text &&
+              attachmentIds(event.metadata.attachments).sort().join(",") === expected,
           );
           this.publish({
             session: this.state.session && this.state.session.id !== session.id ? this.state.session : session,
@@ -407,20 +778,34 @@ export class QuickChatController {
       this.publish({ busy: false });
     }
   }
+  // Uploads in an unconfirmed send may have been delivered, so they are dropped from the draft, never deleted.
+  private forgetUploads(saved: QuickChatState) {
+    const ids = new Set(saved.pending?.attachments ?? []);
+    const draft = saved.compose?.[this.draftKey];
+    if (!ids.size || !draft) return;
+    for (const file of draft.files) if (file.upload && ids.has(file.upload.attachmentId)) file.upload = undefined;
+    this.publish({ compose: composeParts(structuredClone(draft)) });
+  }
   async allowRetry() {
     await this.reconcile();
     if (this.state.error || !this.state.pending) return;
+    if (this.state.busy) return;
     const operationId = this.state.pending.operationId;
+    this.publish({ busy: true });
     try {
+      await this.queue;
       await this.store.transaction(this.connection.id, async (saved, persist) => {
         if (saved.pending?.operationId !== operationId)
           throw new Error("The pending operation changed. Check the outcome again.");
+        this.forgetUploads(saved);
         saved.pending = undefined;
         await persist();
       });
       this.publish({ pending: undefined, notice: undefined });
     } catch (error) {
       this.publish({ error: error instanceof Error ? error.message : "Could not authorize another attempt." });
+    } finally {
+      this.publish({ busy: false });
     }
   }
   async abandonPending() {
@@ -435,6 +820,7 @@ export class QuickChatController {
           throw new Error("The pending attempt changed. Check its outcome again.");
         if (saved.pending.kind !== "interaction" && saved.pointer === saved.pending.sessionId)
           saved.pointer = undefined;
+        this.forgetUploads(saved);
         saved.pending = undefined;
         await persist();
       });
@@ -484,14 +870,14 @@ export class QuickChatController {
             saved.pending = undefined;
             await persist();
           }
-          throw error;
+          throw action === "reattach" ? this.sshFailure(error, current.targetId, "reattach") : error;
         }
         saved.pending = undefined;
         await persist();
         this.publish({ session, revision: this.state.revision + 1 });
       });
     } catch (error) {
-      const saved = await this.store.load(this.connection.id).catch(() => undefined);
+      const saved = await this.store.read(this.connection.id).catch(() => undefined);
       this.publish({
         pending: saved?.pending,
         error: error instanceof Error ? error.message : "Operation failed. Retry after checking Waypoint.",

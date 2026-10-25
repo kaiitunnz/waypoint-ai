@@ -5,10 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WaypointClient } from "../src/api/client";
 import { parseEvent, parseQuestions, parseSession } from "../src/api/sessions";
+import { InteractionDraft } from "../src/domain/interactions";
 import { ownerTag, roleTag } from "../src/domain/quickChat";
 import { InteractionController } from "../src/hooks/interactionController";
 import { QuickChatController } from "../src/hooks/quickChatController";
 import { ConversationSnapshot } from "../src/hooks/sessionFeeds";
+import { draftKeys } from "../src/storage/drafts";
 import { ServerMutex } from "../src/storage/mutex";
 import { QuickChatStore } from "../src/storage/quickChat";
 import { eventWire, metadataWire, sessionWire } from "./fixtures/conversation";
@@ -61,8 +63,8 @@ async function fixture() {
       return values.get(key);
     },
     setItem: async (key: string, value: string) => {
-      const state = JSON.parse(value);
-      if (failAcknowledgedWrite && !state.pending && server.posts.length) {
+      const state = key.startsWith("waypoint.quick-chat.") ? JSON.parse(value) : undefined;
+      if (failAcknowledgedWrite && state && !state.pending && server.posts.length) {
         failAcknowledgedWrite = false;
         throw new Error("Storage unavailable");
       }
@@ -162,6 +164,12 @@ const feed = (overrides: Partial<ConversationSnapshot>): ConversationSnapshot =>
   ...overrides,
 });
 
+const savedDrafts = async (
+  f: { store: QuickChatStore },
+  sessionId = "agent",
+): Promise<Record<string, InteractionDraft>> =>
+  JSON.parse((await f.store.drafts.read(draftKeys.interactions(connection.id, sessionId))) ?? "{}");
+
 test("refresh loads full history once for live sessions, then fetches deltas", async () => {
   const f = await fixture();
   f.server.events.push(...[1, 2, 3, 4, 5].map((sequence) => wire(sequence, "agent_output", `part ${sequence}`)));
@@ -201,7 +209,7 @@ test("approval submissions post the captured ID and clear their checkpoint and d
   ]);
   const saved = await f.store.load(connection.id);
   assert.equal(saved.pending, undefined);
-  assert.deepEqual(saved.interactionDrafts, {});
+  assert.deepEqual(await savedDrafts(f), {});
   assert.equal(c.getSnapshot().notice, "Response sent.");
   assert.deepEqual(c.getSnapshot().interactions, []);
   await f.close();
@@ -248,7 +256,7 @@ test("unconfirmed outcomes keep a durable checkpoint until an explicit release",
   const saved = await f.store.load(connection.id);
   assert.equal(saved.pending?.kind, "interaction");
   assert.equal(saved.pending?.interactionAction, "answer-question");
-  assert.deepEqual(saved.interactionDrafts?.[c.draftKey(captured)], {
+  assert.deepEqual((await savedDrafts(f))[c.draftKey(captured)], {
     selected: { "0": ["Red"] },
     notes: { "0": "warm" },
   });
@@ -277,7 +285,7 @@ test("definitive rejections release the checkpoint and keep the response", async
     assert.equal(await c.submit(captured, { selected: { "0": ["Red"] } }), false);
     const saved = await f.store.load(connection.id);
     assert.equal(saved.pending, undefined, String(status));
-    assert.deepEqual(saved.interactionDrafts?.[c.draftKey(captured)], { selected: { "0": ["Red"] } });
+    assert.deepEqual((await savedDrafts(f))[c.draftKey(captured)], { selected: { "0": ["Red"] } });
     assert.match(c.getSnapshot().error!, /kept/);
     await f.close();
   }
@@ -385,7 +393,7 @@ test("live approval events trigger a history load and drafts survive filtering u
     c.getSnapshot().interactions.map((item) => item.key),
     ["approval:a1", "question:q1"],
   );
-  const drafts = (await f.store.load(connection.id)).interactionDrafts!;
+  const drafts: Record<string, InteractionDraft> = { ...(await savedDrafts(f)), ...(await savedDrafts(f, "chat")) };
   assert.deepEqual(
     Object.values(drafts)
       .map((draft) => draft.notes?.["0"])
@@ -402,7 +410,7 @@ test("a request event during a history-less refresh triggers a follow-up history
   f.setReadGate(new Promise<void>((resolve) => (release = resolve)));
   const c = f.controller();
   const starting = c.start();
-  while (!f.server.queries.includes("agent?messages=40")) await new Promise((resolve) => setTimeout(resolve, 5));
+  while (!f.server.queries.includes("agent")) await new Promise((resolve) => setTimeout(resolve, 5));
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.ok(!f.server.queries.includes("agent?cursor=0"), "the first refresh skipped history");
   f.server.events.push(approval(1));

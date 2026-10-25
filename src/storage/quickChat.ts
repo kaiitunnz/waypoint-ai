@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { ComposeParts } from "../domain/compose";
 import { InteractionAction, InteractionDraft, interactionActions } from "../domain/interactions";
 import { ChatDefaults, initialDefaults } from "../domain/quickChat";
 import { isRecord } from "../domain/connections";
 import { StorageAdapter } from "./connections";
+import { DraftStore } from "./drafts";
 
 export interface PendingOperation {
   kind: "create" | "input" | "reattach" | "interrupt" | "interaction";
@@ -15,6 +17,7 @@ export interface PendingOperation {
   startedAt: number;
   baseline?: number;
   acknowledgedAt?: number;
+  attachments?: string[];
 }
 export interface QuickChatState {
   version: 1;
@@ -22,23 +25,57 @@ export interface QuickChatState {
   defaults: ChatDefaults;
   pointer?: string;
   sentAt: Record<string, number>;
+  // Draft text lives in the DraftStore; these fields are read only to carry older drafts over.
   drafts: Record<string, string>;
   pending?: PendingOperation;
   interactionDrafts?: Record<string, InteractionDraft>;
+  compose?: Record<string, ComposeParts & { text?: string }>;
 }
 export interface Mutex {
-  run<T>(id: string, operation: () => Promise<T>): Promise<T>;
+  run<T>(id: string, operation: (check: () => Promise<void>) => Promise<T>): Promise<T>;
 }
 const textRecord = (value: unknown, valid: (entry: unknown) => boolean) =>
   value === undefined || (isRecord(value) && Object.values(value).every(valid));
 const isText = (value: unknown) => typeof value === "string";
-function isInteractionDraft(value: unknown): boolean {
+export function isInteractionDraft(value: unknown): value is InteractionDraft {
   return (
     isRecord(value) &&
     (value.decision === undefined || isText(value.decision)) &&
     (value.note === undefined || isText(value.note)) &&
     textRecord(value.selected, (entry) => Array.isArray(entry) && entry.every(isText)) &&
     textRecord(value.notes, isText)
+  );
+}
+const isNumber = (value: unknown) => typeof value === "number" && Number.isFinite(value);
+function isComposeParts(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    (value.text === undefined || isText(value.text)) &&
+    (value.sessionId === undefined || isText(value.sessionId)) &&
+    (value.launch === undefined || isText(value.launch)) &&
+    Array.isArray(value.context) &&
+    value.context.every(
+      (item) =>
+        isRecord(item) &&
+        isText(item.id) &&
+        ["selection", "clipboard"].includes(String(item.kind)) &&
+        isText(item.text),
+    ) &&
+    Array.isArray(value.files) &&
+    value.files.every(
+      (file) =>
+        isRecord(file) &&
+        isText(file.id) &&
+        isText(file.path) &&
+        isText(file.name) &&
+        isNumber(file.size) &&
+        isNumber(file.modifiedMs) &&
+        (file.upload === undefined ||
+          (isRecord(file.upload) &&
+            isText(file.upload.sessionId) &&
+            isText(file.upload.attachmentId) &&
+            isNumber(file.upload.uploadedAt))),
+    )
   );
 }
 export function decodeQuickChat(raw?: string): QuickChatState {
@@ -93,6 +130,14 @@ export function decodeQuickChat(raw?: string): QuickChatState {
       (!isRecord(data.interactionDrafts) || !Object.values(data.interactionDrafts).every(isInteractionDraft))
     )
       throw new Error();
+    if (data.compose !== undefined && (!isRecord(data.compose) || !Object.values(data.compose).every(isComposeParts)))
+      throw new Error();
+    if (
+      isRecord(data.pending) &&
+      data.pending.attachments !== undefined &&
+      (!Array.isArray(data.pending.attachments) || !data.pending.attachments.every(isText))
+    )
+      throw new Error();
     if (
       isRecord(data.pending) &&
       data.pending.kind === "interaction" &&
@@ -109,31 +154,37 @@ export function decodeQuickChat(raw?: string): QuickChatState {
   }
 }
 export class QuickChatStore {
+  readonly drafts: DraftStore;
   constructor(
     private readonly storage: StorageAdapter,
     private readonly mutex: Mutex,
-  ) {}
+  ) {
+    this.drafts = new DraftStore(storage);
+  }
   transaction<T>(
     connectionId: string,
-    operation: (state: QuickChatState, persist: () => Promise<void>) => Promise<T>,
+    operation: (state: QuickChatState, persist: () => Promise<void>, fence: () => Promise<void>) => Promise<T>,
   ): Promise<T> {
-    return this.mutex.run(connectionId, async () => {
+    return this.mutex.run(connectionId, async (check) => {
       const key = `waypoint.quick-chat.${connectionId}`;
       const state = decodeQuickChat(await this.storage.getItem(key));
-      const persist = () => this.storage.setItem(key, JSON.stringify(state));
-      return operation(state, persist);
+      // Every write first proves this transaction still holds the server lock.
+      const persist = async () => {
+        await check();
+        await this.storage.setItem(key, JSON.stringify(state));
+      };
+      return operation(state, persist, check);
     });
+  }
+  // Reads without the lock so long operations such as uploads don't block other commands from loading.
+  async read(id: string) {
+    const raw = await this.storage.getItem(`waypoint.quick-chat.${id}`);
+    return raw === undefined ? this.load(id) : decodeQuickChat(raw);
   }
   load(id: string) {
     return this.transaction(id, async (state, persist) => {
       await persist();
       return state;
-    });
-  }
-  draft(id: string, key: string, text: string) {
-    return this.transaction(id, async (state, persist) => {
-      state.drafts[key] = text;
-      await persist();
     });
   }
   defaults(id: string, defaults: ChatDefaults) {

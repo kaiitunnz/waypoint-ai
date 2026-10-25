@@ -33,6 +33,15 @@ function string(value: unknown) {
 }
 const deltas = new Set(["item/commandExecution/outputDelta", "item/fileChange/outputDelta"]);
 
+function withAttachments(event: SessionEvent) {
+  const names = Array.isArray(event.metadata.attachments)
+    ? event.metadata.attachments.flatMap((item) =>
+        isRecord(item) && typeof item.filename === "string" ? [item.filename] : [],
+      )
+    : [];
+  return names.length ? [event.text, `Attached: ${names.join(", ")}`].filter(Boolean).join("\n\n") : event.text;
+}
+
 export function transcript(events: SessionEvent[]): TranscriptRow[] {
   const rows: TranscriptRow[] = [];
   const messages = new Map<string, TranscriptRow>();
@@ -135,7 +144,7 @@ export function transcript(events: SessionEvent[]): TranscriptRow[] {
               : kind === "approval"
                 ? "Approval request"
                 : "Session update",
-      text: event.text,
+      text: kind === "user" ? withAttachments(event) : event.text,
       timestamp: event.timestamp,
       sequence: event.sequence,
     };
