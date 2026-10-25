@@ -13,18 +13,18 @@ Both passes drove Raycast with keystrokes and read the form through macOS access
 
 ## Desktop coverage
 
-| Scenario                                                             | Observed result                                                                                                                                                         |
-| -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Change the title and effort of a Codex session (real server)         | The preview reads "Applies now: title, effort."; both apply without a restart or confirmation                                                                           |
-| Add an environment variable to a Codex session (real server)         | The preview and a confirmation say the session restarts and resumes; Waypoint records the restart and the new key, never the value; a follow-up recalls earlier context |
-| Change effort on Claude Code's native interface (real server)        | The preview says the session restarts and resumes; the interface options are Claude Code and Claude TUI, without the terminal interface                                 |
-| Stage a restart while a turn is running                              | The preview adds "The current turn will be interrupted."                                                                                                                |
-| A later change fails after the title applied                         | The form shows "Partly applied", names the applied title and the rejected model change, and the preview lists only the model; applying again sends only the model       |
-| Waypoint reports another lifecycle operation                         | Nothing is applied, the form says to wait and apply again, and the retry succeeds                                                                                       |
-| Restart a session on a password-auth SSH target that isn't connected | The form names the target; Connect SSH Target takes the password once; applying again restarts the session                                                              |
-| Change the working directory from a Search Sessions conversation     | The action becomes Start New Chat with These Settings; a New Chat for that server opens in the new folder, and the first send creates the session there                 |
-| Change the working directory from Quick Chat                         | Quick Chat prepares a new conversation in the new folder; the previous session keeps running                                                                            |
-| Type a custom model ID                                               | The model dropdown shows it as a custom choice while typing, and applying sets it on the session                                                                        |
+| Scenario                                                             | Observed result                                                                                                                                                                                                                                                     |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Change the title and effort of a Codex session (real server)         | The preview reads "Applies now: title, effort."; both apply without a restart or confirmation                                                                                                                                                                       |
+| Add an environment variable to a Codex session (real server)         | The preview and a confirmation say the session restarts and resumes; Waypoint records the restart and the new key, never the value; a follow-up recalls earlier context                                                                                             |
+| Change effort on Claude Code's native interface (real server)        | The preview says the session restarts and resumes; the interface options are Claude Code and Claude TUI, without the terminal interface                                                                                                                             |
+| Stage a restart while a turn is running                              | The preview adds "The current turn will be interrupted."                                                                                                                                                                                                            |
+| A later change fails after the title applied                         | The form shows "Partly applied", names the applied title and the rejected model change, and the preview lists only the model; applying again sends only the model                                                                                                   |
+| Waypoint reports another lifecycle operation                         | Nothing is applied, the form says to wait and apply again, and the retry succeeds                                                                                                                                                                                   |
+| Restart a session on a password-auth SSH target that isn't connected | The form names the target; Connect SSH Target takes the password once; applying again restarts the session                                                                                                                                                          |
+| Change the working directory from a Search Sessions conversation     | The action becomes Start New Chat with These Settings; a New Chat for that server opens in the new folder, and the first send creates the session there; while it is open, Raycast keeps no live connection for the conversation underneath, and Back reconnects it |
+| Change the working directory from Quick Chat                         | Quick Chat prepares a new conversation in the new folder; the previous session keeps running                                                                                                                                                                        |
+| Type a custom model ID                                               | The model dropdown shows it as a custom choice while typing, and applying sets it on the session                                                                                                                                                                    |
 
 The pass found and fixed:
 
@@ -45,7 +45,7 @@ Unit and integration tests cover these paths.
 
 ## Automated coverage
 
-`npm run verify` checks formatting, ESLint, strict types, 166 behavior and integration tests, Raycast validation, and build.
+`npm run verify` checks formatting, ESLint, strict types, 167 behavior and integration tests, Raycast validation, and build.
 
 Session settings tests cover:
 
