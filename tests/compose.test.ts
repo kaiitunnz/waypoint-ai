@@ -13,6 +13,7 @@ import {
   maxUploadBytes,
   mimeType,
   reusableUpload,
+  spilledClipboardText,
 } from "../src/domain/compose";
 import { decodeQuickChat } from "../src/storage/quickChat";
 import { parseEvent } from "../src/api/sessions";
@@ -62,6 +63,16 @@ test("attachment rules cover types, limits, reuse windows and remote delivery", 
     [true, false],
   );
   assert.deepEqual(attachmentPolicy("opencode", true, true), { images: true, files: true });
+});
+
+test("large copied text is read from Raycast's clipboard store, never from other copied files", () => {
+  const store = "/Library/com.raycast.macos/clipboard";
+  const spill = `${store}/file-61c3.txt`;
+  assert.equal(spilledClipboardText({ text: "file-61c3.txt", file: spill }, `${store}/`), spill);
+  assert.equal(spilledClipboardText({ text: "plain text" }, store), undefined);
+  assert.equal(spilledClipboardText({ text: "notes.txt", file: "/Users/me/notes.txt" }, store), undefined);
+  assert.equal(spilledClipboardText({ text: "file-1.png", file: `${store}/file-1.png` }, store), undefined);
+  assert.equal(spilledClipboardText({ text: "Image", file: spill }, store), undefined);
 });
 
 test("capabilities and stored compose drafts are validated", () => {

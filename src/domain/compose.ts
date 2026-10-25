@@ -1,3 +1,5 @@
+import { basename, dirname, resolve } from "node:path";
+
 export type ContextKind = "selection" | "clipboard";
 export interface ContextItem {
   id: string;
@@ -78,6 +80,13 @@ export function mimeType(path: string): string {
   return imageTypes[path.split(".").pop()?.toLowerCase() ?? ""] ?? "application/octet-stream";
 }
 export const isImage = (path: string) => mimeType(path).startsWith("image/");
+
+// Raycast's clipboard history keeps large copied text in a file and reports only that file's name as the text.
+export function spilledClipboardText(content: { text: string; file?: string }, store: string): string | undefined {
+  const file = content.file;
+  if (!file || !file.endsWith(".txt") || basename(file) !== content.text) return undefined;
+  return dirname(resolve(file)) === resolve(store) ? file : undefined;
+}
 
 // Agents on SSH targets receive attachments as Waypoint host paths unless they inline them.
 const remoteDelivery: Record<string, "all" | "images"> = { opencode: "all", claude_code: "images" };

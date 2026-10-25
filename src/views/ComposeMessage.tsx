@@ -8,13 +8,23 @@ import {
   Keyboard,
   Toast,
   confirmAlert,
+  environment,
   getSelectedText,
   showToast,
   useNavigation,
 } from "@raycast/api";
+import { open } from "node:fs/promises";
+import { join } from "node:path";
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { ServerMetadata } from "../api/contracts";
-import { ContextKind, attachmentPolicy, contextTitle, formatBytes } from "../domain/compose";
+import {
+  ContextKind,
+  attachmentPolicy,
+  contextTitle,
+  formatBytes,
+  maxContextBytes,
+  spilledClipboardText,
+} from "../domain/compose";
 import { QuickChatController } from "../hooks/quickChatController";
 import { ConnectTarget } from "./ConnectTarget";
 
@@ -24,11 +34,28 @@ const preview = (text: string) => {
   return lines.length > 3 ? `${shown}\n…` : shown;
 };
 
+const clipboardStore = join(environment.supportPath, "..", "..", "clipboard");
+
+async function readClipboard(): Promise<string> {
+  const content = await Clipboard.read();
+  const spilled = spilledClipboardText(content, clipboardStore);
+  if (!spilled) return content.text;
+  // One byte past the limit is enough for staging to refuse oversized text.
+  const handle = await open(spilled);
+  try {
+    const buffer = Buffer.alloc(maxContextBytes + 1);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    return buffer.subarray(0, bytesRead).toString("utf8");
+  } finally {
+    await handle.close();
+  }
+}
+
 // Reads the selection or clipboard once, on an explicit action, and stages it for review.
 export async function includeContext(controller: QuickChatController, kind: ContextKind): Promise<boolean> {
   let text: string | undefined;
   try {
-    text = kind === "selection" ? await getSelectedText() : await Clipboard.readText();
+    text = kind === "selection" ? await getSelectedText() : await readClipboard();
   } catch {
     text = undefined;
   }
