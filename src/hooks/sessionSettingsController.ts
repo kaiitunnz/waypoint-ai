@@ -97,6 +97,10 @@ export class SessionSettingsController {
       this.listeners.delete(listener);
     };
   };
+  attach() {
+    this.active = true;
+  }
+  // An apply in flight keeps running after the form closes; it just stops publishing.
   stop() {
     this.active = false;
   }

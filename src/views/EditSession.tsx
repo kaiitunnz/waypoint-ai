@@ -10,7 +10,7 @@ import {
   showToast,
   useNavigation,
 } from "@raycast/api";
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ChatDefaults, createRequest } from "../domain/quickChat";
 import {
   SettingsDraft,
@@ -60,7 +60,8 @@ export function EditSession({
   newChat?: NewChatOption;
   onApplied?: () => void;
 }) {
-  const controller = useMemo(() => new SessionSettingsController(connection, sessionId), [connection, sessionId]);
+  // Callers rebuild the connection object on every render, so the controller is created once per form.
+  const [controller] = useState(() => new SessionSettingsController(connection, sessionId));
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const [draft, setDraft] = useState<SettingsDraft>();
   const [problem, setProblem] = useState<string>();
@@ -71,6 +72,7 @@ export function EditSession({
   const { baseline, metadata, caps } = state;
   useEffect(() => {
     mounted.current = true;
+    controller.attach();
     void controller.load().then((loaded) => loaded && setDraft(settingsDraft(loaded)));
     return () => {
       mounted.current = false;
@@ -333,6 +335,12 @@ export function EditSession({
             />
           ))}
         </Form.Dropdown>
+      )}
+      {available.launch && !available.transports.length && available.terminalHidden && (
+        <Form.Description
+          title="Interface"
+          text={`${metadata.agents.find((agent) => agent.nativeTransport === baseline.transport)?.label ?? baseline.transport}. Terminal interfaces are available in Waypoint.`}
+        />
       )}
       {available.args && (
         <Form.TextArea
