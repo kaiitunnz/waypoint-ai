@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { parseMetadata } from "../src/api/contracts";
 import { parseModels } from "../src/api/models";
@@ -14,6 +15,7 @@ import {
   effortForModel,
   envPatch,
   modelChoices,
+  nativeTransport,
   newChatDefaults,
   permissionChoices,
   planSettings,
@@ -326,4 +328,29 @@ test("the fingerprint ignores status but sees settings and capability changes", 
     settingsFingerprint(a.baseline, a.caps),
     settingsFingerprint(a.baseline, a.caps && { ...a.caps, interruptsTurn: true }),
   );
+});
+
+test("Waypoint's own catalog drives restart disclosure per agent and interface", () => {
+  const backends = JSON.parse(readFileSync("tests/fixtures/waypointBackends.json", "utf8"));
+  const real = parseMetadata({ authenticated: true, default_backend: "codex", backends });
+  const plan = (backend: string, transport: string, status: string, patch: Partial<SettingsDraft>) => {
+    const baseline = settingsBaseline(
+      parseSession(sessionRecord({ backend, transport, status, permission_mode: "default" })),
+    );
+    const caps = capsFor(real, backend, transport);
+    const draft = { ...settingsDraft(baseline), ...patch };
+    return planSettings(baseline, draft, caps, availability(baseline, draft, caps, real, []));
+  };
+  const codex = plan("codex", "codex_app_server", "running", { effort: "medium", model: "m", permission: "plan" });
+  assert.deepEqual([codex.kind, codex.restartCount, codex.interruptsTurn], ["inline", 0, false]);
+  const claude = plan("claude_code", "claude_cli", "idle", { effort: "medium", model: "m", permission: "plan" });
+  assert.deepEqual([claude.kind, claude.restartCount], ["restart-resume", 1]);
+  assert.deepEqual(
+    claude.steps.filter((step) => step.restarts).map((step) => step.op),
+    ["effort"],
+  );
+  const tty = plan("claude_code", "claude_tty", "running", { effort: "medium", permission: "plan" });
+  assert.deepEqual([tty.restartCount, tty.interruptsTurn], [2, true]);
+  assert.equal(nativeTransport(real, "tmux"), false);
+  assert.ok(["claude_cli", "claude_tty", "codex_app_server", "opencode_http"].every((t) => nativeTransport(real, t)));
 });
