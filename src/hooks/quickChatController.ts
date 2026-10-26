@@ -1007,6 +1007,8 @@ export class QuickChatController {
       return { ended: true, message: unconfirmed ? outcome.message : undefined };
     } catch (error) {
       if (released) await this.restore(id, released).catch(() => undefined);
+      const saved = await this.store.read(this.connection.id).catch(() => undefined);
+      this.publish({ pending: saved?.pending });
       return { ended: false, message: error instanceof Error ? error.message : "Could not terminate the session." };
     } finally {
       this.publish({ busy: false });

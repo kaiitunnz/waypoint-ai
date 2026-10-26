@@ -62,6 +62,7 @@ async function fixture() {
   let uncertainCreate = false;
   let uncertainInput = false;
   let terminate: "exit" | "refuse" | "uncertain" | "uncertain-exit" | "gone" = "exit";
+  let duringTerminate: (() => Promise<void>) | undefined;
   let now = 1000000;
   const client = new WaypointClient(connection.apiUrl, async (url, options) => {
     const path = new URL(String(url)).pathname;
@@ -96,6 +97,7 @@ async function fixture() {
       return respond({ session });
     }
     if (path.endsWith("/terminate")) {
+      await duringTerminate?.();
       if (terminate === "refuse") return respond({ detail: "target busy" }, 409);
       if (terminate === "gone") {
         sessions.splice(sessions.indexOf(session), 1);
@@ -152,6 +154,9 @@ async function fixture() {
     },
     setTerminate: (value: typeof terminate) => {
       terminate = value;
+    },
+    setDuringTerminate: (value: typeof duringTerminate) => {
+      duringTerminate = value;
     },
     advance: (value: number) => {
       now += value;
@@ -1211,6 +1216,8 @@ test("terminate waits for an unconfirmed operation to be checked", async () => {
     const result = await c.terminate();
     assert.equal(result?.ended, false);
     assert.match(result?.message ?? "", /earlier operation/);
+    // The view shows the operation to check, so it doesn't keep offering Terminate.
+    assert.equal(c.getSnapshot().pending?.operationId, "op");
     assert.equal(f.sessions[0].status, "running");
     assert.equal((await f.store.read(connection.id)).pointer, id);
   } finally {
@@ -1246,6 +1253,39 @@ test("a new session starts in the workspace, which is prepared first", async () 
     assert.equal(broken.getSnapshot().draft, "Kept");
     assert.equal((await f.store.read(connection.id)).pending, undefined);
     assert.equal(f.requests.filter((request) => request.path === "/api/sessions").length, 1);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a refused terminate restores draft bindings but keeps a destination chosen meanwhile", async () => {
+  const f = await fixture();
+  try {
+    const c = f.controller();
+    await c.start();
+    await c.changeDraft("First");
+    await c.send();
+    const id = c.getSnapshot().session!.id;
+    await f.store.transaction(connection.id, async (state, persist) => {
+      state.compose = { new: { context: [], files: [], sessionId: id, launch: "fingerprint" } };
+      await persist();
+    });
+    f.setTerminate("refuse");
+    f.setDuringTerminate(async () => {
+      const saved = await f.store.read(connection.id);
+      assert.equal(saved.pointer, undefined);
+      assert.equal(saved.compose?.new.sessionId, undefined);
+      await f.store.transaction(connection.id, async (state, persist) => {
+        setPointer(state, "other", 9000);
+        await persist();
+      });
+    });
+    assert.equal((await c.terminate())?.ended, false);
+    const saved = await f.store.read(connection.id);
+    assert.equal(saved.pointer, "other");
+    assert.deepEqual(saved.chosen, { sessionId: "other", at: 9000 });
+    assert.equal(saved.compose?.new.sessionId, id);
+    assert.equal(saved.compose?.new.launch, "fingerprint");
   } finally {
     await f.close();
   }
