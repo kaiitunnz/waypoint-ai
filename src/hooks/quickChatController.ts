@@ -8,13 +8,13 @@ import {
   canReattach,
   createRequest,
   createTag,
+  failedStartAt,
   launchContext,
   launchFingerprint,
   ongoing,
   ownerTag,
   reuseDecision,
   roleTag,
-  startFailed,
 } from "../domain/quickChat";
 import { isStructured } from "../domain/sessions";
 import {
@@ -801,8 +801,9 @@ export class QuickChatController {
               pending: undefined,
               notice: "Recovered the created conversation. The prompt was not resent. Send it when ready.",
             });
-          } else if (!matches.length && startFailed(pending, sessions)) {
+          } else if (!matches.length && failedStartAt(pending, sessions, saved.failedStartAt) !== undefined) {
             // No input reaches a session that never started, so clearing the checkpoint cannot duplicate work.
+            saved.failedStartAt = failedStartAt(pending, sessions, saved.failedStartAt);
             saved.pending = undefined;
             await persist();
             // An error, not a notice: Quick Chat shows notices only while an operation is unconfirmed.

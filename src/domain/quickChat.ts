@@ -1,5 +1,4 @@
 import { ServerMetadata, Preset } from "../api/contracts";
-import type { PendingOperation } from "../storage/quickChat";
 import { Session, PendingQuestions, SessionEvent } from "../api/sessions";
 import { latestPlan, pendingApprovals, plansDecisions } from "./interactions";
 import { structuredTransport } from "./sessions";
@@ -135,9 +134,21 @@ export function ongoing(
 }
 // Server and Mac clocks may differ; a larger skew makes failed starts unrecognizable.
 export const clockToleranceMs = 5 * 60000;
+// Where a create was launched, to recognize a session that Waypoint created but could not start.
+export interface AttemptLaunch {
+  backend: string;
+  target: string;
+  cwd: string;
+}
+export interface CreateAttempt {
+  kind: string;
+  startedAt: number;
+  launch?: AttemptLaunch;
+}
 // Waypoint stores a session before starting its agent and adds tags only after the start succeeds, so an
 // untagged "Quick Chat" session from the same launch may belong to a create whose outcome is unconfirmed.
-function untaggedAttempt(pending: PendingOperation, session: Session): boolean {
+// `after` is the creation time of a failure already recognized, which can't be a later attempt's outcome.
+function untaggedAttempt(pending: CreateAttempt, session: Session, after = -Infinity): boolean {
   const launch = pending.launch;
   const created = session.createdAt ? Date.parse(session.createdAt) : NaN;
   return (
@@ -149,19 +160,22 @@ function untaggedAttempt(pending: PendingOperation, session: Session): boolean {
     (session.targetId ?? "") === launch.target &&
     // Waypoint normalizes local working directories, so only a remote one is compared.
     (!launch.target || session.cwd === launch.cwd) &&
-    created >= pending.startedAt - clockToleranceMs
+    created >= pending.startedAt - clockToleranceMs &&
+    created > after
   );
 }
-// A start that failed leaves such a session in error. One still starting may be this create's own, so
-// an earlier failed attempt is not taken as this one's outcome while it exists.
-export function failedStart(pending: PendingOperation, session: Session): boolean {
-  return untaggedAttempt(pending, session) && session.status === "error";
+export function failedStart(pending: CreateAttempt, session: Session, after?: number): boolean {
+  return untaggedAttempt(pending, session, after) && session.status === "error";
 }
-export function startFailed(pending: PendingOperation, sessions: Session[]): boolean {
-  return (
-    sessions.some((session) => failedStart(pending, session)) &&
-    !sessions.some((session) => untaggedAttempt(pending, session) && session.status === "starting")
-  );
+// The creation time of the failed session that settles this create. One still starting may be this create's
+// own, so an earlier failed attempt is not taken as its outcome while it exists.
+export function failedStartAt(pending: CreateAttempt, sessions: Session[], after?: number): number | undefined {
+  if (sessions.some((session) => untaggedAttempt(pending, session, after) && session.status === "starting"))
+    return undefined;
+  const times = sessions
+    .filter((session) => failedStart(pending, session, after))
+    .map((session) => Date.parse(session.createdAt!));
+  return times.length ? Math.max(...times) : undefined;
 }
 // A Quick Chat opened on a chosen session resumes it only on the server it was opened for.
 export const resumeFor = (connectionId: string, pinnedConnectionId: string | undefined, resume: boolean) =>

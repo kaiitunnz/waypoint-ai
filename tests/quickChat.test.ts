@@ -1001,8 +1001,18 @@ test("a create whose session failed to start is recognized, cleared, and keeps t
     await c.reconcile();
     assert.equal(c.getSnapshot().pending, undefined);
     assert.match(c.getSnapshot().error!, /failed to start/);
-    assert.equal((await f.store.read(connection.id)).pending, undefined);
+    const settled = await f.store.read(connection.id);
+    assert.equal(settled.pending, undefined);
+    assert.equal(settled.failedStartAt, Date.parse("2026-10-26T00:00:00Z"));
     assert.equal(c.getSnapshot().draft, "Hello there");
+    // A retry whose create is unconfirmed is not settled by the failure already recognized.
+    await c.send();
+    assert.equal(c.getSnapshot().pending?.kind, "create");
+    // The retry's session isn't stored yet, as while Waypoint is still connecting to the target.
+    f.sessions.pop();
+    await c.reconcile();
+    assert.equal(c.getSnapshot().pending?.kind, "create");
+    assert.match(c.getSnapshot().notice!, /No matching session is visible yet/);
     assert.equal(f.requests.filter((request) => request.path.endsWith("/input")).length, 0);
   } finally {
     await f.close();
@@ -1040,8 +1050,8 @@ test("a failed start is matched by target and, on remote targets, by working dir
   assert.equal(failedStart(local, record({ launch_target_id: null, cwd: "/Users/me/project" })), true);
 });
 
-test("an earlier failed attempt is not taken as the outcome while another attempt is still starting", async () => {
-  const { startFailed } = await import("../src/domain/quickChat");
+test("an earlier failed attempt is not taken as the outcome of a retry", async () => {
+  const { failedStartAt } = await import("../src/domain/quickChat");
   const pending = {
     kind: "create" as const,
     operationId: "op",
@@ -1050,16 +1060,24 @@ test("an earlier failed attempt is not taken as the outcome while another attemp
     startedAt: Date.parse("2026-10-26T00:00:00Z"),
     launch: { backend: "test-agent", target: "lab", cwd: "/home/lab/project" },
   };
-  const record = (id: string, status: string) =>
+  const record = (id: string, status: string, created = "2026-10-26T00:00:01Z") =>
     parseSession({
       ...sessionWire(id),
       title: "Quick Chat",
       status,
       launch_target_id: "lab",
       cwd: "/home/lab/project",
-      created_at: "2026-10-26T00:00:01Z",
+      created_at: created,
     });
-  assert.equal(startFailed(pending, [record("earlier", "error")]), true);
-  assert.equal(startFailed(pending, [record("earlier", "error"), record("current", "starting")]), false);
-  assert.equal(startFailed(pending, [record("current", "starting")]), false);
+  const earlier = Date.parse("2026-10-26T00:00:01Z");
+  assert.equal(failedStartAt(pending, [record("earlier", "error")]), earlier);
+  assert.equal(failedStartAt(pending, [record("earlier", "error"), record("current", "starting")]), undefined);
+  assert.equal(failedStartAt(pending, [record("current", "starting")]), undefined);
+  // The earlier failure was already recognized and the retry's session doesn't exist yet.
+  assert.equal(failedStartAt(pending, [record("earlier", "error")], earlier), undefined);
+  const later = record("retry", "error", "2026-10-26T00:00:09Z");
+  assert.equal(
+    failedStartAt(pending, [record("earlier", "error"), later], earlier),
+    Date.parse("2026-10-26T00:00:09Z"),
+  );
 });

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { ComposeParts } from "../domain/compose";
 import { InteractionAction, InteractionDraft, interactionActions } from "../domain/interactions";
-import { ChatDefaults, initialDefaults } from "../domain/quickChat";
+import { AttemptLaunch, ChatDefaults, initialDefaults } from "../domain/quickChat";
 import { isRecord } from "../domain/connections";
 import { StorageAdapter } from "./connections";
 import { DraftStore } from "./drafts";
@@ -18,8 +18,7 @@ export interface PendingOperation {
   baseline?: number;
   acknowledgedAt?: number;
   attachments?: string[];
-  // Where a create was launched, to recognize a session that Waypoint created but could not start.
-  launch?: { backend: string; target: string; cwd: string };
+  launch?: AttemptLaunch;
 }
 export interface QuickChatState {
   version: 1;
@@ -28,6 +27,8 @@ export interface QuickChatState {
   pointer?: string;
   // A session the user explicitly chose for Quick Chat. It exists only while it is the pointer.
   chosen?: { sessionId: string; at: number };
+  // When the newest failed start Quick Chat recognized was created; older failures never settle a later create.
+  failedStartAt?: number;
   sentAt: Record<string, number>;
   // Draft text lives in the DraftStore; these fields are read only to carry older drafts over.
   drafts: Record<string, string>;
@@ -95,6 +96,7 @@ export function decodeQuickChat(raw?: string): QuickChatState {
       !isRecord(data.drafts) ||
       !isRecord(data.sentAt) ||
       (data.pointer !== undefined && typeof data.pointer !== "string") ||
+      (data.failedStartAt !== undefined && !isNumber(data.failedStartAt)) ||
       (data.chosen !== undefined &&
         (!isRecord(data.chosen) || !isText(data.chosen.sessionId) || !isNumber(data.chosen.at)))
     )

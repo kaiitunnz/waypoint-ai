@@ -35,7 +35,8 @@ const checkpointFor = (saved: QuickChatState, session: Session) =>
   !!saved.pending &&
   (saved.pending.sessionId === session.id ||
     (saved.pending.kind === "create" &&
-      (session.tags[createTag] === saved.pending.operationId || failedStart(saved.pending, session))));
+      (session.tags[createTag] === saved.pending.operationId ||
+        failedStart(saved.pending, session, saved.failedStartAt))));
 
 export class SessionManager {
   constructor(
