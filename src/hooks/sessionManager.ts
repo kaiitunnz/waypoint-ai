@@ -22,7 +22,9 @@ export function manageFailure(error: unknown, what: string): string {
     if (error.kind === "rejected")
       return error.status === 403
         ? error.message
-        : `Waypoint couldn't ${what}${error.serverDetail ? `: ${error.serverDetail}` : "."}`;
+        : error.serverDetail
+          ? `Waypoint: ${error.serverDetail}`
+          : `Waypoint refused to ${what}.`;
     if (error.kind === "unreachable") return error.message;
   }
   return `Waypoint didn't confirm that it could ${what}. Check the session before trying again.`;

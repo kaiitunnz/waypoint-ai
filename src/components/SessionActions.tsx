@@ -29,9 +29,10 @@ export interface SessionActionHandlers {
 }
 
 // Reports an outcome and returns whether it succeeded.
+// `titles` names the outcome: what was done, and what couldn't be.
 export async function reportOutcome(
   outcome: ManageOutcome,
-  success: string,
+  titles: [string, string],
   handlers: Pick<SessionActionHandlers, "onChanged" | "onDeleted">,
   toast?: Toast,
   primaryAction?: Toast.ActionOptions,
@@ -43,11 +44,11 @@ export async function reportOutcome(
   if (outcome.kind === "done") {
     if (outcome.deleted) handlers.onDeleted(outcome.deleted);
     else if (outcome.session) handlers.onChanged(outcome.session);
-    await show(Toast.Style.Success, success, undefined, primaryAction);
+    await show(Toast.Style.Success, titles[0], undefined, primaryAction);
     return true;
   }
   if (outcome.kind !== "ssh" && outcome.session) handlers.onChanged(outcome.session);
-  await show(Toast.Style.Failure, outcome.kind === "stale" ? "Nothing changed" : "Not done", outcome.message);
+  await show(Toast.Style.Failure, outcome.kind === "stale" ? "Nothing changed" : titles[1], outcome.message);
   return false;
 }
 
@@ -68,18 +69,19 @@ export function SessionActions({
   const allowed = sessionActions(session, metadata, quickChat);
   const run = async (
     progress: string,
-    success: string,
+    titles: [string, string],
     operation: () => Promise<ManageOutcome>,
     primaryAction?: Toast.ActionOptions,
   ) => {
     const toast = await showToast({ style: Toast.Style.Animated, title: progress });
-    return reportOutcome(await operation(), success, handlers, toast, primaryAction);
+    return reportOutcome(await operation(), titles, handlers, toast, primaryAction);
   };
   const reattach = async () => {
     if (!metadata) return;
     const toast = await showToast({ style: Toast.Style.Animated, title: "Reattaching session…" });
     const outcome = await manager.reattach(session.id, metadata);
-    if (outcome.kind !== "ssh") return reportOutcome(outcome, "Session reattached", handlers, toast);
+    if (outcome.kind !== "ssh")
+      return reportOutcome(outcome, ["Session reattached", "Couldn't reattach session"], handlers, toast);
     toast.hide();
     push(
       <ConnectTarget
@@ -105,8 +107,10 @@ export function SessionActions({
           }}
           onAction={async () => {
             if (
-              await run("Choosing for Quick Chat…", "Quick Chat continues this session", () =>
-                manager.useForQuickChat(session.id, metadata),
+              await run(
+                "Choosing for Quick Chat…",
+                ["Quick Chat continues this session", "Couldn't use for Quick Chat"],
+                () => manager.useForQuickChat(session.id, metadata),
               )
             )
               handlers.openQuickChat();
@@ -140,7 +144,7 @@ export function SessionActions({
           onAction={() =>
             run(
               allowed.pin ? "Pinning session…" : "Unpinning session…",
-              allowed.pin ? "Session pinned" : "Session unpinned",
+              allowed.pin ? ["Session pinned", "Couldn't pin session"] : ["Session unpinned", "Couldn't unpin session"],
               () => manager.setPinned(session.id, allowed.pin, metadata),
             )
           }
@@ -155,7 +159,9 @@ export function SessionActions({
             Windows: { modifiers: ["ctrl", "shift"], key: "i" },
           }}
           onAction={() =>
-            run("Interrupting session…", "Session interrupted", () => manager.interrupt(session.id, metadata))
+            run("Interrupting session…", ["Session interrupted", "Couldn't interrupt session"], () =>
+              manager.interrupt(session.id, metadata),
+            )
           }
         />
       )}
@@ -185,7 +191,7 @@ export function SessionActions({
             )
               await run(
                 "Terminating session…",
-                "Session terminated",
+                ["Session terminated", "Couldn't terminate session"],
                 () => manager.terminate(session.id, metadata),
                 handlers.afterTerminate,
               );
@@ -206,7 +212,9 @@ export function SessionActions({
                 primaryAction: { title: "Delete", style: Alert.ActionStyle.Destructive },
               })
             )
-              await run("Deleting session…", "Session deleted", () => manager.remove(session.id, metadata));
+              await run("Deleting session…", ["Session deleted", "Couldn't delete session"], () =>
+                manager.remove(session.id, metadata),
+              );
           }}
         />
       )}
@@ -246,7 +254,7 @@ function RenameSession({
               const toast = await showToast({ style: Toast.Style.Animated, title: "Renaming session…" });
               const outcome = await manager.rename(session.id, title, metadata);
               setSaving(false);
-              if (await reportOutcome(outcome, "Session renamed", handlers, toast)) pop();
+              if (await reportOutcome(outcome, ["Session renamed", "Couldn't rename session"], handlers, toast)) pop();
             }}
           />
         </ActionPanel>

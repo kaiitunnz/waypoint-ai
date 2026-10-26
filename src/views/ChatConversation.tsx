@@ -23,6 +23,14 @@ import { ConversationContent } from "./Conversation";
 import { EditSession, NewChatOption } from "./EditSession";
 
 type ReadingMode = "conversation" | "latest";
+const endedNote = (status: string) =>
+  status === "exited"
+    ? "_This session has exited._"
+    : status === "error"
+      ? "_This session stopped with an error. Show Activity for details._"
+      : status === "interrupted"
+        ? "_Interrupted._"
+        : "";
 export interface ConversationActionContext {
   setActive: (active: boolean) => void;
   session?: Session;
@@ -198,6 +206,8 @@ export function ChatConversation({
             : chatMarkdown(latest, showActivity, waiting, limit)
           : emptyMarkdown || "",
       waiting ? "_Working…_" : "",
+      // Quick Chat shows the status beside its conversation row; the reader has only the transcript.
+      !composer && session ? endedNote(session.status) : "",
     ]
       .filter(Boolean)
       .join("\n\n");
@@ -235,7 +245,7 @@ export function ChatConversation({
           }}
         />
       )}
-      {actions?.({ setActive, session, feed })}
+      {actions?.({ setActive, session: missing ? undefined : session, feed })}
       {withAttention && composer && attention.length > 0 && attentionActions}
       <ActionPanel.Section title="Conversation">
         {turns > 1 && (
