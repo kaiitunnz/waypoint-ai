@@ -3,7 +3,7 @@ import { QuickChatController } from "./quickChatController";
 import { FeedConnection } from "./sessionFeeds";
 import { quickChatStore, connectionStore } from "../storage/raycast";
 
-export function useQuickChat(connection: FeedConnection, forceNew: boolean) {
+export function useQuickChat(connection: FeedConnection, forceNew: boolean, resume = false) {
   const controller = useMemo(
     () =>
       new QuickChatController(
@@ -14,9 +14,9 @@ export function useQuickChat(connection: FeedConnection, forceNew: boolean) {
           if (!state.connections.some((item) => item.id === connection.id && item.apiUrl === connection.apiUrl))
             throw new Error("The server connection changed or was removed. Reopen Quick Chat; your draft is kept.");
         },
-        forceNew,
+        { forceNew, resume },
       ),
-    [connection.id, connection.apiUrl, connection.token, forceNew],
+    [connection.id, connection.apiUrl, connection.token, forceNew, resume],
   );
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   useEffect(() => {

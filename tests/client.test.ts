@@ -72,6 +72,11 @@ test("handles auth failures without reflecting server details or secrets", async
     client.me("private-token"),
     (error: unknown) => error instanceof ApiError && error.kind === "expired-token",
   );
+  // Waypoint answers 403 for protected sessions and paths, never for sign-in.
+  await assert.rejects(
+    new WaypointClient("http://localhost", async () => respond({ detail: "workspace path denied" }, 403)).me("token"),
+    (error: unknown) => error instanceof ApiError && error.kind === "rejected" && error.status === 403,
+  );
 });
 
 test("handles unreachable, timeout, invalid JSON, incompatible catalogs and server errors", async () => {
@@ -253,4 +258,54 @@ test("session HTTP endpoints preserve encoded identity and raw event cursor sema
     new WaypointClient("http://localhost", async () => respond({}, 404)).session("token", "missing"),
     (error: unknown) => error instanceof ApiError && error.kind === "not-found",
   );
+});
+
+test("session management requests and their outcomes", async () => {
+  const { sessionWire } = await import("./fixtures/conversation");
+  const calls: string[] = [];
+  let reply = () => respond({ session: sessionWire("a/b") });
+  const client = new WaypointClient("https://example.com", async (url, init) => {
+    calls.push(`${init?.method} ${String(url).replace("https://example.com", "")}`);
+    return reply();
+  });
+  await client.pin("token", "a/b", true);
+  await client.pin("token", "a/b", false);
+  await client.action("token", "a/b", "terminate");
+  reply = () => respond({ deleted: "a/b" });
+  assert.equal(await client.deleteSession("token", "a/b"), "a/b");
+  assert.deepEqual(calls, [
+    "POST /api/sessions/a%2Fb/pin",
+    "DELETE /api/sessions/a%2Fb/pin",
+    "POST /api/sessions/a%2Fb/terminate",
+    "DELETE /api/sessions/a%2Fb",
+  ]);
+  const failure = async (operation: () => Promise<unknown>) => {
+    try {
+      await operation();
+    } catch (error) {
+      assert.ok(error instanceof ApiError);
+      return error;
+    }
+    assert.fail("expected a failure");
+  };
+  reply = () => respond({ detail: "the assistant session cannot be deleted" }, 403);
+  const refused = await failure(() => client.deleteSession("token", "a/b"));
+  assert.equal(refused.kind, "rejected");
+  assert.equal(refused.status, 403);
+  assert.match(refused.message, /does not allow this: the assistant session cannot be deleted/);
+  reply = () => respond({ detail: "unauthorized" }, 401);
+  assert.equal((await failure(() => client.action("token", "a/b", "terminate"))).kind, "expired-token");
+  reply = () => respond({ deleted: "another" });
+  assert.equal((await failure(() => client.deleteSession("token", "a/b"))).kind, "uncertain");
+  reply = () => new Response("not json", { status: 200 });
+  assert.equal((await failure(() => client.deleteSession("token", "a/b"))).kind, "uncertain");
+  reply = () => respond({ detail: "cwd-not-found" }, 400);
+  const cwd = await failure(() => client.action("token", "a/b", "reattach"));
+  assert.equal(cwd.detail, "cwd-not-found");
+  assert.doesNotMatch(cwd.message, /Quick Chat/);
+  reply = () => respond({ detail: "session not found" }, 404);
+  const missing = await failure(() =>
+    new WaypointClient("https://example.com", async () => respond({}, 404)).session("token", "a/b"),
+  );
+  assert.equal(missing.message, "This session is no longer available on this server.");
 });

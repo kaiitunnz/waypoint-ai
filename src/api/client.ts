@@ -55,16 +55,15 @@ export class WaypointClient {
         redirect: "error",
         signal,
       });
-      if (response.status === 401 || response.status === 403) {
+      // Waypoint answers 403 for protected sessions and paths, never for sign-in.
+      if (response.status === 403) throw new ApiError("rejected", "Waypoint does not allow this.", undefined, 403);
+      if (response.status === 401) {
         throw path === "/api/auth/login"
           ? new ApiError("invalid-credentials", "The password was not accepted. Check it and try again.")
           : new ApiError("expired-token", "Your sign-in expired or was revoked. Sign in again to reconnect.");
       }
       if (response.status === 404)
-        throw new ApiError(
-          "not-found",
-          "This session is no longer available on this server. Return to Search Sessions and refresh.",
-        );
+        throw new ApiError("not-found", "This session is no longer available on this server.");
       if (!response.ok)
         throw new ApiError("server-error", `The server returned HTTP ${response.status}. Check the server and retry.`);
       try {
@@ -163,12 +162,25 @@ export class WaypointClient {
       options.cursor !== undefined ? this.timeoutMs * 5 : undefined,
     );
   }
-  async mutate(
+  mutate(
     token: string,
     path: string,
     body?: Record<string, unknown>,
-    options: { method?: "POST" | "PATCH"; timeoutMs?: number } = {},
+    options: { method?: "POST" | "PATCH" | "DELETE"; timeoutMs?: number } = {},
   ): Promise<Session> {
+    return this.send(token, path, body, options, (value) => {
+      if (!isRecord(value)) throw new Error("Invalid mutation response");
+      return parseSession(value.session);
+    });
+  }
+  // A response that doesn't parse leaves the outcome uncertain, since the server may have applied it.
+  private async send<T>(
+    token: string,
+    path: string,
+    body: Record<string, unknown> | undefined,
+    options: { method?: "POST" | "PATCH" | "DELETE"; timeoutMs?: number },
+    parse: (value: unknown) => T,
+  ): Promise<T> {
     try {
       const response = await this.request(`${this.apiUrl}${path}`, {
         method: options.method ?? "POST",
@@ -177,7 +189,7 @@ export class WaypointClient {
         redirect: "error",
         signal: AbortSignal.timeout(options.timeoutMs ?? this.timeoutMs),
       });
-      if (response.status === 401 || response.status === 403)
+      if (response.status === 401)
         throw new ApiError("expired-token", "Your sign-in expired. Sign in again; the draft is kept.");
       if (response.status === 404) {
         const value: unknown = await response.json().catch(() => undefined);
@@ -202,12 +214,14 @@ export class WaypointClient {
         }
         const message =
           detail === "cwd-not-found"
-            ? "The working directory does not exist on the execution target. Update Quick Chat Defaults."
+            ? "The working directory does not exist on the execution target."
             : detail === "ssh-master-required"
               ? "Connect this SSH target in Waypoint, then retry. Your draft is kept."
-              : response.status === 409
-                ? "Waypoint rejected this operation because the session is busy or waiting for an interaction. Review it and retry; your draft is kept."
-                : "Waypoint rejected this operation. Check the selected agent, target, and launch settings; your draft is kept.";
+              : response.status === 403
+                ? `Waypoint does not allow this${detail ? `: ${detail}` : "."}`
+                : response.status === 409
+                  ? "Waypoint rejected this operation because the session is busy or waiting for an interaction. Review it and retry; your draft is kept."
+                  : "Waypoint rejected this operation. Check the selected agent, target, and launch settings; your draft is kept.";
         throw new ApiError(
           "rejected",
           message,
@@ -221,9 +235,7 @@ export class WaypointClient {
           "uncertain",
           "Waypoint may have processed this operation, but its result was not confirmed. Check the outcome before retrying.",
         );
-      const value: unknown = await response.json();
-      if (!isRecord(value)) throw new Error("Invalid mutation response");
-      return parseSession(value.session);
+      return parse(await response.json());
     } catch (error) {
       if (error instanceof ApiError) throw error;
       throw new ApiError(
@@ -260,8 +272,10 @@ export class WaypointClient {
       if (signal?.aborted) throw new DOMException("Cancelled", "AbortError");
       throw new ApiError("unreachable", `Could not upload ${basename(path)}. Check the connection and send again.`);
     }
-    if (response.status === 401 || response.status === 403)
+    if (response.status === 401)
       throw new ApiError("expired-token", "Your sign-in expired. Sign in again; your draft is kept.");
+    if (response.status === 403)
+      throw new ApiError("rejected", `Waypoint does not allow uploading ${basename(path)}.`, undefined, 403);
     if (response.status === 404)
       throw new ApiError("not-found", "This session is unavailable. Start a new chat; your draft is kept.");
     if (response.status === 413)
@@ -315,8 +329,9 @@ export class WaypointClient {
         "Could not reach Waypoint to connect the target. Check the connection and retry.",
       );
     }
-    if (response.status === 401 || response.status === 403)
+    if (response.status === 401)
       throw new ApiError("expired-token", "Your sign-in expired. Sign in again, then connect.");
+    if (response.status === 403) throw new ApiError("rejected", "Waypoint does not allow connecting this target.");
     if (response.status === 404) throw new ApiError("not-found", "This execution target is no longer available.");
     if (response.status === 400) throw new ApiError("rejected", "This execution target does not use a password.");
     if (!response.ok)
@@ -326,8 +341,26 @@ export class WaypointClient {
       throw new ApiError("invalid-response", "The server returned an unexpected connection response.");
     return { connected: value.connected, detail: typeof value.detail === "string" ? value.detail : undefined };
   }
-  action(token: string, id: string, action: "interrupt" | "reattach", timeoutMs?: number) {
+  action(token: string, id: string, action: "interrupt" | "reattach" | "terminate", timeoutMs?: number) {
     return this.mutate(token, `/api/sessions/${encodeURIComponent(id)}/${action}`, undefined, { timeoutMs });
+  }
+  pin(token: string, id: string, pinned: boolean) {
+    return this.mutate(token, `/api/sessions/${encodeURIComponent(id)}/pin`, undefined, {
+      method: pinned ? "POST" : "DELETE",
+    });
+  }
+  // Waypoint deletes the transcript and any session worktree; it terminates a live session first.
+  deleteSession(token: string, id: string, timeoutMs?: number): Promise<string> {
+    return this.send(
+      token,
+      `/api/sessions/${encodeURIComponent(id)}`,
+      undefined,
+      { method: "DELETE", timeoutMs },
+      (value) => {
+        if (!isRecord(value) || value.deleted !== id) throw new Error("Invalid delete response");
+        return id;
+      },
+    );
   }
   launchSettings(token: string, id: string, signal?: AbortSignal): Promise<LaunchSettings> {
     return this.read(`/api/sessions/${encodeURIComponent(id)}/launch-settings`, token, signal, parseLaunchSettings);

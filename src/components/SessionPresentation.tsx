@@ -5,12 +5,21 @@ export const statusIcon = (status: string) => ({
   source:
     status === "running" || status === "starting"
       ? Icon.CircleProgress
-      : status === "waiting_input"
+      : status === "waiting_input" || status === "error"
         ? Icon.ExclamationMark
         : status === "exited"
           ? Icon.Stop
-          : Icon.Circle,
-  tintColor: status === "waiting_input" ? Color.Orange : status === "running" ? Color.Green : Color.SecondaryText,
+          : status === "interrupted"
+            ? Icon.Pause
+            : Icon.Circle,
+  tintColor:
+    status === "error"
+      ? Color.Red
+      : status === "waiting_input"
+        ? Color.Orange
+        : status === "running"
+          ? Color.Green
+          : Color.SecondaryText,
 });
 export const markdownText = (value: string) => value.replace(/[\\`*_{}[\]()<>#+.!|~-]/g, "\\$&");
 

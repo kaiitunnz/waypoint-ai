@@ -1,6 +1,7 @@
 import { Action, ActionPanel, Detail, Icon, Keyboard, List, useNavigation } from "@raycast/api";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ServerMetadata } from "../api/contracts";
+import { Session } from "../api/sessions";
 import { chatExchanges, chatMarkdown, conversationMarkdown, previewMessageLimit } from "../domain/chatPresentation";
 import { transcript } from "../domain/transcript";
 import { isStructured } from "../domain/sessions";
@@ -22,6 +23,25 @@ import { ConversationContent } from "./Conversation";
 import { EditSession, NewChatOption } from "./EditSession";
 
 type ReadingMode = "conversation" | "latest";
+const endedNote = (status: string) =>
+  status === "exited"
+    ? "_This session has exited._"
+    : status === "error"
+      ? "_This session stopped with an error. Show Activity for details._"
+      : status === "interrupted"
+        ? "_Interrupted._"
+        : "";
+export interface ConversationActionContext {
+  setActive: (active: boolean) => void;
+  // False on interaction rows, which bring their own Open in Waypoint.
+  browser: boolean;
+}
+
+export interface SessionActionContext {
+  setActive: (active: boolean) => void;
+  session: Session;
+  feed: ConversationFeed;
+}
 
 function FullConversation({
   feed,
@@ -67,6 +87,7 @@ export function ChatConversation({
   metadata,
   composer,
   actions,
+  sessionActions,
   status,
   busy = false,
   revision = 0,
@@ -74,6 +95,7 @@ export function ChatConversation({
   hasDraft = false,
   refreshConnections,
   emptyMarkdown,
+  onMissing,
   settings,
 }: {
   connection: FeedConnection;
@@ -86,7 +108,9 @@ export function ChatConversation({
     canSend: boolean;
     accessory?: React.ComponentProps<typeof List>["searchBarAccessory"];
   };
-  actions?: (setActive: (active: boolean) => void) => React.ReactNode;
+  actions?: (context: ConversationActionContext) => React.ReactNode;
+  // Listed after the Conversation section so a state-changing action never becomes the default.
+  sessionActions?: (context: SessionActionContext) => React.ReactNode;
   status?: string;
   busy?: boolean;
   revision?: number;
@@ -94,6 +118,7 @@ export function ChatConversation({
   hasDraft?: boolean;
   refreshConnections: () => Promise<void>;
   emptyMarkdown?: string;
+  onMissing?: (sessionId: string) => void;
   // Quick Chat hides editing while a send is unsettled and offers starting a new chat with changed settings.
   settings?: { available: boolean; newChat?: NewChatOption };
 }) {
@@ -112,6 +137,10 @@ export function ChatConversation({
   useEffect(() => {
     onPendingChange?.();
   }, [pendingOperation]);
+  const missing = state.error?.kind === "not-found";
+  useEffect(() => {
+    if (missing && sessionId) onMissing?.(sessionId);
+  }, [missing, sessionId]);
   const interactionUrl = sessionId ? sessionUrl(connection.frontendUrl, sessionId) : undefined;
   const [mode, setMode] = useState<ReadingMode>("conversation");
   const [interactionSelection, setInteractionSelection] = useState<string>();
@@ -166,6 +195,8 @@ export function ChatConversation({
     if (interactionSelection && !interactionItemIds(interactionState, sessionId).includes(interactionSelection))
       setInteractionSelection(undefined);
   }, [interactionState, interactionSelection, sessionId]);
+  // Only the side panel clips long messages; the full-width reader shows them whole.
+  const limit = composer ? previewMessageLimit : undefined;
   const renderMarkdown = (readingMode: ReadingMode) =>
     [
       problem
@@ -176,13 +207,15 @@ export function ChatConversation({
         : "",
       attention.length ? `> **Needs attention**\n>\n${attention.map((line) => `> ${line}`).join("\n")}\n\n---` : "",
       unsupported
-        ? "## This conversation needs Waypoint\n\nIts interface changed. Open it in Waypoint to continue."
+        ? `## This conversation needs Waypoint\n\nIts interface changed. ${interactionUrl ? "Open it in Waypoint to continue." : "Add a frontend URL in Manage Servers to open it in Waypoint."}`
         : exchanges.length
           ? readingMode === "conversation"
-            ? conversationMarkdown(exchanges, showActivity, waiting, previewMessageLimit)
-            : chatMarkdown(latest, showActivity, waiting, previewMessageLimit)
+            ? conversationMarkdown(exchanges, showActivity, waiting, limit)
+            : chatMarkdown(latest, showActivity, waiting, limit)
           : emptyMarkdown || "",
       waiting ? "_Working…_" : "",
+      // Quick Chat shows the status beside its conversation row; the reader has only the transcript.
+      !composer && session ? endedNote(session.status) : "",
     ]
       .filter(Boolean)
       .join("\n\n");
@@ -201,13 +234,12 @@ export function ChatConversation({
       {unconfirmed && <UnconfirmedActions controller={interactionController} url={interactionUrl} />}
     </ActionPanel.Section>
   );
-  const sendAction = composer?.text.trim() && composer.canSend && (
+  const sendAction = composer?.text.trim() && composer.canSend && !missing && (
     <Action title="Send Message" icon={Icon.ArrowUp} onAction={composer.onSend} />
   );
-  const actionPanel = (
-    <ActionPanel>
-      {!composer && attention.length > 0 && attentionActions}
-      {sendAction}
+  // Interaction rows bring their own review actions, so they omit the Needs Attention section.
+  const otherActions = (withAttention: boolean) => (
+    <>
       {!composer?.text.trim() && !status && response && (
         <Action.CopyToClipboard title="Copy Latest Response" content={response} />
       )}
@@ -221,8 +253,8 @@ export function ChatConversation({
           }}
         />
       )}
-      {actions?.(setActive)}
-      {composer && attention.length > 0 && attentionActions}
+      {actions?.({ setActive, browser: withAttention })}
+      {withAttention && composer && attention.length > 0 && attentionActions}
       <ActionPanel.Section title="Conversation">
         {turns > 1 && (
           <Action
@@ -279,7 +311,7 @@ export function ChatConversation({
             void interactionController.refresh();
           }}
         />
-        {session && !unsupported && settings?.available !== false && (
+        {session && !unsupported && !missing && settings?.available !== false && (
           <Action.Push
             title="Edit Current Session"
             icon={Icon.Gear}
@@ -323,6 +355,14 @@ export function ChatConversation({
           />
         )}
       </ActionPanel.Section>
+      {session && !missing && sessionActions?.({ setActive, session, feed })}
+    </>
+  );
+  const actionPanel = (
+    <ActionPanel>
+      {!composer && attention.length > 0 && attentionActions}
+      {sendAction}
+      {otherActions(true)}
     </ActionPanel>
   );
 
@@ -358,6 +398,7 @@ export function ChatConversation({
         sessionId={sessionId}
         url={interactionUrl}
         leading={sendAction}
+        trailing={otherActions(false)}
       />
       <List.Section
         title="Conversation"

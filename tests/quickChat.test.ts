@@ -7,9 +7,17 @@ import { spawn } from "node:child_process";
 import { parseMetadata } from "../src/api/contracts";
 import { WaypointClient } from "../src/api/client";
 import { parseSession, parseEvent } from "../src/api/sessions";
-import { createRequest, initialDefaults, ongoing, reuseDecision } from "../src/domain/quickChat";
+import {
+  createRequest,
+  failedStart,
+  failedStartAt,
+  initialDefaults,
+  ongoing,
+  resumeFor,
+  reuseDecision,
+} from "../src/domain/quickChat";
 import { draftKeys } from "../src/storage/drafts";
-import { QuickChatStore, decodeQuickChat } from "../src/storage/quickChat";
+import { QuickChatStore, decodeQuickChat, lastActivity, setPointer } from "../src/storage/quickChat";
 import { ServerMutex } from "../src/storage/mutex";
 import { QuickChatController } from "../src/hooks/quickChatController";
 import { metadataWire, sessionWire, eventWire } from "./fixtures/conversation";
@@ -87,12 +95,12 @@ async function fixture() {
     await sessionGate;
     return respond({ session });
   });
-  const controller = (forceNew = false) =>
+  const controller = (forceNew = false, resume = false) =>
     new QuickChatController(
       connection,
       store,
       async () => undefined,
-      forceNew,
+      { forceNew, resume },
       client,
       () => now,
     );
@@ -822,4 +830,260 @@ test("abandoning an attempt invalidates a delayed refresh of its destination", a
   } finally {
     await f.close();
   }
+});
+
+const choose = (f: Awaited<ReturnType<typeof fixture>>, id: string, at: number) =>
+  f.store.transaction(connection.id, async (state, persist) => {
+    setPointer(state, id, at);
+    await persist();
+  });
+
+test("a chosen destination decodes, times out from the choice, and leaves with its pointer", () => {
+  const state = decodeQuickChat(undefined);
+  assert.equal(decodeQuickChat(JSON.stringify(state)).chosen, undefined);
+  setPointer(state, "found", 5000);
+  assert.deepEqual(decodeQuickChat(JSON.stringify(state)).chosen, { sessionId: "found", at: 5000 });
+  assert.throws(() => decodeQuickChat(JSON.stringify({ ...state, chosen: { sessionId: "found" } })));
+  assert.equal(lastActivity(state, "found"), 5000);
+  state.sentAt.found = 4000;
+  assert.equal(lastActivity(state, "found"), 5000);
+  state.sentAt.found = 6000;
+  assert.equal(lastActivity(state, "found"), 6000);
+  setPointer(state, "found");
+  assert.equal(state.chosen?.sessionId, "found");
+  setPointer(state, "created");
+  assert.equal(state.chosen, undefined);
+  assert.equal(lastActivity(state, "found"), 6000);
+  setPointer(state, "found", 7000);
+  setPointer(state, undefined);
+  assert.equal(state.chosen, undefined);
+  assert.equal(resumeFor("a", "a", true), true);
+  assert.equal(resumeFor("b", "a", true), false);
+  assert.equal(resumeFor("a", undefined, true), false);
+  assert.equal(resumeFor("a", "a", false), false);
+});
+
+test("a chosen session from elsewhere is continued and receives sends", async () => {
+  const f = await fixture();
+  try {
+    f.sessions.push({ ...sessionWire("found"), status: "idle", tags: {} });
+    const unchosen = f.controller();
+    await f.store.transaction(connection.id, async (state, persist) => {
+      state.pointer = "found";
+      await persist();
+    });
+    await unchosen.start();
+    assert.match(unchosen.getSnapshot().error!, /not owned by this Quick Chat installation/);
+    await choose(f, "found", 1000000);
+    const c = f.controller();
+    await c.start();
+    assert.equal(c.getSnapshot().session?.id, "found");
+    await c.changeDraft("Follow up");
+    await c.send();
+    assert.equal(f.sessions.length, 1);
+    assert.ok(f.requests.some((request) => request.path === "/api/sessions/found/input"));
+    f.advance(29 * 60000);
+    const reopened = f.controller();
+    await reopened.start();
+    assert.equal(reopened.getSnapshot().session?.id, "found");
+  } finally {
+    await f.close();
+  }
+});
+
+test("timed reuse of a chosen session counts from the choice, and resume overrides the mode", async () => {
+  const f = await fixture();
+  try {
+    f.sessions.push({ ...sessionWire("found"), status: "idle", tags: {} });
+    await choose(f, "found", 1000000);
+    f.advance(29 * 60000);
+    const within = f.controller();
+    await within.start();
+    assert.equal(within.getSnapshot().session?.id, "found");
+    f.advance(2 * 60000);
+    const expired = f.controller();
+    await expired.start();
+    assert.equal(expired.getSnapshot().session, undefined);
+    const resumed = f.controller(false, true);
+    await resumed.start();
+    assert.equal(resumed.getSnapshot().session?.id, "found");
+    await f.store.transaction(connection.id, async (state, persist) => {
+      state.defaults = { ...state.defaults, mode: "new" };
+      await persist();
+    });
+    const always = f.controller();
+    await always.start();
+    assert.equal(always.getSnapshot().session, undefined);
+    const resumedNew = f.controller(false, true);
+    await resumedNew.start();
+    assert.equal(resumedNew.getSnapshot().session?.id, "found");
+    const fresh = f.controller(true, true);
+    await fresh.start();
+    assert.equal(fresh.getSnapshot().session, undefined);
+  } finally {
+    await f.close();
+  }
+});
+
+test("creating a new conversation drops the earlier choice", async () => {
+  const f = await fixture();
+  try {
+    f.sessions.push({ ...sessionWire("found"), status: "idle", tags: {} });
+    await choose(f, "found", 1000000);
+    const c = f.controller();
+    await c.start();
+    await c.newChat();
+    await c.changeDraft("Fresh");
+    await c.send();
+    const saved = await f.store.load(connection.id);
+    assert.equal(saved.pointer, "created-2");
+    assert.equal(saved.chosen, undefined);
+    await f.store.transaction(connection.id, async (state, persist) => {
+      state.pointer = "found";
+      await persist();
+    });
+    const back = f.controller();
+    await back.start();
+    assert.match(back.getSnapshot().error!, /not owned/);
+  } finally {
+    await f.close();
+  }
+});
+
+test("Start New Chat clears a destination that is gone, but never a live one", async () => {
+  const f = await fixture();
+  try {
+    await f.store.transaction(connection.id, async (state, persist) => {
+      setPointer(state, "missing", 1000000);
+      await persist();
+    });
+    const c = f.controller();
+    await c.start();
+    assert.match(c.getSnapshot().error!, /no longer on this server/);
+    await c.newChat();
+    let saved = await f.store.load(connection.id);
+    assert.equal(saved.pointer, undefined);
+    assert.equal(saved.chosen, undefined);
+    const reopened = f.controller();
+    await reopened.start();
+    assert.equal(reopened.getSnapshot().error, undefined);
+    await reopened.changeDraft("Hello");
+    await reopened.send();
+    const live = f.controller();
+    await live.start();
+    assert.equal(live.getSnapshot().session?.id, "created-1");
+    await live.newChat();
+    saved = await f.store.load(connection.id);
+    assert.equal(saved.pointer, "created-1");
+  } finally {
+    await f.close();
+  }
+});
+
+test("a create whose session failed to start is recognized, cleared, and keeps the draft", async () => {
+  const f = await fixture();
+  try {
+    const c = f.controller();
+    await c.start();
+    f.setUncertainCreate(true);
+    await c.changeDraft("Hello there");
+    await c.send();
+    const pending = (await f.store.read(connection.id)).pending!;
+    assert.deepEqual(pending.launch, { backend: "test-agent", target: "", cwd: "/workspace" });
+    const failed = f.sessions[0];
+    const untagged = () =>
+      Object.assign(failed, {
+        tags: {},
+        title: "Quick Chat",
+        status: "running",
+        created_at: "2026-10-26T00:00:00Z",
+      });
+    untagged();
+    await c.reconcile();
+    assert.equal(c.getSnapshot().pending?.kind, "create");
+    assert.match(c.getSnapshot().notice!, /No matching session is visible yet/);
+    Object.assign(failed, { status: "error", created_at: "1969-12-31T00:00:00Z" });
+    await c.reconcile();
+    assert.equal(c.getSnapshot().pending?.kind, "create");
+    Object.assign(failed, { created_at: "2026-10-26T00:00:00Z" });
+    await c.reconcile();
+    assert.equal(c.getSnapshot().pending, undefined);
+    assert.match(c.getSnapshot().error!, /failed to start/);
+    const settled = await f.store.read(connection.id);
+    assert.equal(settled.pending, undefined);
+    assert.equal(settled.failedStartAt, Date.parse("2026-10-26T00:00:00Z"));
+    assert.equal(c.getSnapshot().draft, "Hello there");
+    // A retry whose create is unconfirmed is not settled by the failure already recognized.
+    await c.send();
+    assert.equal(c.getSnapshot().pending?.kind, "create");
+    // The retry's session isn't stored yet, as while Waypoint is still connecting to the target.
+    f.sessions.pop();
+    await c.reconcile();
+    assert.equal(c.getSnapshot().pending?.kind, "create");
+    assert.match(c.getSnapshot().notice!, /No matching session is visible yet/);
+    assert.equal(f.requests.filter((request) => request.path.endsWith("/input")).length, 0);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a failed start is matched by target and, on remote targets, by working directory", async () => {
+  const pending = {
+    kind: "create" as const,
+    operationId: "op",
+    text: "",
+    draftKey: "quick",
+    startedAt: Date.parse("2026-10-26T00:00:00Z"),
+    launch: { backend: "test-agent", target: "lab", cwd: "/home/lab/missing" },
+  };
+  const record = (patch: Record<string, unknown>) =>
+    parseSession({
+      ...sessionWire("f"),
+      title: "Quick Chat",
+      status: "error",
+      launch_target_id: "lab",
+      cwd: "/home/lab/missing",
+      created_at: "2026-10-25T23:57:00Z",
+      ...patch,
+    });
+  assert.equal(failedStart(pending, record({})), true);
+  assert.equal(failedStart(pending, record({ cwd: "/home/lab" })), false);
+  assert.equal(failedStart(pending, record({ launch_target_id: null })), false);
+  assert.equal(failedStart(pending, record({ tags: { raycast_create: "op" } })), false);
+  assert.equal(failedStart(pending, record({ created_at: "2026-10-25T23:50:00Z" })), false);
+  assert.equal(failedStart(pending, record({ created_at: undefined })), false);
+  assert.equal(failedStart({ ...pending, launch: undefined }, record({})), false);
+  const local = { ...pending, launch: { ...pending.launch, target: "" } };
+  assert.equal(failedStart(local, record({ launch_target_id: null, cwd: "/Users/me/project" })), true);
+});
+
+test("an earlier failed attempt is not taken as the outcome of a retry", async () => {
+  const pending = {
+    kind: "create" as const,
+    operationId: "op",
+    text: "",
+    draftKey: "quick",
+    startedAt: Date.parse("2026-10-26T00:00:00Z"),
+    launch: { backend: "test-agent", target: "lab", cwd: "/home/lab/project" },
+  };
+  const record = (id: string, status: string, created = "2026-10-26T00:00:01Z") =>
+    parseSession({
+      ...sessionWire(id),
+      title: "Quick Chat",
+      status,
+      launch_target_id: "lab",
+      cwd: "/home/lab/project",
+      created_at: created,
+    });
+  const earlier = Date.parse("2026-10-26T00:00:01Z");
+  assert.equal(failedStartAt(pending, [record("earlier", "error")]), earlier);
+  assert.equal(failedStartAt(pending, [record("earlier", "error"), record("current", "starting")]), undefined);
+  assert.equal(failedStartAt(pending, [record("current", "starting")]), undefined);
+  // The earlier failure was already recognized and the retry's session doesn't exist yet.
+  assert.equal(failedStartAt(pending, [record("earlier", "error")], earlier), undefined);
+  const later = record("retry", "error", "2026-10-26T00:00:09Z");
+  assert.equal(
+    failedStartAt(pending, [record("earlier", "error"), later], earlier),
+    Date.parse("2026-10-26T00:00:09Z"),
+  );
 });

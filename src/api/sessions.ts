@@ -18,6 +18,7 @@ export interface Session {
   branch?: string;
   status: string;
   pinnedAt?: string;
+  createdAt?: string;
   lastEventAt: string;
   model?: string;
   // The selection as stored; null means the agent default. `model` above is the resolved display name.
@@ -27,6 +28,8 @@ export interface Session {
   profile?: Profile;
   usageSource: UsageSource;
   targetId?: string;
+  // A git worktree Waypoint made for this session; deleting the session removes it.
+  worktreePath?: string;
   context?: { used: number; limit?: number };
   tokens?: number;
   rateLimits: { label: string; percent: number }[];
@@ -91,6 +94,7 @@ export function parseSession(value: unknown): Session {
     branch: optionalText(value.branch),
     status: text(value.status),
     pinnedAt: optionalText(value.pinned_at),
+    createdAt: optionalText(value.created_at),
     lastEventAt: text(value.last_event_at ?? value.updated_at),
     model: optionalText(value.resolved_model) ?? optionalText(value.model),
     modelSelection: optionalText(value.model) ?? null,
@@ -109,6 +113,7 @@ export function parseSession(value: unknown): Session {
           }
         : { kind: "plugin" },
     targetId: optionalText(value.launch_target_id),
+    worktreePath: optionalText(value.worktree_path) || undefined,
     context: used !== undefined ? { used, limit: number(context?.context_window_tokens) } : undefined,
     tokens: number(usage?.display_total_tokens),
     rateLimits: Array.isArray(limits?.windows)

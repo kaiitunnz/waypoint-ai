@@ -15,7 +15,7 @@ import { useConnections } from "../hooks/useConnections";
 import { useQuickChat } from "../hooks/useQuickChat";
 import { FeedConnection } from "../hooks/sessionFeeds";
 import { connectionStore } from "../storage/raycast";
-import { canReattach, launchContext } from "../domain/quickChat";
+import { canReattach, launchContext, resumeFor } from "../domain/quickChat";
 import { sessionUrl } from "../domain/sessions";
 import { ChatConversation } from "./ChatConversation";
 import { QuickChatController } from "../hooks/quickChatController";
@@ -27,8 +27,17 @@ import { SignInForm } from "./ServerForm";
 import { ManageServers } from "./ManageServers";
 import { LoadingView } from "../components/SessionPresentation";
 
-// A pinned connection opens that server without changing the saved server selection.
-export function QuickChat({ forceNew = false, connectionId }: { forceNew?: boolean; connectionId?: string }) {
+// A pinned connection opens that server without changing the saved server selection. `resume` opens that
+// server's saved destination, such as a session chosen with Use for Quick Chat, whatever the reuse mode.
+export function QuickChat({
+  forceNew = false,
+  connectionId,
+  resume = false,
+}: {
+  forceNew?: boolean;
+  connectionId?: string;
+  resume?: boolean;
+}) {
   const { state, error, refresh } = useConnections();
   const [selected, setSelected] = useState(connectionId);
   if (!state && !error) return <LoadingView title="Loading Quick Chat…" />;
@@ -54,12 +63,15 @@ export function QuickChat({ forceNew = false, connectionId }: { forceNew?: boole
   if (!connection?.token)
     return (
       <List navigationTitle={forceNew ? "New Chat" : "Quick Chat"} searchBarAccessory={accessory}>
-        <List.Item
-          id="prepared-chat"
+        <List.EmptyView
+          icon={Icon.Message}
           title={
             error ? "Saved servers need attention" : connection ? "Sign in to start chatting" : "Connect to Waypoint"
           }
-          subtitle={error ?? "Choose a server and sign in using Manage Servers."}
+          description={
+            error ??
+            (connection ? `Sign in to ${connection.name} to chat.` : "Add a Waypoint API server using Manage Servers.")
+          }
           actions={
             <ActionPanel>
               {connection && (
@@ -69,17 +81,27 @@ export function QuickChat({ forceNew = false, connectionId }: { forceNew?: boole
                   target={<SignInForm connection={connection} onSaved={refresh} />}
                 />
               )}
+              {error && (
+                <Action
+                  title="Retry Loading"
+                  icon={Icon.ArrowClockwise}
+                  shortcut={Keyboard.Shortcut.Common.Refresh}
+                  onAction={refresh}
+                />
+              )}
               <Action.Push title="Manage Servers" icon={Icon.Network} target={<ManageServers />} onPop={refresh} />
             </ActionPanel>
           }
         />
       </List>
     );
+  const resumed = resumeFor(connection.id, connectionId, resume);
   return (
     <QuickChatView
-      key={`${connection.id}:${forceNew}`}
+      key={`${connection.id}:${forceNew}:${resumed}`}
       connection={{ ...connection, token: connection.token }}
       forceNew={forceNew}
+      resume={resumed}
       refreshConnections={refresh}
       accessory={accessory}
     />
@@ -89,22 +111,25 @@ export function QuickChat({ forceNew = false, connectionId }: { forceNew?: boole
 function QuickChatView({
   connection,
   forceNew,
+  resume,
   refreshConnections,
   accessory,
 }: {
   connection: FeedConnection;
   forceNew: boolean;
+  resume: boolean;
   refreshConnections: () => Promise<void>;
   accessory?: React.ComponentProps<typeof List>["searchBarAccessory"];
 }) {
-  const { state, controller } = useQuickChat(connection, forceNew);
+  const { state, controller } = useQuickChat(connection, forceNew, resume);
   const metadata = state.metadata;
-  const actions = (setActive: (value: boolean) => void = () => undefined) => (
+  const actions = ({ setActive, browser }: { setActive: (value: boolean) => void; browser: boolean }) => (
     <QuickChatActions
       controller={controller}
       connection={connection}
       refreshConnections={refreshConnections}
       setActive={setActive}
+      browser={browser}
     />
   );
   if (state.loading && !state.session) return <LoadingView title="Preparing your chat…" />;
@@ -138,6 +163,7 @@ function QuickChatView({
         busy={state.busy}
         revision={state.revision}
         onPendingChange={() => void controller.syncPending()}
+        onMissing={(id) => controller.markMissing(id)}
         hasDraft={state.hasDraft}
         settings={{
           available: !state.busy && !state.pending,
@@ -186,7 +212,7 @@ function QuickChatView({
             {state.draft.trim() && controller.canSend() && (
               <Action title="Send Message" icon={Icon.ArrowUp} onAction={() => controller.send()} />
             )}
-            {actions()}
+            {actions({ setActive: () => undefined, browser: true })}
           </ActionPanel>
         }
       />
@@ -199,11 +225,13 @@ function QuickChatActions({
   connection,
   refreshConnections,
   setActive,
+  browser,
 }: {
   controller: QuickChatController;
   connection: FeedConnection;
   refreshConnections: () => Promise<void>;
   setActive: (active: boolean) => void;
+  browser: boolean;
 }) {
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const metadata = state.metadata;
@@ -404,7 +432,7 @@ function QuickChatActions({
           void refreshConnections();
         }}
       />
-      {url && <Action.OpenInBrowser title="Open in Waypoint" url={url} />}
+      {browser && url && <Action.OpenInBrowser title="Open in Waypoint" url={url} />}
       <Action.Push
         title="Manage Servers"
         icon={Icon.Network}

@@ -1,11 +1,14 @@
-import { Action, ActionPanel, Icon, Keyboard, List, Toast, showToast } from "@raycast/api";
-import { useMemo, useState } from "react";
+import { Action, ActionPanel, Icon, Keyboard, List, Toast, showToast, useNavigation } from "@raycast/api";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useConnections } from "../hooks/useConnections";
 import { useSessionsFeed } from "../hooks/useSessionFeeds";
 import { FeedConnection } from "../hooks/sessionFeeds";
+import { Session } from "../api/sessions";
 import { connectionStore, quickChatStore } from "../storage/raycast";
 import { SessionFilter, visibleSessions, isStructured, sessionUrl } from "../domain/sessions";
 import { LoadingView, SessionDetail, statusIcon } from "../components/SessionPresentation";
+import { SessionActions } from "./SessionActions";
+import { SessionManager } from "../hooks/sessionManager";
 import { ManageServers } from "./ManageServers";
 import { SignInForm } from "./ServerForm";
 import { ConversationScreen } from "./Conversation";
@@ -61,6 +64,14 @@ export function SearchSessions() {
                   target={<SignInForm connection={connection} onSaved={refresh} />}
                 />
               )}
+              {error && (
+                <Action
+                  title="Retry Loading"
+                  icon={Icon.ArrowClockwise}
+                  shortcut={Keyboard.Shortcut.Common.Refresh}
+                  onAction={refresh}
+                />
+              )}
               <Action.Push title="Manage Servers" icon={Icon.Network} target={<ManageServers />} onPop={refresh} />
             </ActionPanel>
           }
@@ -95,6 +106,41 @@ function SessionsBrowser({
   const [active, setActive] = useState(true);
   const [filter, setFilter] = useState<SessionFilter>("active");
   const { state, feed } = useSessionsFeed(connection, active);
+  const { push } = useNavigation();
+  const manager = useMemo(
+    () => new SessionManager(connection, quickChatStore),
+    [connection.id, connection.apiUrl, connection.token],
+  );
+  const [quickChat, setQuickChat] = useState<{ pointer?: string; pending: boolean }>({ pending: false });
+  const readQuickChat = useCallback(() => {
+    manager.quickChat().then(setQuickChat, () => setQuickChat({ pending: false }));
+  }, [manager]);
+  useEffect(() => {
+    if (active) readQuickChat();
+  }, [active, readQuickChat]);
+  const pause = () => setActive(false);
+  const resume = () => {
+    setActive(true);
+    void refreshConnections();
+  };
+  const handlers = {
+    onChanged: (session: Session) => {
+      feed.apply(session);
+      readQuickChat();
+    },
+    onDeleted: (id: string) => {
+      feed.remove(id);
+      readQuickChat();
+    },
+    openQuickChat: () => {
+      pause();
+      push(<QuickChat connectionId={connection.id} resume />, resume);
+    },
+    afterTerminate:
+      filter === "active"
+        ? { title: "Show Exited Sessions", onAction: (toast: Toast) => (setFilter("all"), toast.hide()) }
+        : undefined,
+  };
   const sessions = useMemo(
     () => visibleSessions(state.sessions, query, filter, state.metadata),
     [state.sessions, query, filter, state.metadata],
@@ -194,6 +240,11 @@ function SessionsBrowser({
                   title={session.title || "Untitled session"}
                   keywords={[session.backend, session.status]}
                   icon={statusIcon(session.status)}
+                  accessories={
+                    quickChat.pointer === session.id
+                      ? [{ tag: "Quick Chat", tooltip: "Quick Chat's destination on this server" }]
+                      : undefined
+                  }
                   detail={<SessionDetail session={session} structured={structured} />}
                   actions={
                     <ActionPanel>
@@ -206,6 +257,7 @@ function SessionsBrowser({
                               connectionId={connection.id}
                               sessionId={session.id}
                               metadata={state.metadata}
+                              quickChat={() => <QuickChat connectionId={connection.id} resume />}
                               newChat={{
                                 start: async (build) => {
                                   await quickChatStore.transaction(connection.id, async (saved, persist) => {
@@ -238,6 +290,13 @@ function SessionsBrowser({
                         />
                       )}
                       {structured && url && <Action.OpenInBrowser title="Open in Waypoint" url={url} />}
+                      <SessionActions
+                        session={session}
+                        metadata={state.metadata}
+                        quickChat={quickChat}
+                        manager={manager}
+                        handlers={handlers}
+                      />
                       <ActionPanel.Section>{shared}</ActionPanel.Section>
                     </ActionPanel>
                   }
