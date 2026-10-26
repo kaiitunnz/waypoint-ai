@@ -340,22 +340,22 @@ test("delete rechecks the session once it holds the server lock", async () => {
 
 test("a failure before anything is sent says what went wrong locally", async () => {
   const f = await fixture();
+  const dir = await mkdtemp(join(tmpdir(), "session-manager-broken-"));
   try {
     f.add("s", { status: "exited" });
     const broken = new SessionManager(
       connection,
-      new QuickChatStore(
-        { getItem: async () => "{not json", setItem: async () => undefined },
-        new ServerMutex(await mkdtemp(join(tmpdir(), "session-manager-broken-"))),
-      ),
+      new QuickChatStore({ getItem: async () => "{not json", setItem: async () => undefined }, new ServerMutex(dir)),
       new WaypointClient(connection.apiUrl, async () => respond({ session: sessionWire("s") })),
     );
     const outcome = await broken.useForQuickChat("s", metadata);
     assert.equal(outcome.kind, "failed");
     assert.match(outcome.kind === "failed" ? outcome.message : "", /Saved Quick Chat data could not be read/);
     const removal = await broken.remove("s", metadata);
-    assert.doesNotMatch(removal.kind === "failed" ? removal.message : "", /didn't confirm/);
+    assert.equal(removal.kind, "failed");
+    assert.match(removal.kind === "failed" ? removal.message : "", /Saved Quick Chat data could not be read/);
   } finally {
+    await rm(dir, { recursive: true, force: true });
     await f.close();
   }
 });

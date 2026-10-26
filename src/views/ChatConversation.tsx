@@ -33,10 +33,14 @@ const endedNote = (status: string) =>
         : "";
 export interface ConversationActionContext {
   setActive: (active: boolean) => void;
-  session?: Session;
-  feed: ConversationFeed;
   // False on interaction rows, which bring their own Open in Waypoint.
   browser: boolean;
+}
+
+export interface SessionActionContext {
+  setActive: (active: boolean) => void;
+  session: Session;
+  feed: ConversationFeed;
 }
 
 function FullConversation({
@@ -83,6 +87,7 @@ export function ChatConversation({
   metadata,
   composer,
   actions,
+  sessionActions,
   status,
   busy = false,
   revision = 0,
@@ -104,6 +109,8 @@ export function ChatConversation({
     accessory?: React.ComponentProps<typeof List>["searchBarAccessory"];
   };
   actions?: (context: ConversationActionContext) => React.ReactNode;
+  // Listed after the Conversation section so a state-changing action never becomes the default.
+  sessionActions?: (context: SessionActionContext) => React.ReactNode;
   status?: string;
   busy?: boolean;
   revision?: number;
@@ -111,7 +118,6 @@ export function ChatConversation({
   hasDraft?: boolean;
   refreshConnections: () => Promise<void>;
   emptyMarkdown?: string;
-  // Called when Waypoint reports the conversation's session gone.
   onMissing?: (sessionId: string) => void;
   // Quick Chat hides editing while a send is unsettled and offers starting a new chat with changed settings.
   settings?: { available: boolean; newChat?: NewChatOption };
@@ -247,7 +253,7 @@ export function ChatConversation({
           }}
         />
       )}
-      {actions?.({ setActive, session: missing ? undefined : session, feed, browser: withAttention })}
+      {actions?.({ setActive, browser: withAttention })}
       {withAttention && composer && attention.length > 0 && attentionActions}
       <ActionPanel.Section title="Conversation">
         {turns > 1 && (
@@ -349,6 +355,7 @@ export function ChatConversation({
           />
         )}
       </ActionPanel.Section>
+      {session && !missing && sessionActions?.({ setActive, session, feed })}
     </>
   );
   const actionPanel = (

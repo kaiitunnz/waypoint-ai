@@ -7,7 +7,7 @@ import { useConnections } from "../hooks/useConnections";
 import { useConversationFeed } from "../hooks/useSessionFeeds";
 import { ConversationFeed, FeedConnection } from "../hooks/sessionFeeds";
 import { LoadingView, markdownText, sessionSummary, statusIcon } from "../components/SessionPresentation";
-import { ChatConversation, ConversationActionContext } from "./ChatConversation";
+import { ChatConversation, SessionActionContext } from "./ChatConversation";
 import { SessionActions } from "./SessionActions";
 import { SessionManager } from "../hooks/sessionManager";
 import { quickChatStore } from "../storage/raycast";
@@ -59,18 +59,16 @@ export function ConversationScreen({
       metadata={metadata}
       refreshConnections={refresh}
       settings={{ available: true, newChat }}
-      actions={({ setActive, session, feed, browser }) => (
+      sessionActions={(context) => (
+        <ConversationSessionActions
+          {...context}
+          connection={{ ...connection, token: connection.token! }}
+          metadata={metadata}
+          quickChat={quickChat}
+        />
+      )}
+      actions={({ setActive, browser }) => (
         <>
-          {session && (
-            <ConversationSessionActions
-              connection={{ ...connection, token: connection.token! }}
-              metadata={metadata}
-              session={session}
-              feed={feed}
-              setActive={setActive}
-              quickChat={quickChat}
-            />
-          )}
           {browser && connection.frontendUrl && (
             <Action.OpenInBrowser title="Open in Waypoint" url={sessionUrl(connection.frontendUrl, sessionId)!} />
           )}
@@ -107,10 +105,9 @@ function ConversationSessionActions({
   feed,
   setActive,
   quickChat,
-}: Required<Pick<ConversationActionContext, "setActive" | "feed">> & {
+}: SessionActionContext & {
   connection: FeedConnection;
   metadata: ServerMetadata;
-  session: NonNullable<ConversationActionContext["session"]>;
   quickChat?: () => React.ReactElement;
 }) {
   const { push, pop } = useNavigation();

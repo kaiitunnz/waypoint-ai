@@ -54,7 +54,7 @@ Not exercised natively:
 
 ## Automated coverage
 
-`npm run verify` checks formatting, ESLint, strict types, 192 behavior and integration tests, Raycast validation, and build.
+`npm run verify` checks formatting, ESLint, strict types, 194 behavior and integration tests, Raycast validation, and build.
 
 Session management tests cover:
 

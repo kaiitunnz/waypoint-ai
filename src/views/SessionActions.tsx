@@ -20,13 +20,11 @@ import { ConnectTarget } from "./ConnectTarget";
 export interface SessionActionHandlers {
   onChanged: (session: Session) => void;
   onDeleted: (id: string) => void;
-  // Shows Quick Chat continuing the session.
   openQuickChat: () => void;
   // Offered on the success toast, such as revealing a terminated session the list now hides.
   afterTerminate?: Toast.ActionOptions;
 }
 
-// Reports an outcome and returns whether it succeeded.
 // `titles` names the outcome: what was done, and what couldn't be.
 export async function reportOutcome(
   outcome: ManageOutcome,
@@ -100,6 +98,15 @@ export function SessionActions({
   };
   return (
     <ActionPanel.Section title="Session">
+      {/* Rename leads because it only opens a form, so a row's secondary action never changes the session. */}
+      {allowed.rename && (
+        <Action.Push
+          title="Rename Session"
+          icon={Icon.Pencil}
+          shortcut={Keyboard.Shortcut.Common.Edit}
+          target={<RenameSession session={session} metadata={metadata} manager={manager} handlers={handlers} />}
+        />
+      )}
       {allowed.useForQuickChat && metadata && (
         <Action
           title="Use for Quick Chat"
@@ -129,14 +136,6 @@ export function SessionActions({
             Windows: { modifiers: ["ctrl", "shift"], key: "u" },
           }}
           onAction={handlers.openQuickChat}
-        />
-      )}
-      {allowed.rename && (
-        <Action.Push
-          title="Rename Session"
-          icon={Icon.Pencil}
-          shortcut={Keyboard.Shortcut.Common.Edit}
-          target={<RenameSession session={session} metadata={metadata} manager={manager} handlers={handlers} />}
         />
       )}
       {(allowed.pin || allowed.unpin) && (
