@@ -54,15 +54,15 @@ Reconnects recover missed events and preserve loaded history. Expired sign-in of
 
 Session actions appear in the Actions panel of each Search Sessions row and of conversations opened from search. Each action checks the session's current state with Waypoint first, so an action on an outdated row does nothing and says so.
 
-| Action             | Available when                                                   | Shortcut                                 |
-| ------------------ | ---------------------------------------------------------------- | ---------------------------------------- |
-| Use for Quick Chat | The session has a native conversation and can continue           | ⇧⌘U / Ctrl+Shift+U                       |
-| Rename Session     | Always                                                           | Raycast's Edit (⌘E on macOS)             |
-| Pin / Unpin        | Always                                                           | Raycast's Pin (⌘. on macOS), in the list |
-| Interrupt Session  | A native conversation is starting, running, or waiting for input | ⇧⌘I / Ctrl+Shift+I                       |
-| Reattach Session   | The session exited or failed and its interface can resume it     | ⇧⌘T / Ctrl+Shift+T                       |
-| Terminate Session  | The session has not exited                                       | None                                     |
-| Delete Session     | The session exited or failed                                     | Raycast's Remove (⌃X on macOS)           |
+| Action             | Available when                                                   | Shortcut                       |
+| ------------------ | ---------------------------------------------------------------- | ------------------------------ |
+| Use for Quick Chat | The session has a native conversation and can continue           | ⇧⌘U / Ctrl+Shift+U             |
+| Rename Session     | Always                                                           | Raycast's Edit (⌘E on macOS)   |
+| Pin / Unpin        | Always                                                           | Raycast's Pin (⌘. on macOS)    |
+| Interrupt Session  | A native conversation is starting, running, or waiting for input | ⇧⌘I / Ctrl+Shift+I             |
+| Reattach Session   | The session exited or failed and its interface can resume it     | ⇧⌘T / Ctrl+Shift+T             |
+| Terminate Session  | The session has not exited                                       | None                           |
+| Delete Session     | The session exited or failed                                     | Raycast's Remove (⌃X on macOS) |
 
 **Terminate** stops the agent and asks for confirmation first. Terminating a terminal session that is attached to your own tmux session leaves your tmux session running. A terminated session leaves the active list; the success toast offers **Show Exited Sessions**.
 

@@ -72,6 +72,11 @@ test("handles auth failures without reflecting server details or secrets", async
     client.me("private-token"),
     (error: unknown) => error instanceof ApiError && error.kind === "expired-token",
   );
+  // Waypoint answers 403 for protected sessions and paths, never for sign-in.
+  await assert.rejects(
+    new WaypointClient("http://localhost", async () => respond({ detail: "workspace path denied" }, 403)).me("token"),
+    (error: unknown) => error instanceof ApiError && error.kind === "rejected" && error.status === 403,
+  );
 });
 
 test("handles unreachable, timeout, invalid JSON, incompatible catalogs and server errors", async () => {

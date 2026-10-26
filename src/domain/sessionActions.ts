@@ -63,6 +63,6 @@ export function titleProblem(title: string): string | undefined {
 export const terminateMessage = "Any running command will be stopped.";
 export function deleteMessage(session: Session): string {
   return session.worktreePath
-    ? `Its transcript, attachments, scheduled messages, and board posts are removed, and so is its worktree at ${session.worktreePath}, including uncommitted changes, with the worktree's branch if it is merged. This cannot be undone.`
-    : "Its transcript, attachments, scheduled messages, and board posts are removed. This cannot be undone.";
+    ? `Its transcript, attachments, scheduled messages, board posts, and any manager backlog it owns are removed, and so is its worktree at ${session.worktreePath}, including uncommitted changes, with the worktree's branch if it is merged. This cannot be undone.`
+    : "Its transcript, attachments, scheduled messages, board posts, and any manager backlog it owns are removed. This cannot be undone.";
 }

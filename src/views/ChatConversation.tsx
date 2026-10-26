@@ -35,6 +35,8 @@ export interface ConversationActionContext {
   setActive: (active: boolean) => void;
   session?: Session;
   feed: ConversationFeed;
+  // False on interaction rows, which bring their own Open in Waypoint.
+  browser: boolean;
 }
 
 function FullConversation({
@@ -245,7 +247,7 @@ export function ChatConversation({
           }}
         />
       )}
-      {actions?.({ setActive, session: missing ? undefined : session, feed })}
+      {actions?.({ setActive, session: missing ? undefined : session, feed, browser: withAttention })}
       {withAttention && composer && attention.length > 0 && attentionActions}
       <ActionPanel.Section title="Conversation">
         {turns > 1 && (

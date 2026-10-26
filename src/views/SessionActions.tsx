@@ -15,15 +15,13 @@ import { ServerMetadata } from "../api/contracts";
 import { Session } from "../api/sessions";
 import { deleteMessage, sessionActions, terminateMessage, titleProblem } from "../domain/sessionActions";
 import { ManageOutcome, SessionManager } from "../hooks/sessionManager";
-import { ConnectTarget } from "../views/ConnectTarget";
+import { ConnectTarget } from "./ConnectTarget";
 
 export interface SessionActionHandlers {
   onChanged: (session: Session) => void;
   onDeleted: (id: string) => void;
   // Shows Quick Chat continuing the session.
   openQuickChat: () => void;
-  // Pin and unpin have a shortcut only where Paste Latest Response does not already use it.
-  pinShortcut?: boolean;
   // Offered on the success toast, such as revealing a terminated session the list now hides.
   afterTerminate?: Toast.ActionOptions;
 }
@@ -140,7 +138,7 @@ export function SessionActions({
         <Action
           title={allowed.pin ? "Pin Session" : "Unpin Session"}
           icon={allowed.pin ? Icon.Pin : Icon.PinDisabled}
-          shortcut={handlers.pinShortcut ? Keyboard.Shortcut.Common.Pin : undefined}
+          shortcut={Keyboard.Shortcut.Common.Pin}
           onAction={() =>
             run(
               allowed.pin ? "Pinning session…" : "Unpinning session…",

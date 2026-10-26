@@ -82,7 +82,7 @@ test("titles and delete confirmations", () => {
   assert.equal(titleProblem(` ${"x".repeat(500)} `), undefined);
   assert.match(
     deleteMessage(session()),
-    /^Its transcript, attachments, scheduled messages, and board posts are removed\./,
+    /^Its transcript, attachments, scheduled messages, board posts, and any manager backlog it owns are removed\./,
   );
   const worktree = deleteMessage(session({ worktree_path: "/repo/.worktrees/s" }));
   assert.match(worktree, /worktree at \/repo\/\.worktrees\/s/);

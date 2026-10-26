@@ -8,7 +8,7 @@ import { useConversationFeed } from "../hooks/useSessionFeeds";
 import { ConversationFeed, FeedConnection } from "../hooks/sessionFeeds";
 import { LoadingView, markdownText, sessionSummary, statusIcon } from "../components/SessionPresentation";
 import { ChatConversation, ConversationActionContext } from "./ChatConversation";
-import { SessionActions } from "../components/SessionActions";
+import { SessionActions } from "./SessionActions";
 import { SessionManager } from "../hooks/sessionManager";
 import { quickChatStore } from "../storage/raycast";
 import { NewChatOption } from "./EditSession";
@@ -59,7 +59,7 @@ export function ConversationScreen({
       metadata={metadata}
       refreshConnections={refresh}
       settings={{ available: true, newChat }}
-      actions={({ setActive, session, feed }) => (
+      actions={({ setActive, session, feed, browser }) => (
         <>
           {session && (
             <ConversationSessionActions
@@ -71,7 +71,7 @@ export function ConversationScreen({
               quickChat={quickChat}
             />
           )}
-          {connection.frontendUrl && (
+          {browser && connection.frontendUrl && (
             <Action.OpenInBrowser title="Open in Waypoint" url={sessionUrl(connection.frontendUrl, sessionId)!} />
           )}
           <Action.Push

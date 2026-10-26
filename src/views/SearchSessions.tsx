@@ -7,7 +7,7 @@ import { Session } from "../api/sessions";
 import { connectionStore, quickChatStore } from "../storage/raycast";
 import { SessionFilter, visibleSessions, isStructured, sessionUrl } from "../domain/sessions";
 import { LoadingView, SessionDetail, statusIcon } from "../components/SessionPresentation";
-import { SessionActions } from "../components/SessionActions";
+import { SessionActions } from "./SessionActions";
 import { SessionManager } from "../hooks/sessionManager";
 import { ManageServers } from "./ManageServers";
 import { SignInForm } from "./ServerForm";
@@ -136,7 +136,6 @@ function SessionsBrowser({
       pause();
       push(<QuickChat connectionId={connection.id} resume />, resume);
     },
-    pinShortcut: true,
     afterTerminate:
       filter === "active"
         ? { title: "Show Exited Sessions", onAction: (toast: Toast) => (setFilter("all"), toast.hide()) }

@@ -123,12 +123,13 @@ function QuickChatView({
 }) {
   const { state, controller } = useQuickChat(connection, forceNew, resume);
   const metadata = state.metadata;
-  const actions = ({ setActive }: { setActive: (value: boolean) => void } = { setActive: () => undefined }) => (
+  const actions = ({ setActive, browser }: { setActive: (value: boolean) => void; browser: boolean }) => (
     <QuickChatActions
       controller={controller}
       connection={connection}
       refreshConnections={refreshConnections}
       setActive={setActive}
+      browser={browser}
     />
   );
   if (state.loading && !state.session) return <LoadingView title="Preparing your chat…" />;
@@ -211,7 +212,7 @@ function QuickChatView({
             {state.draft.trim() && controller.canSend() && (
               <Action title="Send Message" icon={Icon.ArrowUp} onAction={() => controller.send()} />
             )}
-            {actions()}
+            {actions({ setActive: () => undefined, browser: true })}
           </ActionPanel>
         }
       />
@@ -224,11 +225,13 @@ function QuickChatActions({
   connection,
   refreshConnections,
   setActive,
+  browser,
 }: {
   controller: QuickChatController;
   connection: FeedConnection;
   refreshConnections: () => Promise<void>;
   setActive: (active: boolean) => void;
+  browser: boolean;
 }) {
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const metadata = state.metadata;
@@ -429,7 +432,7 @@ function QuickChatActions({
           void refreshConnections();
         }}
       />
-      {url && <Action.OpenInBrowser title="Open in Waypoint" url={url} />}
+      {browser && url && <Action.OpenInBrowser title="Open in Waypoint" url={url} />}
       <Action.Push
         title="Manage Servers"
         icon={Icon.Network}

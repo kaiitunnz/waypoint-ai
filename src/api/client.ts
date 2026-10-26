@@ -55,7 +55,9 @@ export class WaypointClient {
         redirect: "error",
         signal,
       });
-      if (response.status === 401 || response.status === 403) {
+      // Waypoint answers 403 for protected sessions and paths, never for sign-in.
+      if (response.status === 403) throw new ApiError("rejected", "Waypoint does not allow this.", undefined, 403);
+      if (response.status === 401) {
         throw path === "/api/auth/login"
           ? new ApiError("invalid-credentials", "The password was not accepted. Check it and try again.")
           : new ApiError("expired-token", "Your sign-in expired or was revoked. Sign in again to reconnect.");
@@ -210,7 +212,6 @@ export class WaypointClient {
         } catch {
           /* HTTP status still establishes rejection. */
         }
-        // Waypoint answers 403 only for protected sessions and paths, never for sign-in.
         const message =
           detail === "cwd-not-found"
             ? "The working directory does not exist on the execution target."
@@ -271,8 +272,10 @@ export class WaypointClient {
       if (signal?.aborted) throw new DOMException("Cancelled", "AbortError");
       throw new ApiError("unreachable", `Could not upload ${basename(path)}. Check the connection and send again.`);
     }
-    if (response.status === 401 || response.status === 403)
+    if (response.status === 401)
       throw new ApiError("expired-token", "Your sign-in expired. Sign in again; your draft is kept.");
+    if (response.status === 403)
+      throw new ApiError("rejected", `Waypoint does not allow uploading ${basename(path)}.`, undefined, 403);
     if (response.status === 404)
       throw new ApiError("not-found", "This session is unavailable. Start a new chat; your draft is kept.");
     if (response.status === 413)
@@ -326,8 +329,9 @@ export class WaypointClient {
         "Could not reach Waypoint to connect the target. Check the connection and retry.",
       );
     }
-    if (response.status === 401 || response.status === 403)
+    if (response.status === 401)
       throw new ApiError("expired-token", "Your sign-in expired. Sign in again, then connect.");
+    if (response.status === 403) throw new ApiError("rejected", "Waypoint does not allow connecting this target.");
     if (response.status === 404) throw new ApiError("not-found", "This execution target is no longer available.");
     if (response.status === 400) throw new ApiError("rejected", "This execution target does not use a password.");
     if (!response.ok)
