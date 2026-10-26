@@ -63,12 +63,15 @@ export function QuickChat({
   if (!connection?.token)
     return (
       <List navigationTitle={forceNew ? "New Chat" : "Quick Chat"} searchBarAccessory={accessory}>
-        <List.Item
-          id="prepared-chat"
+        <List.EmptyView
+          icon={Icon.Message}
           title={
             error ? "Saved servers need attention" : connection ? "Sign in to start chatting" : "Connect to Waypoint"
           }
-          subtitle={error ?? "Choose a server and sign in using Manage Servers."}
+          description={
+            error ??
+            (connection ? `Sign in to ${connection.name} to chat.` : "Add a Waypoint API server using Manage Servers.")
+          }
           actions={
             <ActionPanel>
               {connection && (
@@ -76,6 +79,14 @@ export function QuickChat({
                   title="Sign in"
                   icon={Icon.Lock}
                   target={<SignInForm connection={connection} onSaved={refresh} />}
+                />
+              )}
+              {error && (
+                <Action
+                  title="Retry Loading"
+                  icon={Icon.ArrowClockwise}
+                  shortcut={Keyboard.Shortcut.Common.Refresh}
+                  onAction={refresh}
                 />
               )}
               <Action.Push title="Manage Servers" icon={Icon.Network} target={<ManageServers />} onPop={refresh} />

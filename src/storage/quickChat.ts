@@ -18,6 +18,8 @@ export interface PendingOperation {
   baseline?: number;
   acknowledgedAt?: number;
   attachments?: string[];
+  // Where a create was launched, to recognize a session that Waypoint created but could not start.
+  launch?: { backend: string; target: string; cwd: string };
 }
 export interface QuickChatState {
   version: 1;
@@ -135,6 +137,15 @@ export function decodeQuickChat(raw?: string): QuickChatState {
     )
       throw new Error();
     if (data.compose !== undefined && (!isRecord(data.compose) || !Object.values(data.compose).every(isComposeParts)))
+      throw new Error();
+    if (
+      isRecord(data.pending) &&
+      data.pending.launch !== undefined &&
+      (!isRecord(data.pending.launch) ||
+        !isText(data.pending.launch.backend) ||
+        !isText(data.pending.launch.target) ||
+        !isText(data.pending.launch.cwd))
+    )
       throw new Error();
     if (
       isRecord(data.pending) &&

@@ -262,3 +262,25 @@ test("Use for Quick Chat records an explicit choice, and refuses while an operat
     await f.close();
   }
 });
+
+test("delete waits for Quick Chat to check a create whose session failed to start", async () => {
+  const f = await fixture();
+  try {
+    f.add("failed", { status: "error", title: "Quick Chat", cwd: "/workspace", created_at: "2026-10-26T00:00:00Z" });
+    await f.store.transaction(connection.id, async (state, persist) => {
+      state.pending = {
+        kind: "create",
+        operationId: "op",
+        text: "",
+        draftKey: "quick",
+        startedAt: Date.parse("2026-10-26T00:00:00Z"),
+        launch: { backend: "test-agent", target: "", cwd: "/workspace" },
+      };
+      await persist();
+    });
+    assert.equal((await f.manager.remove("failed", metadata)).kind, "stale");
+    assert.ok(f.sessions.has("failed"));
+  } finally {
+    await f.close();
+  }
+});

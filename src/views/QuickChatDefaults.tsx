@@ -1,4 +1,4 @@
-import { Action, ActionPanel, Form, Icon, Toast, showToast, useNavigation } from "@raycast/api";
+import { Action, ActionPanel, Form, Icon, Keyboard, Toast, showToast, useNavigation } from "@raycast/api";
 import { useEffect, useRef, useState } from "react";
 import { customModelValue, defaultsModelChoice, defaultsModelChoices, modelEfforts } from "../domain/modelOptions";
 import { structuredTransport } from "../domain/sessions";
@@ -25,6 +25,7 @@ export function QuickChatDefaults({
     !!(defaults.transport || defaults.profile || defaults.permission || defaults.args || defaults.config),
   );
   const [models, setModels] = useState<ModelCatalog>();
+  const [modelLoad, setModelLoad] = useState(0);
   const [error, setError] = useState<string>();
   const [modelError, setModelError] = useState<string>();
   const [busy, setBusy] = useState(false);
@@ -53,10 +54,10 @@ export function QuickChatDefaults({
         if (!controller.signal.aborted) setModels(catalog);
       })
       .catch(() => {
-        if (!controller.signal.aborted) setModelError("Could not load models. Reopen defaults to retry.");
+        if (!controller.signal.aborted) setModelError("Could not load models. Reload them to retry.");
       });
     return () => controller.abort();
-  }, [connection.apiUrl, connection.token, context.backend, values.target, profile]);
+  }, [connection.apiUrl, connection.token, context.backend, values.target, profile, modelLoad]);
   function set<K extends keyof ChatDefaults>(key: K, value: ChatDefaults[K]) {
     setError(undefined);
     setValues((current) => ({ ...current, [key]: value }));
@@ -127,6 +128,14 @@ export function QuickChatDefaults({
       actions={
         <ActionPanel>
           <Action.SubmitForm title="Save Defaults" icon={Icon.Checkmark} onSubmit={save} />
+          {modelError && (
+            <Action
+              title="Reload Models"
+              icon={Icon.ArrowClockwise}
+              shortcut={Keyboard.Shortcut.Common.Refresh}
+              onAction={() => setModelLoad((value) => value + 1)}
+            />
+          )}
         </ActionPanel>
       }
     >
@@ -231,7 +240,6 @@ export function QuickChatDefaults({
       <Form.Checkbox id="advanced" label="Show advanced launch settings" value={advanced} onChange={setAdvanced} />
       {advanced && (
         <>
-          {" "}
           <Form.Dropdown
             id="transport"
             title="Interface"

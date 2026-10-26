@@ -18,6 +18,7 @@ export interface Session {
   branch?: string;
   status: string;
   pinnedAt?: string;
+  createdAt?: string;
   lastEventAt: string;
   model?: string;
   // The selection as stored; null means the agent default. `model` above is the resolved display name.
@@ -93,6 +94,7 @@ export function parseSession(value: unknown): Session {
     branch: optionalText(value.branch),
     status: text(value.status),
     pinnedAt: optionalText(value.pinned_at),
+    createdAt: optionalText(value.created_at),
     lastEventAt: text(value.last_event_at ?? value.updated_at),
     model: optionalText(value.resolved_model) ?? optionalText(value.model),
     modelSelection: optionalText(value.model) ?? null,

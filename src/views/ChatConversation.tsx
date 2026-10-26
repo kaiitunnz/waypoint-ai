@@ -179,6 +179,8 @@ export function ChatConversation({
     if (interactionSelection && !interactionItemIds(interactionState, sessionId).includes(interactionSelection))
       setInteractionSelection(undefined);
   }, [interactionState, interactionSelection, sessionId]);
+  // Only the side panel clips long messages; the full-width reader shows them whole.
+  const limit = composer ? previewMessageLimit : undefined;
   const renderMarkdown = (readingMode: ReadingMode) =>
     [
       problem
@@ -189,11 +191,11 @@ export function ChatConversation({
         : "",
       attention.length ? `> **Needs attention**\n>\n${attention.map((line) => `> ${line}`).join("\n")}\n\n---` : "",
       unsupported
-        ? "## This conversation needs Waypoint\n\nIts interface changed. Open it in Waypoint to continue."
+        ? `## This conversation needs Waypoint\n\nIts interface changed. ${interactionUrl ? "Open it in Waypoint to continue." : "Add a frontend URL in Manage Servers to open it in Waypoint."}`
         : exchanges.length
           ? readingMode === "conversation"
-            ? conversationMarkdown(exchanges, showActivity, waiting, previewMessageLimit)
-            : chatMarkdown(latest, showActivity, waiting, previewMessageLimit)
+            ? conversationMarkdown(exchanges, showActivity, waiting, limit)
+            : chatMarkdown(latest, showActivity, waiting, limit)
           : emptyMarkdown || "",
       waiting ? "_Working…_" : "",
     ]
@@ -214,13 +216,12 @@ export function ChatConversation({
       {unconfirmed && <UnconfirmedActions controller={interactionController} url={interactionUrl} />}
     </ActionPanel.Section>
   );
-  const sendAction = composer?.text.trim() && composer.canSend && (
+  const sendAction = composer?.text.trim() && composer.canSend && !missing && (
     <Action title="Send Message" icon={Icon.ArrowUp} onAction={composer.onSend} />
   );
-  const actionPanel = (
-    <ActionPanel>
-      {!composer && attention.length > 0 && attentionActions}
-      {sendAction}
+  // Interaction rows bring their own review actions, so they omit the Needs Attention section.
+  const otherActions = (withAttention: boolean) => (
+    <>
       {!composer?.text.trim() && !status && response && (
         <Action.CopyToClipboard title="Copy Latest Response" content={response} />
       )}
@@ -235,7 +236,7 @@ export function ChatConversation({
         />
       )}
       {actions?.({ setActive, session, feed })}
-      {composer && attention.length > 0 && attentionActions}
+      {withAttention && composer && attention.length > 0 && attentionActions}
       <ActionPanel.Section title="Conversation">
         {turns > 1 && (
           <Action
@@ -292,7 +293,7 @@ export function ChatConversation({
             void interactionController.refresh();
           }}
         />
-        {session && !unsupported && settings?.available !== false && (
+        {session && !unsupported && !missing && settings?.available !== false && (
           <Action.Push
             title="Edit Current Session"
             icon={Icon.Gear}
@@ -336,6 +337,13 @@ export function ChatConversation({
           />
         )}
       </ActionPanel.Section>
+    </>
+  );
+  const actionPanel = (
+    <ActionPanel>
+      {!composer && attention.length > 0 && attentionActions}
+      {sendAction}
+      {otherActions(true)}
     </ActionPanel>
   );
 
@@ -371,6 +379,7 @@ export function ChatConversation({
         sessionId={sessionId}
         url={interactionUrl}
         leading={sendAction}
+        trailing={otherActions(false)}
       />
       <List.Section
         title="Conversation"

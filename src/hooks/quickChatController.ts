@@ -8,6 +8,7 @@ import {
   canReattach,
   createRequest,
   createTag,
+  failedStart,
   launchContext,
   launchFingerprint,
   ongoing,
@@ -599,7 +600,15 @@ export class QuickChatController {
           this.checkPolicy(draft?.files ?? [], launchContext(defaults, metadata).backend, defaults.target || undefined);
           const operationId = randomUUID();
           const request = createRequest(defaults, metadata, saved.installation, operationId);
-          saved.pending = { kind: "create", operationId, text, draftKey: this.draftKey, startedAt: this.now() };
+          const context = launchContext(defaults, metadata);
+          saved.pending = {
+            kind: "create",
+            operationId,
+            text,
+            draftKey: this.draftKey,
+            startedAt: this.now(),
+            launch: { backend: context.backend, target: defaults.target, cwd: context.cwd },
+          };
           await persist();
           try {
             session = await this.client.create(this.connection.token, request);
@@ -791,6 +800,15 @@ export class QuickChatController {
               session: this.state.session ?? matches[0],
               pending: undefined,
               notice: "Recovered the created conversation. The prompt was not resent. Send it when ready.",
+            });
+          } else if (!matches.length && sessions.some((session) => failedStart(pending, session))) {
+            // No input reaches a session that never started, so clearing the checkpoint cannot duplicate work.
+            saved.pending = undefined;
+            await persist();
+            this.publish({
+              pending: undefined,
+              notice:
+                "The new session failed to start on its execution target. Check the working directory and target in Quick Chat Defaults. No message was sent; your draft is kept.",
             });
           } else
             this.publish({

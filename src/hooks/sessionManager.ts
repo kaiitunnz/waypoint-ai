@@ -2,7 +2,7 @@ import { ApiError, WaypointClient } from "../api/client";
 import { ServerMetadata } from "../api/contracts";
 import { Session } from "../api/sessions";
 import { SessionActionSet, sessionActions, titleProblem } from "../domain/sessionActions";
-import { createTag } from "../domain/quickChat";
+import { createTag, failedStart } from "../domain/quickChat";
 import { QuickChatState, QuickChatStore, setPointer } from "../storage/quickChat";
 import { restartTimeoutMs } from "./sessionSettingsController";
 import { FeedConnection } from "./sessionFeeds";
@@ -32,7 +32,8 @@ const quickChatOf = (saved: QuickChatState) => ({ pointer: saved.pointer, pendin
 const checkpointFor = (saved: QuickChatState, session: Session) =>
   !!saved.pending &&
   (saved.pending.sessionId === session.id ||
-    (saved.pending.kind === "create" && session.tags[createTag] === saved.pending.operationId));
+    (saved.pending.kind === "create" &&
+      (session.tags[createTag] === saved.pending.operationId || failedStart(saved.pending, session))));
 
 export class SessionManager {
   constructor(

@@ -1,4 +1,5 @@
 import { ServerMetadata, Preset } from "../api/contracts";
+import type { PendingOperation } from "../storage/quickChat";
 import { Session, PendingQuestions, SessionEvent } from "../api/sessions";
 import { latestPlan, pendingApprovals, plansDecisions } from "./interactions";
 import { structuredTransport } from "./sessions";
@@ -131,6 +132,26 @@ export function ongoing(
 ): boolean {
   if (["starting", "running"].includes(session.status) || questions?.questions.length) return true;
   return pendingApprovals(events).length > 0 || (plansDecisions(session, metadata) && !!latestPlan(events));
+}
+// Server and Mac clocks may differ; a larger skew makes failed starts unrecognizable.
+export const clockToleranceMs = 5 * 60000;
+// Waypoint stores a session before starting its agent and adds tags only after the start succeeds, so a
+// start that fails leaves an untagged, failed "Quick Chat" session while the create itself looks unconfirmed.
+export function failedStart(pending: PendingOperation, session: Session): boolean {
+  const launch = pending.launch;
+  const created = session.createdAt ? Date.parse(session.createdAt) : NaN;
+  return (
+    pending.kind === "create" &&
+    !!launch &&
+    session.status === "error" &&
+    !session.tags[createTag] &&
+    session.title === "Quick Chat" &&
+    session.backend === launch.backend &&
+    (session.targetId ?? "") === launch.target &&
+    // Waypoint normalizes local working directories, so only a remote one is compared.
+    (!launch.target || session.cwd === launch.cwd) &&
+    created >= pending.startedAt - clockToleranceMs
+  );
 }
 // A Quick Chat opened on a chosen session resumes it only on the server it was opened for.
 export const resumeFor = (connectionId: string, pinnedConnectionId: string | undefined, resume: boolean) =>

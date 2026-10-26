@@ -971,3 +971,71 @@ test("Start New Chat clears a destination that is gone, but never a live one", a
     await f.close();
   }
 });
+
+test("a create whose session failed to start is recognized, cleared, and keeps the draft", async () => {
+  const f = await fixture();
+  try {
+    const c = f.controller();
+    await c.start();
+    f.setUncertainCreate(true);
+    await c.changeDraft("Hello there");
+    await c.send();
+    const pending = (await f.store.read(connection.id)).pending!;
+    assert.deepEqual(pending.launch, { backend: "test-agent", target: "", cwd: "/workspace" });
+    const failed = f.sessions[0];
+    const untagged = () =>
+      Object.assign(failed, {
+        tags: {},
+        title: "Quick Chat",
+        status: "running",
+        created_at: "2026-10-26T00:00:00Z",
+      });
+    untagged();
+    await c.reconcile();
+    assert.equal(c.getSnapshot().pending?.kind, "create");
+    assert.match(c.getSnapshot().notice!, /No matching session is visible yet/);
+    Object.assign(failed, { status: "error", created_at: "1969-12-31T00:00:00Z" });
+    await c.reconcile();
+    assert.equal(c.getSnapshot().pending?.kind, "create");
+    Object.assign(failed, { created_at: "2026-10-26T00:00:00Z" });
+    await c.reconcile();
+    assert.equal(c.getSnapshot().pending, undefined);
+    assert.match(c.getSnapshot().notice!, /failed to start/);
+    assert.equal((await f.store.read(connection.id)).pending, undefined);
+    assert.equal(c.getSnapshot().draft, "Hello there");
+    assert.equal(f.requests.filter((request) => request.path.endsWith("/input")).length, 0);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a failed start is matched by target and, on remote targets, by working directory", async () => {
+  const { failedStart } = await import("../src/domain/quickChat");
+  const pending = {
+    kind: "create" as const,
+    operationId: "op",
+    text: "",
+    draftKey: "quick",
+    startedAt: Date.parse("2026-10-26T00:00:00Z"),
+    launch: { backend: "test-agent", target: "lab", cwd: "/home/lab/missing" },
+  };
+  const record = (patch: Record<string, unknown>) =>
+    parseSession({
+      ...sessionWire("f"),
+      title: "Quick Chat",
+      status: "error",
+      launch_target_id: "lab",
+      cwd: "/home/lab/missing",
+      created_at: "2026-10-25T23:57:00Z",
+      ...patch,
+    });
+  assert.equal(failedStart(pending, record({})), true);
+  assert.equal(failedStart(pending, record({ cwd: "/home/lab" })), false);
+  assert.equal(failedStart(pending, record({ launch_target_id: null })), false);
+  assert.equal(failedStart(pending, record({ tags: { raycast_create: "op" } })), false);
+  assert.equal(failedStart(pending, record({ created_at: "2026-10-25T23:50:00Z" })), false);
+  assert.equal(failedStart(pending, record({ created_at: undefined })), false);
+  assert.equal(failedStart({ ...pending, launch: undefined }, record({})), false);
+  const local = { ...pending, launch: { ...pending.launch, target: "" } };
+  assert.equal(failedStart(local, record({ launch_target_id: null, cwd: "/Users/me/project" })), true);
+});
