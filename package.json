@@ -14,6 +14,15 @@
   "categories": [
     "Productivity"
   ],
+  "keywords": [
+    "waypoint",
+    "coding agent",
+    "codex",
+    "claude code",
+    "opencode",
+    "chat",
+    "sessions"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -27,14 +36,14 @@
       "name": "manage-servers",
       "title": "Manage Servers",
       "subtitle": "Waypoint AI",
-      "description": "Connect to Waypoint servers and manage sign-in, defaults, and execution metadata.",
+      "description": "Add Waypoint servers, sign in, and choose the active and default server.",
       "mode": "view"
     },
     {
       "name": "search-sessions",
       "title": "Search Sessions",
       "subtitle": "Waypoint AI",
-      "description": "Find Waypoint sessions and read live conversations, tool activity, and pending interactions.",
+      "description": "Find Waypoint sessions, read live conversations, and rename, pin, reattach, interrupt, terminate, or delete them.",
       "mode": "view"
     },
     {
