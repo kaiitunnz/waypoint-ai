@@ -119,7 +119,7 @@ export function SessionActions({
             if (
               await run(
                 "Choosing for Quick Chat…",
-                ["Quick Chat continues this session", "Couldn't use for Quick Chat"],
+                ["Quick Chat destination set", "Couldn't use for Quick Chat"],
                 () => manager.useForQuickChat(session.id, metadata),
               )
             )

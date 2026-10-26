@@ -162,7 +162,7 @@ export class SessionManager {
       await persist();
     });
   }
-  // An explicit choice: Quick Chat continues this session until another one replaces it.
+  // An explicit choice: the session stays Quick Chat's destination until another one replaces it.
   async useForQuickChat(id: string, metadata: ServerMetadata): Promise<ManageOutcome> {
     try {
       return await this.store.transaction(this.connection.id, async (saved, persist): Promise<ManageOutcome> => {
@@ -178,7 +178,7 @@ export class SessionManager {
             session,
             message:
               saved.pointer === id
-                ? "Quick Chat already continues this session."
+                ? "This is already Quick Chat's destination."
                 : "Quick Chat can't continue this session.",
           };
         setPointer(saved, id, this.now());
