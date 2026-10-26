@@ -144,6 +144,14 @@ test("unconfirmed and refused outcomes report fresh state without retrying", asy
     const refused = await f.manager.remove("t", metadata);
     assert.match(refused.kind === "failed" ? refused.message : "", /does not allow this/);
     assert.ok(f.sessions.has("t"));
+    f.add("e", { status: "error" });
+    f.failures.set("DELETE /api/sessions/e", () => {
+      f.add("e", { status: "exited" });
+      return respond({}, 502);
+    });
+    const partial = await f.manager.remove("e", metadata);
+    assert.equal(partial.kind, "failed");
+    assert.equal(partial.kind === "failed" && partial.session?.status, "exited");
   } finally {
     await f.close();
   }

@@ -242,7 +242,7 @@ function SessionsBrowser({
                   icon={statusIcon(session.status)}
                   accessories={
                     quickChat.pointer === session.id
-                      ? [{ tag: "Quick Chat", tooltip: "Quick Chat continues this session" }]
+                      ? [{ tag: "Quick Chat", tooltip: "Quick Chat's destination on this server" }]
                       : undefined
                   }
                   detail={<SessionDetail session={session} structured={structured} />}

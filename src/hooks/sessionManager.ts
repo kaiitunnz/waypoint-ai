@@ -141,11 +141,11 @@ export class SessionManager {
     try {
       await this.client.deleteSession(this.connection.token, id, restartTimeoutMs);
     } catch (error) {
-      const gone = await this.client.session(this.connection.token, id).then(
-        () => false,
-        (failure) => failure instanceof ApiError && failure.kind === "not-found",
+      const check = await this.client.session(this.connection.token, id).then(
+        (current) => ({ gone: false, current }),
+        (failure) => ({ gone: failure instanceof ApiError && failure.kind === "not-found", current: undefined }),
       );
-      if (!gone) return { kind: "failed", message: manageFailure(error, "delete it"), session };
+      if (!check.gone) return { kind: "failed", message: manageFailure(error, "delete it"), session: check.current };
     }
     await this.forget(id).catch(() => undefined);
     return { kind: "done", deleted: id };
