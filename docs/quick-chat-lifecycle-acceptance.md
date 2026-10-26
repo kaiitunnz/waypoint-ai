@@ -34,7 +34,7 @@ Not exercised natively:
 
 ## Automated coverage
 
-`npm run verify` checks formatting, ESLint, strict types, 207 behavior and integration tests, Raycast validation, and build.
+`npm run verify` checks formatting, ESLint, strict types, 208 behavior and integration tests, Raycast validation, and build.
 
 Tests cover:
 
