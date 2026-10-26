@@ -29,6 +29,9 @@ export function manageFailure(error: unknown, what: string): string {
   }
   return `Waypoint didn't confirm that it could ${what}. Check the session before trying again.`;
 }
+// Before anything is sent, a failure is local, such as another command holding the server lock, so it says so.
+const localFailure = (error: unknown, what: string) =>
+  error instanceof ApiError || !(error instanceof Error) ? manageFailure(error, what) : error.message;
 const quickChatOf = (saved: QuickChatState) => ({ pointer: saved.pointer, pending: !!saved.pending });
 // Quick Chat's unconfirmed operation still needs this session to be checked.
 const checkpointFor = (saved: QuickChatState, session: Session) =>
@@ -62,7 +65,7 @@ export class SessionManager {
       if (!sessionActions(session, metadata, await this.quickChat())[action])
         return { kind: "stale", session, message: `This session changed, so it can't ${what} now.` };
     } catch (error) {
-      return { kind: "failed", message: manageFailure(error, what) };
+      return { kind: "failed", message: localFailure(error, what) };
     }
     try {
       return { kind: "done", session: await mutate(session) };
@@ -117,19 +120,23 @@ export class SessionManager {
   async remove(id: string, metadata?: ServerMetadata): Promise<ManageOutcome> {
     let session: Session;
     try {
-      session = await this.client.session(this.connection.token, id);
-      // The checkpoint is checked under the server lock, but the delete itself runs outside it: it can take
-      // longer than other commands wait for the lock.
-      const refusal = await this.store.transaction(this.connection.id, async (saved) => {
-        if (checkpointFor(saved, session))
-          return "Quick Chat has an unconfirmed operation for this session. Check it in Quick Chat first.";
-        if (!sessionActions(session, metadata, quickChatOf(saved)).delete)
-          return "This session changed, so it can't be deleted now.";
-        return undefined;
+      // The session is checked under the server lock, so a Quick Chat send that was reattaching it has finished;
+      // the delete itself runs outside the lock, since it can take longer than other commands wait for it.
+      const checked = await this.store.transaction(this.connection.id, async (saved) => {
+        const current = await this.client.session(this.connection.token, id);
+        if (checkpointFor(saved, current))
+          return {
+            session: current,
+            refusal: "Quick Chat has an unconfirmed operation for this session. Check it in Quick Chat first.",
+          };
+        if (!sessionActions(current, metadata, quickChatOf(saved)).delete)
+          return { session: current, refusal: "This session changed, so it can't be deleted now." };
+        return { session: current };
       });
-      if (refusal) return { kind: "stale", session, message: refusal };
+      session = checked.session;
+      if (checked.refusal) return { kind: "stale", session, message: checked.refusal };
     } catch (error) {
-      return { kind: "failed", message: manageFailure(error, "delete it") };
+      return { kind: "failed", message: localFailure(error, "delete it") };
     }
     try {
       await this.client.deleteSession(this.connection.token, id, restartTimeoutMs);
@@ -179,7 +186,7 @@ export class SessionManager {
         return { kind: "done", session };
       });
     } catch (error) {
-      return { kind: "failed", message: manageFailure(error, "use it for Quick Chat") };
+      return { kind: "failed", message: localFailure(error, "use it for Quick Chat") };
     }
   }
 }

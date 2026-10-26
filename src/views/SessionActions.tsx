@@ -81,16 +81,21 @@ export function SessionActions({
     if (outcome.kind !== "ssh")
       return reportOutcome(outcome, ["Session reattached", "Couldn't reattach session"], handlers, toast);
     toast.hide();
+    let connected = false;
+    // Reattaching after the form closes lets its outcome toast follow the form's own.
     push(
       <ConnectTarget
         target={metadata.targets.find((target) => target.id === outcome.targetId)}
         connect={async (password) => {
           const result = await manager.connectTarget(outcome.targetId, password);
-          if (result.connected) void reattach();
+          connected = result.connected;
           return result;
         }}
         submitTitle="Connect and Reattach"
       />,
+      () => {
+        if (connected) void reattach();
+      },
     );
   };
   return (

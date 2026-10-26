@@ -7,7 +7,15 @@ import { spawn } from "node:child_process";
 import { parseMetadata } from "../src/api/contracts";
 import { WaypointClient } from "../src/api/client";
 import { parseSession, parseEvent } from "../src/api/sessions";
-import { createRequest, initialDefaults, ongoing, resumeFor, reuseDecision } from "../src/domain/quickChat";
+import {
+  createRequest,
+  failedStart,
+  failedStartAt,
+  initialDefaults,
+  ongoing,
+  resumeFor,
+  reuseDecision,
+} from "../src/domain/quickChat";
 import { draftKeys } from "../src/storage/drafts";
 import { QuickChatStore, decodeQuickChat, lastActivity, setPointer } from "../src/storage/quickChat";
 import { ServerMutex } from "../src/storage/mutex";
@@ -1020,7 +1028,6 @@ test("a create whose session failed to start is recognized, cleared, and keeps t
 });
 
 test("a failed start is matched by target and, on remote targets, by working directory", async () => {
-  const { failedStart } = await import("../src/domain/quickChat");
   const pending = {
     kind: "create" as const,
     operationId: "op",
@@ -1051,7 +1058,6 @@ test("a failed start is matched by target and, on remote targets, by working dir
 });
 
 test("an earlier failed attempt is not taken as the outcome of a retry", async () => {
-  const { failedStartAt } = await import("../src/domain/quickChat");
   const pending = {
     kind: "create" as const,
     operationId: "op",
