@@ -132,6 +132,9 @@ export function ongoing(
   if (["starting", "running"].includes(session.status) || questions?.questions.length) return true;
   return pendingApprovals(events).length > 0 || (plansDecisions(session, metadata) && !!latestPlan(events));
 }
+// A Quick Chat opened on a chosen session resumes it only on the server it was opened for.
+export const resumeFor = (connectionId: string, pinnedConnectionId: string | undefined, resume: boolean) =>
+  resume && connectionId === pinnedConnectionId;
 export function reuseDecision(
   defaults: ChatDefaults,
   session: Session | undefined,

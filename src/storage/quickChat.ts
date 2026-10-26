@@ -24,6 +24,8 @@ export interface QuickChatState {
   installation: string;
   defaults: ChatDefaults;
   pointer?: string;
+  // A session the user explicitly chose for Quick Chat. It exists only while it is the pointer.
+  chosen?: { sessionId: string; at: number };
   sentAt: Record<string, number>;
   // Draft text lives in the DraftStore; these fields are read only to carry older drafts over.
   drafts: Record<string, string>;
@@ -90,7 +92,9 @@ export function decodeQuickChat(raw?: string): QuickChatState {
       !isRecord(data.defaults) ||
       !isRecord(data.drafts) ||
       !isRecord(data.sentAt) ||
-      (data.pointer !== undefined && typeof data.pointer !== "string")
+      (data.pointer !== undefined && typeof data.pointer !== "string") ||
+      (data.chosen !== undefined &&
+        (!isRecord(data.chosen) || !isText(data.chosen.sessionId) || !isNumber(data.chosen.at)))
     )
       throw new Error();
     const defaults = data.defaults;
@@ -152,6 +156,18 @@ export function decodeQuickChat(raw?: string): QuickChatState {
       "Saved Quick Chat data could not be read. Restore the saved data before sending; it has not been replaced.",
     );
   }
+}
+// Every pointer change goes through here so a choice never outlives its destination.
+export function setPointer(state: QuickChatState, sessionId: string | undefined, chosenAt?: number) {
+  state.pointer = sessionId;
+  if (sessionId && chosenAt !== undefined) state.chosen = { sessionId, at: chosenAt };
+  else if (state.chosen?.sessionId !== sessionId) state.chosen = undefined;
+}
+// The last explicit user activity for a session: a successful send, or choosing it for Quick Chat.
+export function lastActivity(state: QuickChatState, sessionId: string): number | undefined {
+  const chosen = state.chosen?.sessionId === sessionId ? state.chosen.at : undefined;
+  const sent = state.sentAt[sessionId];
+  return sent === undefined ? chosen : chosen === undefined ? sent : Math.max(sent, chosen);
 }
 export class QuickChatStore {
   readonly drafts: DraftStore;

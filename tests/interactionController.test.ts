@@ -464,7 +464,7 @@ test("interaction checkpoints coordinate with Quick Chat without rebinding it", 
     connection,
     f.store,
     async () => undefined,
-    false,
+    {},
     f.client,
     () => 1000,
   );
@@ -517,7 +517,7 @@ test("clearing an own-session checkpoint unblocks Quick Chat, and another conver
     connection,
     f.store,
     async () => undefined,
-    false,
+    {},
     f.client,
     () => 1000,
   );

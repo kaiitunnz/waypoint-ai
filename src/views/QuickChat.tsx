@@ -15,7 +15,7 @@ import { useConnections } from "../hooks/useConnections";
 import { useQuickChat } from "../hooks/useQuickChat";
 import { FeedConnection } from "../hooks/sessionFeeds";
 import { connectionStore } from "../storage/raycast";
-import { canReattach, launchContext } from "../domain/quickChat";
+import { canReattach, launchContext, resumeFor } from "../domain/quickChat";
 import { sessionUrl } from "../domain/sessions";
 import { ChatConversation } from "./ChatConversation";
 import { QuickChatController } from "../hooks/quickChatController";
@@ -27,8 +27,17 @@ import { SignInForm } from "./ServerForm";
 import { ManageServers } from "./ManageServers";
 import { LoadingView } from "../components/SessionPresentation";
 
-// A pinned connection opens that server without changing the saved server selection.
-export function QuickChat({ forceNew = false, connectionId }: { forceNew?: boolean; connectionId?: string }) {
+// A pinned connection opens that server without changing the saved server selection. `resume` opens that
+// server's saved destination, such as a session chosen with Use for Quick Chat, whatever the reuse mode.
+export function QuickChat({
+  forceNew = false,
+  connectionId,
+  resume = false,
+}: {
+  forceNew?: boolean;
+  connectionId?: string;
+  resume?: boolean;
+}) {
   const { state, error, refresh } = useConnections();
   const [selected, setSelected] = useState(connectionId);
   if (!state && !error) return <LoadingView title="Loading Quick Chat…" />;
@@ -75,11 +84,13 @@ export function QuickChat({ forceNew = false, connectionId }: { forceNew?: boole
         />
       </List>
     );
+  const resumed = resumeFor(connection.id, connectionId, resume);
   return (
     <QuickChatView
-      key={`${connection.id}:${forceNew}`}
+      key={`${connection.id}:${forceNew}:${resumed}`}
       connection={{ ...connection, token: connection.token }}
       forceNew={forceNew}
+      resume={resumed}
       refreshConnections={refresh}
       accessory={accessory}
     />
@@ -89,15 +100,17 @@ export function QuickChat({ forceNew = false, connectionId }: { forceNew?: boole
 function QuickChatView({
   connection,
   forceNew,
+  resume,
   refreshConnections,
   accessory,
 }: {
   connection: FeedConnection;
   forceNew: boolean;
+  resume: boolean;
   refreshConnections: () => Promise<void>;
   accessory?: React.ComponentProps<typeof List>["searchBarAccessory"];
 }) {
-  const { state, controller } = useQuickChat(connection, forceNew);
+  const { state, controller } = useQuickChat(connection, forceNew, resume);
   const metadata = state.metadata;
   const actions = (setActive: (value: boolean) => void = () => undefined) => (
     <QuickChatActions

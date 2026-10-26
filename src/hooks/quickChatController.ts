@@ -32,7 +32,7 @@ import {
   reusableUpload,
 } from "../domain/compose";
 import { draftKeys } from "../storage/drafts";
-import { PendingOperation, QuickChatState, QuickChatStore } from "../storage/quickChat";
+import { PendingOperation, QuickChatState, QuickChatStore, lastActivity, setPointer } from "../storage/quickChat";
 import { FeedConnection } from "./sessionFeeds";
 
 export interface QuickChatSnapshot {
@@ -89,6 +89,10 @@ export class QuickChatController {
   private observedPointer?: string;
   private observedDefaults = "";
   private prepared = false;
+  // A destination that turned out to be gone or unusable; Start New Chat clears it.
+  private deadPointer?: string;
+  private readonly forceNew: boolean;
+  private readonly resume: boolean;
   private draftLoaded = false;
   private queue: Promise<unknown> = Promise.resolve();
   private readonly draftKey: string;
@@ -98,11 +102,14 @@ export class QuickChatController {
     private readonly connection: FeedConnection,
     private readonly store: QuickChatStore,
     private readonly verifyConnection: () => Promise<void>,
-    private readonly forceNew = false,
+    // `resume` opens the saved destination regardless of the reuse mode and timeout.
+    options: { forceNew?: boolean; resume?: boolean } = {},
     private readonly client = new WaypointClient(connection.apiUrl),
     private readonly now = Date.now,
   ) {
-    this.draftKey = forceNew ? "new" : "quick";
+    this.forceNew = options.forceNew ?? false;
+    this.resume = !this.forceNew && (options.resume ?? false);
+    this.draftKey = this.forceNew ? "new" : "quick";
     this.lineKey = draftKeys.line(connection.id, this.draftKey);
     this.composeKey = draftKeys.compose(connection.id, this.draftKey);
   }
@@ -165,7 +172,7 @@ export class QuickChatController {
         this.prepared = true;
       } else if (saved.pending?.sessionId && saved.pending.kind !== "interaction") {
         const session = await this.client.session(this.connection.token, saved.pending.sessionId);
-        this.checkOwned(session, saved.installation, metadata);
+        this.checkOwned(session, saved, metadata);
         if (this.active && generation === this.generation) this.publish({ session });
         this.prepared = true;
       } else if (!this.prepared && this.forceNew) {
@@ -175,28 +182,30 @@ export class QuickChatController {
       } else if (!this.prepared) {
         this.observedPointer = saved.pointer;
         this.observedDefaults = JSON.stringify(saved.defaults);
-        if (!this.forceNew && saved.defaults.mode !== "new" && saved.pointer) {
-          const session = await this.savedConversation(saved.pointer);
-          this.checkOwned(session, saved.installation, metadata);
-          const page = await this.client.events(this.connection.token, session.id);
-          const expired =
-            saved.sentAt[session.id] === undefined ||
-            this.now() - saved.sentAt[session.id] >= saved.defaults.timeoutMinutes * 60000;
-          const events =
-            saved.defaults.mode === "timed" && expired && !["starting", "running"].includes(session.status)
-              ? (await this.client.events(this.connection.token, session.id, { cursor: 0 })).events
-              : page.events;
-          if (
-            reuseDecision(
-              saved.defaults,
-              session,
-              saved.sentAt[session.id],
-              this.now(),
-              ongoing(session, page.questions, events, metadata),
-              false,
-            ) === "continue"
-          ) {
+        if (!this.forceNew && (saved.defaults.mode !== "new" || this.resume) && saved.pointer) {
+          const session = await this.destination(saved, metadata);
+          const last = lastActivity(saved, session.id);
+          if (this.resume) {
             if (this.active && generation === this.generation) this.publish({ session });
+          } else {
+            const page = await this.client.events(this.connection.token, session.id);
+            const expired = last === undefined || this.now() - last >= saved.defaults.timeoutMinutes * 60000;
+            const events =
+              saved.defaults.mode === "timed" && expired && !["starting", "running"].includes(session.status)
+                ? (await this.client.events(this.connection.token, session.id, { cursor: 0 })).events
+                : page.events;
+            if (
+              reuseDecision(
+                saved.defaults,
+                session,
+                last,
+                this.now(),
+                ongoing(session, page.questions, events, metadata),
+                false,
+              ) === "continue"
+            ) {
+              if (this.active && generation === this.generation) this.publish({ session });
+            }
           }
         }
         this.prepared = true;
@@ -220,6 +229,22 @@ export class QuickChatController {
         });
     }
   }
+  // Loads the saved destination; one that is gone or can't be used is remembered for Start New Chat to clear.
+  private async destination(saved: QuickChatState, metadata: ServerMetadata) {
+    const id = saved.pointer!;
+    try {
+      const session = await this.savedConversation(id);
+      this.checkOwned(session, saved, metadata);
+      return session;
+    } catch (error) {
+      if (!(error instanceof ApiError)) this.deadPointer = id;
+      throw error;
+    }
+  }
+  // The open conversation reported its session missing.
+  markMissing(sessionId: string) {
+    if (this.state.session?.id === sessionId) this.deadPointer = sessionId;
+  }
   private async savedConversation(id: string) {
     try {
       return await this.client.session(this.connection.token, id);
@@ -231,8 +256,9 @@ export class QuickChatController {
       throw error;
     }
   }
-  private checkOwned(session: Session, installation: string, metadata: ServerMetadata) {
-    if (session.tags[ownerTag] !== installation || session.tags[roleTag] !== "quick-chat")
+  private checkOwned(session: Session, saved: QuickChatState, metadata: ServerMetadata) {
+    const created = session.tags[ownerTag] === saved.installation && session.tags[roleTag] === "quick-chat";
+    if (!created && saved.chosen?.sessionId !== session.id)
       throw new Error(
         "The saved destination is not owned by this Quick Chat installation. Choose Start New Chat; your draft is kept.",
       );
@@ -267,6 +293,16 @@ export class QuickChatController {
   }
   async newChat() {
     if (this.state.busy || this.state.pending) return;
+    const dead = this.deadPointer;
+    this.deadPointer = undefined;
+    if (dead)
+      await this.store
+        .transaction(this.connection.id, async (saved, persist) => {
+          if (saved.pointer !== dead || saved.pending) return;
+          setPointer(saved, undefined);
+          await persist();
+        })
+        .catch(() => undefined);
     this.generation++;
     this.prepared = true;
     this.observedPointer = undefined;
@@ -299,7 +335,7 @@ export class QuickChatController {
     this.boundSession ??= (async () => {
       try {
         const session = await this.client.session(this.connection.token, bound);
-        this.checkOwned(session, saved.installation, metadata);
+        this.checkOwned(session, saved, metadata);
         // Defaults changed since the session was created: the next send starts a session with the new ones.
         const launch = saved.compose?.[this.draftKey]?.launch;
         if (!launch || launch !== launchFingerprint(createRequest(saved.defaults, metadata, saved.installation, "")))
@@ -544,14 +580,13 @@ export class QuickChatController {
           saved.pointer &&
           saved.pointer !== this.observedPointer
         ) {
-          const candidate = await this.savedConversation(saved.pointer);
-          this.checkOwned(candidate, saved.installation, metadata);
+          const candidate = await this.destination(saved, metadata);
           const page = await this.client.events(this.connection.token, candidate.id);
           if (
             reuseDecision(
               saved.defaults,
               candidate,
-              saved.sentAt[candidate.id],
+              lastActivity(saved, candidate.id),
               this.now(),
               ongoing(candidate, page.questions, page.events, metadata),
               false,
@@ -583,15 +618,15 @@ export class QuickChatController {
               );
             throw this.sshFailure(error, defaults.target || undefined, fromCompose ? "compose" : "send");
           }
-          saved.pointer = session.id;
+          setPointer(saved, session.id);
           saved.pending = undefined;
           if (draft) Object.assign(draft, { sessionId: session.id, launch: launchFingerprint(request) });
           await persist();
           this.publish({ session });
-          this.checkOwned(session, saved.installation, metadata);
+          this.checkOwned(session, saved, metadata);
         } else {
           session = await this.client.session(this.connection.token, session.id);
-          this.checkOwned(session, saved.installation, metadata);
+          this.checkOwned(session, saved, metadata);
         }
         if (["exited", "error"].includes(session.status)) {
           saved.pending = {
@@ -682,6 +717,8 @@ export class QuickChatController {
         });
       });
     } catch (error) {
+      if (error instanceof ApiError && error.kind === "not-found" && this.state.session)
+        this.markMissing(this.state.session.id);
       const saved = await this.store.read(this.connection.id).catch(() => undefined);
       this.publish({
         pending: saved?.pending,
@@ -746,8 +783,8 @@ export class QuickChatController {
               session.tags[ownerTag] === saved.installation && session.tags[createTag] === pending.operationId,
           );
           if (matches.length === 1) {
-            this.checkOwned(matches[0], saved.installation, metadata);
-            saved.pointer = matches[0].id;
+            this.checkOwned(matches[0], saved, metadata);
+            setPointer(saved, matches[0].id);
             saved.pending = undefined;
             await persist();
             this.publish({
@@ -839,7 +876,7 @@ export class QuickChatController {
         if (saved.pending?.operationId !== operationId)
           throw new Error("The pending attempt changed. Check its outcome again.");
         if (saved.pending.kind !== "interaction" && saved.pointer === saved.pending.sessionId)
-          saved.pointer = undefined;
+          setPointer(saved, undefined);
         this.forgetUploads(saved);
         saved.pending = undefined;
         await persist();
