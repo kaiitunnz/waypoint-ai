@@ -35,6 +35,7 @@ import {
 import { draftKeys } from "../storage/drafts";
 import { PendingOperation, QuickChatState, QuickChatStore, lastActivity, setPointer } from "../storage/quickChat";
 import { Workspace } from "../storage/workspace";
+import { ManageOutcome, SessionManager } from "./sessionManager";
 import { FeedConnection } from "./sessionFeeds";
 
 export interface QuickChatSnapshot {
@@ -71,6 +72,16 @@ async function fileStats(file: StagedFile): Promise<FileStats> {
   const problem = fileProblem(stats && { isFile: stats.isFile(), size: stats.size });
   if (problem) throw new Error(`${file.name}: ${problem}`);
   return { size: stats!.size, modifiedMs: stats!.mtimeMs };
+}
+// `ended` means Quick Chat no longer continues the session; `message` explains a failure or an unconfirmed result.
+export interface TerminateResult {
+  ended: boolean;
+  message?: string;
+}
+interface Released {
+  pointer?: boolean;
+  chosen?: number;
+  bindings: Record<string, string | undefined>;
 }
 export class QuickChatController {
   private state: QuickChatSnapshot = {
@@ -938,6 +949,71 @@ export class QuickChatController {
     } finally {
       this.publish({ busy: false });
     }
+  }
+  // The destination is released before terminating, so a closed window or an unconfirmed result can't leave Quick
+  // Chat continuing the session; only a definite refusal restores it.
+  async terminate(): Promise<TerminateResult | undefined> {
+    const session = this.state.session;
+    const metadata = this.state.metadata;
+    if (this.state.busy || this.state.pending || !session || !metadata) return;
+    const id = session.id;
+    this.publish({ busy: true, error: undefined, notice: undefined });
+    let released: Released | undefined;
+    try {
+      await this.queue;
+      const current = await this.store.transaction(this.connection.id, async (saved, persist) => {
+        if (saved.pending) throw new Error("Check the earlier operation's outcome first.");
+        await this.verifyConnection();
+        const current = await this.client.session(this.connection.token, id);
+        released = { chosen: saved.chosen?.sessionId === id ? saved.chosen.at : undefined, bindings: {} };
+        if (saved.pointer === id) {
+          released.pointer = true;
+          setPointer(saved, undefined);
+        }
+        for (const [key, draft] of Object.entries(saved.compose ?? {}))
+          if (draft.sessionId === id) {
+            released.bindings[key] = draft.launch;
+            draft.sessionId = draft.launch = undefined;
+          }
+        await persist();
+        return current;
+      });
+      const outcome: ManageOutcome =
+        current.status === "exited"
+          ? { kind: "done", session: current }
+          : await new SessionManager(this.connection, this.store, this.client, this.now).terminate(id, metadata);
+      if (outcome.kind !== "done") {
+        const after = outcome.kind === "ssh" ? undefined : outcome.session;
+        if (after?.status !== "exited" && !(outcome.kind === "failed" && outcome.uncertain)) {
+          await this.restore(id, released!);
+          if (after) this.publish({ session: after });
+          return { ended: false, message: outcome.message };
+        }
+      }
+      this.generation++;
+      this.prepared = true;
+      this.observedPointer = undefined;
+      this.observedDefaults = "manual-new";
+      this.publish({ session: undefined, loading: false, revision: this.state.revision + 1 });
+      const unconfirmed = outcome.kind === "failed" && outcome.session?.status !== "exited";
+      return { ended: true, message: unconfirmed ? outcome.message : undefined };
+    } catch (error) {
+      if (released) await this.restore(id, released).catch(() => undefined);
+      return { ended: false, message: error instanceof Error ? error.message : "Could not terminate the session." };
+    } finally {
+      this.publish({ busy: false });
+    }
+  }
+  private restore(id: string, released: Released) {
+    return this.store.transaction(this.connection.id, async (saved, persist) => {
+      if (saved.pending) return;
+      if (released.pointer && saved.pointer === undefined) setPointer(saved, id, released.chosen);
+      for (const [key, launch] of Object.entries(released.bindings)) {
+        const draft = saved.compose?.[key];
+        if (draft && draft.sessionId === undefined) Object.assign(draft, { sessionId: id, launch });
+      }
+      await persist();
+    });
   }
   async action(action: "interrupt" | "reattach") {
     if (this.state.busy || this.state.pending || !this.state.session || !this.state.metadata) return;

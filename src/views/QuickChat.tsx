@@ -18,6 +18,7 @@ import { connectionStore } from "../storage/raycast";
 import { localWorkspace } from "../storage/workspace";
 import { canReattach, launchContext, resumeFor } from "../domain/quickChat";
 import { sessionUrl } from "../domain/sessions";
+import { terminateMessage } from "../domain/sessionActions";
 import { ChatConversation } from "./ChatConversation";
 import { QuickChatController } from "../hooks/quickChatController";
 import { QuickChatDefaults } from "./QuickChatDefaults";
@@ -402,6 +403,38 @@ function QuickChatActions({
             onAction={() => controller.action("reattach")}
           />
         )}
+      {state.session && state.session.status !== "exited" && !state.busy && !state.pending && (
+        <Action
+          title="Terminate Session"
+          icon={Icon.XMarkCircle}
+          style={Action.Style.Destructive}
+          onAction={async () => {
+            if (
+              !(await confirmAlert({
+                title: "Terminate this session?",
+                message: `${terminateMessage} Quick Chat starts a new conversation on your next send.`,
+                primaryAction: { title: "Terminate", style: Alert.ActionStyle.Destructive },
+              }))
+            )
+              return;
+            const toast = await showToast({ style: Toast.Style.Animated, title: "Terminating session…" });
+            const result = await controller.terminate();
+            if (!result) return toast.hide();
+            Object.assign(
+              toast,
+              !result.ended
+                ? { style: Toast.Style.Failure, title: "Couldn't terminate session", message: result.message }
+                : result.message
+                  ? { style: Toast.Style.Failure, title: "Quick Chat moved to a new chat", message: result.message }
+                  : {
+                      style: Toast.Style.Success,
+                      title: "Session terminated",
+                      message: "A new conversation starts on your next send; your draft is kept.",
+                    },
+            );
+          }}
+        />
+      )}
       <Action.Push
         title="Sign in Again"
         icon={Icon.Lock}

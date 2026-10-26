@@ -13,7 +13,8 @@ export type ManageOutcome =
   | { kind: "stale"; session: Session; message: string }
   // A password-auth SSH target must be connected before reattaching.
   | { kind: "ssh"; targetId: string; message: string }
-  | { kind: "failed"; message: string; session?: Session };
+  // `uncertain` means the request was sent but Waypoint's answer didn't say whether it applied.
+  | { kind: "failed"; message: string; session?: Session; uncertain?: boolean };
 
 export function manageFailure(error: unknown, what: string): string {
   if (error instanceof ApiError) {
@@ -71,7 +72,8 @@ export class SessionManager {
       return { kind: "done", session: await mutate(session) };
     } catch (error) {
       const fresh = await this.client.session(this.connection.token, id).catch(() => undefined);
-      return { kind: "failed", message: manageFailure(error, what), session: fresh };
+      const uncertain = !(error instanceof ApiError) || error.kind === "uncertain";
+      return { kind: "failed", message: manageFailure(error, what), session: fresh, uncertain };
     }
   }
   rename(id: string, title: string, metadata?: ServerMetadata) {

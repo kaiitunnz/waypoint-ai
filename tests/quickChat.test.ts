@@ -20,6 +20,7 @@ import { draftKeys } from "../src/storage/drafts";
 import { QuickChatStore, decodeQuickChat, lastActivity, setPointer } from "../src/storage/quickChat";
 import { ServerMutex } from "../src/storage/mutex";
 import { QuickChatController } from "../src/hooks/quickChatController";
+import { Workspace } from "../src/storage/workspace";
 import { metadataWire, sessionWire, eventWire } from "./fixtures/conversation";
 
 const respond = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
@@ -58,6 +59,7 @@ async function fixture() {
   let inputStatus = 200;
   let uncertainCreate = false;
   let uncertainInput = false;
+  let terminate: "exit" | "refuse" | "uncertain" | "uncertain-exit" = "exit";
   let now = 1000000;
   const client = new WaypointClient(connection.apiUrl, async (url, options) => {
     const path = new URL(String(url)).pathname;
@@ -91,16 +93,22 @@ async function fixture() {
       session.status = "idle";
       return respond({ session });
     }
+    if (path.endsWith("/terminate")) {
+      if (terminate === "refuse") return respond({ detail: "target busy" }, 409);
+      if (terminate !== "uncertain") session.status = "exited";
+      if (terminate !== "exit") throw new Error("connection reset");
+      return respond({ session });
+    }
     sessionReads++;
     await sessionGate;
     return respond({ session });
   });
-  const controller = (forceNew = false, resume = false) =>
+  const controller = (forceNew = false, resume = false, workspace?: Workspace) =>
     new QuickChatController(
       connection,
       store,
       async () => undefined,
-      { forceNew, resume },
+      { forceNew, resume, workspace },
       client,
       () => now,
     );
@@ -135,6 +143,9 @@ async function fixture() {
     },
     setUncertainInput: (value: boolean) => {
       uncertainInput = value;
+    },
+    setTerminate: (value: typeof terminate) => {
+      terminate = value;
     },
     advance: (value: number) => {
       now += value;
@@ -1093,4 +1104,124 @@ test("an earlier failed attempt is not taken as the outcome of a retry", async (
     failedStartAt(pending, [record("earlier", "error"), later], earlier),
     Date.parse("2026-10-26T00:00:09Z"),
   );
+});
+
+test("terminating releases Quick Chat's session, and the next send starts a new one", async () => {
+  const f = await fixture();
+  try {
+    const c = f.controller();
+    await c.start();
+    await c.changeDraft("First");
+    await c.send();
+    const first = c.getSnapshot().session!.id;
+    await f.store.transaction(connection.id, async (state, persist) => {
+      state.compose = { quick: { context: [], files: [], sessionId: first, launch: "fingerprint" } };
+      await persist();
+    });
+    await c.changeDraft("Keep this");
+    assert.deepEqual(await c.terminate(), { ended: true, message: undefined });
+    assert.equal(f.sessions[0].status, "exited");
+    assert.equal(c.getSnapshot().session, undefined);
+    assert.equal(c.getSnapshot().draft, "Keep this");
+    const saved = await f.store.read(connection.id);
+    assert.equal(saved.pointer, undefined);
+    assert.equal(saved.compose?.quick.sessionId, undefined);
+    await c.send();
+    assert.equal(c.getSnapshot().session?.id, "created-2");
+    const reopened = f.controller();
+    await reopened.start();
+    assert.equal(reopened.getSnapshot().session?.id, "created-2");
+  } finally {
+    await f.close();
+  }
+});
+
+test("a refused terminate restores the destination, and an unconfirmed one keeps it released", async () => {
+  const f = await fixture();
+  try {
+    const c = f.controller();
+    await c.start();
+    await c.changeDraft("First");
+    await c.send();
+    const id = c.getSnapshot().session!.id;
+    await f.store.transaction(connection.id, async (state, persist) => {
+      setPointer(state, id, 5000);
+      await persist();
+    });
+    f.setTerminate("refuse");
+    const refused = await c.terminate();
+    assert.equal(refused?.ended, false);
+    assert.match(refused?.message ?? "", /target busy/);
+    assert.equal(c.getSnapshot().session?.id, id);
+    const restored = await f.store.read(connection.id);
+    assert.equal(restored.pointer, id);
+    assert.deepEqual(restored.chosen, { sessionId: id, at: 5000 });
+    f.setTerminate("uncertain-exit");
+    assert.deepEqual(await c.terminate(), { ended: true, message: undefined });
+    await c.changeDraft("Second");
+    await c.send();
+    f.setTerminate("uncertain");
+    const unconfirmed = await c.terminate();
+    assert.equal(unconfirmed?.ended, true);
+    assert.match(unconfirmed?.message ?? "", /didn't confirm/);
+    assert.equal((await f.store.read(connection.id)).pointer, undefined);
+    assert.equal(c.getSnapshot().session, undefined);
+  } finally {
+    await f.close();
+  }
+});
+
+test("terminate waits for an unconfirmed operation to be checked", async () => {
+  const f = await fixture();
+  try {
+    const c = f.controller();
+    await c.start();
+    await c.changeDraft("First");
+    await c.send();
+    const id = c.getSnapshot().session!.id;
+    await f.store.transaction(connection.id, async (state, persist) => {
+      state.pending = { kind: "input", operationId: "op", sessionId: id, text: "x", draftKey: "quick", startedAt: 1 };
+      await persist();
+    });
+    const result = await c.terminate();
+    assert.equal(result?.ended, false);
+    assert.match(result?.message ?? "", /earlier operation/);
+    assert.equal(f.sessions[0].status, "running");
+    assert.equal((await f.store.read(connection.id)).pointer, id);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a new session starts in the workspace, which is prepared first", async () => {
+  const f = await fixture();
+  try {
+    let ensured = 0;
+    const c = f.controller(false, false, {
+      dir: "/home/me/.waypoint-ai/workspace",
+      ensure: async () => void ensured++,
+    });
+    await c.start();
+    await c.changeDraft("Hello");
+    await c.send();
+    const create = f.requests.find((request) => request.path === "/api/sessions")!;
+    assert.equal(create.body.cwd, "/home/me/.waypoint-ai/workspace");
+    assert.match(String(create.body.title), /^Quick Chat \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+    assert.equal(ensured, 1);
+    const broken = f.controller(true, false, {
+      dir: "/home/me/.waypoint-ai/workspace",
+      ensure: async () => {
+        throw new Error("permission denied");
+      },
+    });
+    await broken.start();
+    await broken.changeDraft("Kept");
+    await broken.send();
+    assert.match(broken.getSnapshot().error ?? "", /Could not create the Quick Chat workspace.*permission denied/);
+    assert.equal(broken.getSnapshot().draft, "Kept");
+    assert.equal((await f.store.read(connection.id)).pending, undefined);
+    assert.equal(f.requests.filter((request) => request.path === "/api/sessions").length, 1);
+  } finally {
+    await f.close();
+  }
 });
