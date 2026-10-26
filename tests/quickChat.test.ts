@@ -1178,7 +1178,18 @@ test("a refused terminate restores the destination, and an unconfirmed one keeps
     assert.equal(c.getSnapshot().session?.id, "created-3");
     assert.equal(f.sessions[1].status, "running");
     f.setTerminate("gone");
-    assert.deepEqual(await c.terminate(), { ended: true, message: undefined });
+    assert.deepEqual(await c.terminate(), { ended: true, message: "This session is no longer on this server." });
+    assert.equal((await f.store.read(connection.id)).pointer, undefined);
+    // Deleted before Terminate was chosen: Quick Chat moves on rather than reporting a failure.
+    await c.changeDraft("Fourth");
+    await c.send();
+    const deleted = c.getSnapshot().session!.id;
+    f.sessions.splice(
+      f.sessions.findIndex((session) => session.id === deleted),
+      1,
+    );
+    assert.deepEqual(await c.terminate(), { ended: true, message: "This session is no longer on this server." });
+    assert.equal(c.getSnapshot().session, undefined);
     assert.equal((await f.store.read(connection.id)).pointer, undefined);
   } finally {
     await f.close();

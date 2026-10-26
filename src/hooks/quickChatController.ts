@@ -966,7 +966,11 @@ export class QuickChatController {
       const current = await this.store.transaction(this.connection.id, async (saved, persist) => {
         if (saved.pending) throw new Error("Check the earlier operation's outcome first.");
         await this.verifyConnection();
-        const current = await this.client.session(this.connection.token, id);
+        // A session deleted elsewhere is released like a terminated one.
+        const current = await this.client.session(this.connection.token, id).catch((error: unknown) => {
+          if (error instanceof ApiError && error.kind === "not-found") return undefined;
+          throw error;
+        });
         released = { chosen: saved.chosen?.sessionId === id ? saved.chosen.at : undefined, bindings: {} };
         if (saved.pointer === id) {
           released.pointer = true;
@@ -980,8 +984,9 @@ export class QuickChatController {
         await persist();
         return current;
       });
-      const outcome: ManageOutcome =
-        current.status === "exited"
+      const outcome: ManageOutcome = !current
+        ? { kind: "failed", message: "This session is no longer on this server.", gone: true }
+        : current.status === "exited"
           ? { kind: "done", session: current }
           : await new SessionManager(this.connection, this.store, this.client, this.now).terminate(id, metadata);
       if (outcome.kind !== "done") {
@@ -997,7 +1002,8 @@ export class QuickChatController {
       this.observedPointer = undefined;
       this.observedDefaults = "manual-new";
       this.publish({ session: undefined, loading: false, revision: this.state.revision + 1 });
-      const unconfirmed = outcome.kind === "failed" && !outcome.gone && outcome.session?.status !== "exited";
+      // An unconfirmed result or a session that is gone is explained, since it wasn't a confirmed terminate.
+      const unconfirmed = outcome.kind === "failed" && outcome.session?.status !== "exited";
       return { ended: true, message: unconfirmed ? outcome.message : undefined };
     } catch (error) {
       if (released) await this.restore(id, released).catch(() => undefined);

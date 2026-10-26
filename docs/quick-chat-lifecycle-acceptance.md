@@ -17,6 +17,7 @@ Raycast was driven with keystrokes and read through macOS accessibility. Outcome
 | Terminate Session                                            | The confirmation explains the effect; the session exits, the toast confirms it, and Quick Chat shows a new conversation with the draft kept                   |
 | Reopening Quick Chat after terminating                       | It opens a new conversation; the next send creates a new titled session                                                                                       |
 | The terminated session in Search Sessions                    | Shown under exited sessions with Use for Quick Chat, Reattach, and Delete                                                                                     |
+| Terminate after the session was deleted elsewhere            | Quick Chat moves to a new conversation and the toast says the session is no longer on the server                                                              |
 | A send whose outcome is unconfirmed                          | Terminate Session is not offered until the outcome is checked or retried                                                                                      |
 | A new chat that fails to start in a missing remote directory | Check Previous Outcome recognizes the failed session by its new title and explains it                                                                         |
 | Remove Server, opened from that server's own Quick Chat      | The confirmation names the Quick Chat data; every stored key for that server is gone, and returning to the open Quick Chat doesn't write them back            |
@@ -28,7 +29,7 @@ Stored keys were checked with temporary logging in a development build, removed 
 Not exercised natively:
 
 - A New Chat send that created a session but never delivered its message, then continued that session. Tests cover the fingerprint that ignores titles.
-- A terminate whose result is unconfirmed or refused, and terminating a session that was deleted meanwhile. Tests cover these.
+- A terminate whose result is unconfirmed or refused. Tests cover these.
 - A server reached through a tunnel or container on a local port.
 
 ## Automated coverage
