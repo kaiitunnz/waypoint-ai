@@ -43,7 +43,8 @@ export function chosenPreset(defaults: ChatDefaults, metadata: ServerMetadata): 
         : defaults.preset;
   return metadata.presets.find((preset) => preset.id === id);
 }
-export function launchContext(defaults: ChatDefaults, metadata: ServerMetadata) {
+// `workspace` is the folder Quick Chat uses on the server's own machine when no directory is chosen.
+export function launchContext(defaults: ChatDefaults, metadata: ServerMetadata, workspace?: string) {
   const preset = chosenPreset(defaults, metadata);
   const target = metadata.targets.find((target) => target.id === defaults.target);
   const backend = defaults.agent || preset?.backend || target?.defaultAgent || metadata.defaultAgent;
@@ -66,16 +67,27 @@ export function launchContext(defaults: ChatDefaults, metadata: ServerMetadata) 
     target,
     transport,
     transports,
-    cwd: defaults.cwd || target?.defaultCwd || metadata.defaultCwd,
+    cwd: defaults.cwd || (!defaults.target && workspace) || target?.defaultCwd || metadata.defaultCwd,
   };
+}
+export const legacyTitle = "Quick Chat";
+// Minute precision in the Mac's local time tells apart chats started on the same day.
+export function quickChatTitle(at: Date): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${legacyTitle} ${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`;
+}
+export interface LaunchOptions {
+  workspace?: string;
+  createdAt?: Date;
 }
 export function createRequest(
   defaults: ChatDefaults,
   metadata: ServerMetadata,
   installation: string,
   operation: string,
+  options: LaunchOptions = {},
 ): Record<string, unknown> {
-  const context = launchContext(defaults, metadata);
+  const context = launchContext(defaults, metadata, options.workspace);
   if (!context.agent || !context.transport || !context.transports.includes(context.transport))
     throw new Error("Choose an agent with a structured interface in Quick Chat Defaults.");
   if (defaults.target && (!context.target || !context.target.agents.includes(context.backend)))
@@ -88,7 +100,7 @@ export function createRequest(
     launch_target_id: defaults.target || null,
     transport: context.transport,
     source_mode: "managed",
-    title: "Quick Chat",
+    title: quickChatTitle(options.createdAt ?? new Date()),
     tags: { ...context.preset?.tags, [ownerTag]: installation, [createTag]: operation, [roleTag]: "quick-chat" },
   };
   if (defaults.preset === "default") request.use_default_preset = true;
@@ -111,9 +123,9 @@ export function createRequest(
   }
   return request;
 }
-// Launch settings without per-attempt tags, for telling whether defaults changed since a session was created.
+// Launch settings without the per-attempt title and tags, for telling whether defaults changed since a session was created.
 export function launchFingerprint(request: Record<string, unknown>): string {
-  const settings = Object.fromEntries(Object.entries(request).filter(([key]) => key !== "tags"));
+  const settings = Object.fromEntries(Object.entries(request).filter(([key]) => !["tags", "title"].includes(key)));
   return JSON.stringify(
     Object.keys(settings)
       .sort()
@@ -139,6 +151,8 @@ export interface AttemptLaunch {
   backend: string;
   target: string;
   cwd: string;
+  // Absent for attempts saved before titles carried their creation time.
+  title?: string;
 }
 export interface CreateAttempt {
   kind: string;
@@ -146,7 +160,7 @@ export interface CreateAttempt {
   launch?: AttemptLaunch;
 }
 // Waypoint stores a session before starting its agent and adds tags only after the start succeeds, so an
-// untagged "Quick Chat" session from the same launch may belong to a create whose outcome is unconfirmed.
+// untagged session with the attempt's title from the same launch may belong to a create whose outcome is unconfirmed.
 // `after` is the creation time of a failure already recognized, which can't be a later attempt's outcome.
 function untaggedAttempt(pending: CreateAttempt, session: Session, after = -Infinity): boolean {
   const launch = pending.launch;
@@ -155,7 +169,7 @@ function untaggedAttempt(pending: CreateAttempt, session: Session, after = -Infi
     pending.kind === "create" &&
     !!launch &&
     !session.tags[createTag] &&
-    session.title === "Quick Chat" &&
+    session.title === (launch.title ?? legacyTitle) &&
     session.backend === launch.backend &&
     (session.targetId ?? "") === launch.target &&
     // Waypoint normalizes local working directories, so only a remote one is compared.

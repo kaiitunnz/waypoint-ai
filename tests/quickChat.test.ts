@@ -989,12 +989,14 @@ test("a create whose session failed to start is recognized, cleared, and keeps t
     await c.changeDraft("Hello there");
     await c.send();
     const pending = (await f.store.read(connection.id)).pending!;
-    assert.deepEqual(pending.launch, { backend: "test-agent", target: "", cwd: "/workspace" });
+    const title = pending.launch!.title!;
+    assert.match(title, /^Quick Chat \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+    assert.deepEqual(pending.launch, { backend: "test-agent", target: "", cwd: "/workspace", title });
     const failed = f.sessions[0];
     const untagged = () =>
       Object.assign(failed, {
         tags: {},
-        title: "Quick Chat",
+        title,
         status: "running",
         created_at: "2026-10-26T00:00:00Z",
       });
@@ -1055,6 +1057,11 @@ test("a failed start is matched by target and, on remote targets, by working dir
   assert.equal(failedStart({ ...pending, launch: undefined }, record({})), false);
   const local = { ...pending, launch: { ...pending.launch, target: "" } };
   assert.equal(failedStart(local, record({ launch_target_id: null, cwd: "/Users/me/project" })), true);
+  // Attempts carry their own title; ones saved before titles had a time match the plain title.
+  const titled = { ...pending, launch: { ...pending.launch, title: "Quick Chat 2026-10-26 08:00" } };
+  assert.equal(failedStart(titled, record({ title: "Quick Chat 2026-10-26 08:00" })), true);
+  assert.equal(failedStart(titled, record({})), false);
+  assert.equal(failedStart(pending, record({ title: "Quick Chat 2026-10-26 08:00" })), false);
 });
 
 test("an earlier failed attempt is not taken as the outcome of a retry", async () => {

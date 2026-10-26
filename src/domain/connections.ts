@@ -90,3 +90,9 @@ export function decodeState(raw: string | undefined): ConnectionState {
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+
+// A loopback API URL means the Waypoint server runs on this Mac and shares its file system.
+export function isLoopback(apiUrl: string): boolean {
+  const host = new URL(apiUrl).hostname.replace(/^\[|\]$/g, "");
+  return host === "localhost" || host === "::1" || /^127(\.\d{1,3}){3}$/.test(host);
+}

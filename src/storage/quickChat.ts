@@ -146,7 +146,8 @@ export function decodeQuickChat(raw?: string): QuickChatState {
       (!isRecord(data.pending.launch) ||
         !isText(data.pending.launch.backend) ||
         !isText(data.pending.launch.target) ||
-        !isText(data.pending.launch.cwd))
+        !isText(data.pending.launch.cwd) ||
+        (data.pending.launch.title !== undefined && !isText(data.pending.launch.title)))
     )
       throw new Error();
     if (

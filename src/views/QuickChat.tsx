@@ -15,6 +15,7 @@ import { useConnections } from "../hooks/useConnections";
 import { useQuickChat } from "../hooks/useQuickChat";
 import { FeedConnection } from "../hooks/sessionFeeds";
 import { connectionStore } from "../storage/raycast";
+import { localWorkspace } from "../storage/workspace";
 import { canReattach, launchContext, resumeFor } from "../domain/quickChat";
 import { sessionUrl } from "../domain/sessions";
 import { ChatConversation } from "./ChatConversation";
@@ -123,6 +124,10 @@ function QuickChatView({
 }) {
   const { state, controller } = useQuickChat(connection, forceNew, resume);
   const metadata = state.metadata;
+  const context =
+    metadata && state.defaults
+      ? launchContext(state.defaults, metadata, localWorkspace(connection.apiUrl)?.dir)
+      : undefined;
   const actions = ({ setActive, browser }: { setActive: (value: boolean) => void; browser: boolean }) => (
     <QuickChatActions
       controller={controller}
@@ -144,8 +149,8 @@ function QuickChatView({
         sessionId={state.session?.id}
         metadata={metadata}
         emptyMarkdown={
-          state.defaults
-            ? `## New conversation\n\n**${launchContext(state.defaults, metadata).agent?.label ?? "Waypoint"}** · ${launchContext(state.defaults, metadata).target?.name ?? "Local server"}\n\n${launchContext(state.defaults, metadata).cwd}`
+          context
+            ? `## New conversation\n\n**${context.agent?.label ?? "Waypoint"}** · ${context.target?.name ?? "Local server"}\n\n${context.cwd}`
             : ""
         }
         refreshConnections={refreshConnections}
@@ -173,7 +178,6 @@ function QuickChatView({
         }}
       />
     );
-  const context = metadata && state.defaults ? launchContext(state.defaults, metadata) : undefined;
   return (
     <List
       navigationTitle={`${forceNew ? "New Chat" : "Quick Chat"} · ${connection.name}`}

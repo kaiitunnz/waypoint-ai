@@ -34,6 +34,7 @@ import {
 } from "../domain/compose";
 import { draftKeys } from "../storage/drafts";
 import { PendingOperation, QuickChatState, QuickChatStore, lastActivity, setPointer } from "../storage/quickChat";
+import { Workspace } from "../storage/workspace";
 import { FeedConnection } from "./sessionFeeds";
 
 export interface QuickChatSnapshot {
@@ -94,6 +95,7 @@ export class QuickChatController {
   private deadPointer?: string;
   private readonly forceNew: boolean;
   private readonly resume: boolean;
+  private readonly workspace?: Workspace;
   private draftLoaded = false;
   private queue: Promise<unknown> = Promise.resolve();
   private readonly draftKey: string;
@@ -104,12 +106,13 @@ export class QuickChatController {
     private readonly store: QuickChatStore,
     private readonly verifyConnection: () => Promise<void>,
     // `resume` opens the saved destination regardless of the reuse mode and timeout.
-    options: { forceNew?: boolean; resume?: boolean } = {},
+    options: { forceNew?: boolean; resume?: boolean; workspace?: Workspace } = {},
     private readonly client = new WaypointClient(connection.apiUrl),
     private readonly now = Date.now,
   ) {
     this.forceNew = options.forceNew ?? false;
     this.resume = !this.forceNew && (options.resume ?? false);
+    this.workspace = options.workspace;
     this.draftKey = this.forceNew ? "new" : "quick";
     this.lineKey = draftKeys.line(connection.id, this.draftKey);
     this.composeKey = draftKeys.compose(connection.id, this.draftKey);
@@ -339,7 +342,13 @@ export class QuickChatController {
         this.checkOwned(session, saved, metadata);
         // Defaults changed since the session was created: the next send starts a session with the new ones.
         const launch = saved.compose?.[this.draftKey]?.launch;
-        if (!launch || launch !== launchFingerprint(createRequest(saved.defaults, metadata, saved.installation, "")))
+        if (
+          !launch ||
+          launch !==
+            launchFingerprint(
+              createRequest(saved.defaults, metadata, saved.installation, "", { workspace: this.workspace?.dir }),
+            )
+        )
           return undefined;
         const page = await this.client.events(this.connection.token, bound, { cursor: 0 });
         return page.events.some((event) => event.kind === "user_input") ? undefined : session;
@@ -597,17 +606,32 @@ export class QuickChatController {
         }
         if (!session) {
           const defaults = this.state.defaults ?? saved.defaults;
-          this.checkPolicy(draft?.files ?? [], launchContext(defaults, metadata).backend, defaults.target || undefined);
+          const workspace = this.workspace?.dir;
+          const context = launchContext(defaults, metadata, workspace);
+          this.checkPolicy(draft?.files ?? [], context.backend, defaults.target || undefined);
           const operationId = randomUUID();
-          const request = createRequest(defaults, metadata, saved.installation, operationId);
-          const context = launchContext(defaults, metadata);
+          const request = createRequest(defaults, metadata, saved.installation, operationId, {
+            workspace,
+            createdAt: new Date(this.now()),
+          });
+          if (workspace && context.cwd === workspace)
+            await this.workspace!.ensure().catch((error: Error) => {
+              throw new Error(
+                `Could not create the Quick Chat workspace at ${workspace}: ${error.message}. Your draft is kept.`,
+              );
+            });
           saved.pending = {
             kind: "create",
             operationId,
             text,
             draftKey: this.draftKey,
             startedAt: this.now(),
-            launch: { backend: context.backend, target: defaults.target, cwd: context.cwd },
+            launch: {
+              backend: context.backend,
+              target: defaults.target,
+              cwd: context.cwd,
+              title: String(request.title),
+            },
           };
           await persist();
           try {
