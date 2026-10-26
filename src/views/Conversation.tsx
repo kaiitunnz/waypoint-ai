@@ -1,5 +1,5 @@
-import { Action, ActionPanel, Detail, Icon, Keyboard, List } from "@raycast/api";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { Action, ActionPanel, Detail, Icon, Keyboard, List, useNavigation } from "@raycast/api";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { ServerMetadata } from "../api/contracts";
 import { TranscriptRow, transcript, selectedRow } from "../domain/transcript";
 import { isStructured, sessionUrl } from "../domain/sessions";
@@ -7,7 +7,10 @@ import { useConnections } from "../hooks/useConnections";
 import { useConversationFeed } from "../hooks/useSessionFeeds";
 import { ConversationFeed, FeedConnection } from "../hooks/sessionFeeds";
 import { LoadingView, markdownText, sessionSummary, statusIcon } from "../components/SessionPresentation";
-import { ChatConversation } from "./ChatConversation";
+import { ChatConversation, ConversationActionContext } from "./ChatConversation";
+import { SessionActions } from "../components/SessionActions";
+import { SessionManager } from "../hooks/sessionManager";
+import { quickChatStore } from "../storage/raycast";
 import { NewChatOption } from "./EditSession";
 import { InteractionController } from "../hooks/interactionController";
 import { InteractionSection, interactionItemIds } from "./SessionInteraction";
@@ -19,11 +22,14 @@ export function ConversationScreen({
   sessionId,
   metadata,
   newChat,
+  quickChat,
 }: {
   connectionId: string;
   sessionId: string;
   metadata: ServerMetadata;
   newChat?: NewChatOption;
+  // Quick Chat opened on this server's chosen session.
+  quickChat?: () => React.ReactElement;
 }) {
   const { state, error, refresh } = useConnections();
   if (!state && !error) return <LoadingView title="Loading connection…" />;
@@ -53,8 +59,18 @@ export function ConversationScreen({
       metadata={metadata}
       refreshConnections={refresh}
       settings={{ available: true, newChat }}
-      actions={(setActive) => (
+      actions={({ setActive, session, feed }) => (
         <>
+          {session && (
+            <ConversationSessionActions
+              connection={{ ...connection, token: connection.token! }}
+              metadata={metadata}
+              session={session}
+              feed={feed}
+              setActive={setActive}
+              quickChat={quickChat}
+            />
+          )}
           {connection.frontendUrl && (
             <Action.OpenInBrowser title="Open in Waypoint" url={sessionUrl(connection.frontendUrl, sessionId)!} />
           )}
@@ -80,6 +96,54 @@ export function ConversationScreen({
           />
         </>
       )}
+    />
+  );
+}
+
+function ConversationSessionActions({
+  connection,
+  metadata,
+  session,
+  feed,
+  setActive,
+  quickChat,
+}: Required<Pick<ConversationActionContext, "setActive" | "feed">> & {
+  connection: FeedConnection;
+  metadata: ServerMetadata;
+  session: NonNullable<ConversationActionContext["session"]>;
+  quickChat?: () => React.ReactElement;
+}) {
+  const { push, pop } = useNavigation();
+  const manager = useMemo(
+    () => new SessionManager(connection, quickChatStore),
+    [connection.id, connection.apiUrl, connection.token],
+  );
+  const [state, setState] = useState<{ pointer?: string; pending: boolean }>({ pending: false });
+  const read = useCallback(() => {
+    manager.quickChat().then(setState, () => setState({ pending: false }));
+  }, [manager]);
+  useEffect(read, [read]);
+  return (
+    <SessionActions
+      session={session}
+      metadata={metadata}
+      quickChat={state}
+      manager={manager}
+      handlers={{
+        onChanged: () => {
+          feed.retry();
+          read();
+        },
+        onDeleted: () => pop(),
+        openQuickChat: () => {
+          if (!quickChat) return;
+          setActive(false);
+          push(quickChat(), () => {
+            setActive(true);
+            read();
+          });
+        },
+      }}
     />
   );
 }

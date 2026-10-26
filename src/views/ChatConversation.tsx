@@ -1,6 +1,7 @@
 import { Action, ActionPanel, Detail, Icon, Keyboard, List, useNavigation } from "@raycast/api";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ServerMetadata } from "../api/contracts";
+import { Session } from "../api/sessions";
 import { chatExchanges, chatMarkdown, conversationMarkdown, previewMessageLimit } from "../domain/chatPresentation";
 import { transcript } from "../domain/transcript";
 import { isStructured } from "../domain/sessions";
@@ -22,6 +23,11 @@ import { ConversationContent } from "./Conversation";
 import { EditSession, NewChatOption } from "./EditSession";
 
 type ReadingMode = "conversation" | "latest";
+export interface ConversationActionContext {
+  setActive: (active: boolean) => void;
+  session?: Session;
+  feed: ConversationFeed;
+}
 
 function FullConversation({
   feed,
@@ -74,6 +80,7 @@ export function ChatConversation({
   hasDraft = false,
   refreshConnections,
   emptyMarkdown,
+  onMissing,
   settings,
 }: {
   connection: FeedConnection;
@@ -86,7 +93,7 @@ export function ChatConversation({
     canSend: boolean;
     accessory?: React.ComponentProps<typeof List>["searchBarAccessory"];
   };
-  actions?: (setActive: (active: boolean) => void) => React.ReactNode;
+  actions?: (context: ConversationActionContext) => React.ReactNode;
   status?: string;
   busy?: boolean;
   revision?: number;
@@ -94,6 +101,8 @@ export function ChatConversation({
   hasDraft?: boolean;
   refreshConnections: () => Promise<void>;
   emptyMarkdown?: string;
+  // Called when Waypoint reports the conversation's session gone.
+  onMissing?: (sessionId: string) => void;
   // Quick Chat hides editing while a send is unsettled and offers starting a new chat with changed settings.
   settings?: { available: boolean; newChat?: NewChatOption };
 }) {
@@ -112,6 +121,10 @@ export function ChatConversation({
   useEffect(() => {
     onPendingChange?.();
   }, [pendingOperation]);
+  const missing = state.error?.kind === "not-found";
+  useEffect(() => {
+    if (missing && sessionId) onMissing?.(sessionId);
+  }, [missing, sessionId]);
   const interactionUrl = sessionId ? sessionUrl(connection.frontendUrl, sessionId) : undefined;
   const [mode, setMode] = useState<ReadingMode>("conversation");
   const [interactionSelection, setInteractionSelection] = useState<string>();
@@ -221,7 +234,7 @@ export function ChatConversation({
           }}
         />
       )}
-      {actions?.(setActive)}
+      {actions?.({ setActive, session, feed })}
       {composer && attention.length > 0 && attentionActions}
       <ActionPanel.Section title="Conversation">
         {turns > 1 && (

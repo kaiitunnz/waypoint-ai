@@ -1,7 +1,7 @@
 import { WaypointClient, ApiError } from "../api/client";
 import { ServerMetadata } from "../api/contracts";
 import { Connection } from "../domain/connections";
-import { LiveSocket, StreamStatus, Envelope, SocketFactory, Scheduler, socketUrl } from "../api/liveSocket";
+import { LiveSocket, StreamStatus, Envelope, SocketFactory, Scheduler, socketUrl, timers } from "../api/liveSocket";
 import {
   Session,
   SessionEvent,
@@ -16,7 +16,10 @@ import { mergeEvents, newerQuestions } from "../domain/transcript";
 export interface FeedConnection extends Connection {
   token: string;
 }
-type Options = { factory?: SocketFactory; scheduler?: Scheduler };
+// `watch` schedules the conversation's periodic existence check.
+type Options = { factory?: SocketFactory; scheduler?: Scheduler; watch?: Scheduler };
+// Waypoint announces a deletion only on the session list, so an open conversation checks that it still exists.
+export const presenceIntervalMs = 20000;
 const safeError = (error: unknown) =>
   error instanceof ApiError
     ? error
@@ -97,6 +100,20 @@ export class SessionsFeed extends Observable<BrowserSnapshot> {
     this.socket.retry();
     void this.refresh();
   }
+  // Mutation results show at once; a later list snapshot from Waypoint replaces them.
+  apply(session: Session) {
+    this.revision++;
+    const exists = this.state.sessions.some((item) => item.id === session.id);
+    this.publish({
+      sessions: exists
+        ? this.state.sessions.map((item) => (item.id === session.id ? session : item))
+        : [session, ...this.state.sessions],
+    });
+  }
+  remove(id: string) {
+    this.revision++;
+    this.publish({ sessions: this.state.sessions.filter((item) => item.id !== id) });
+  }
   private receive(message: Envelope) {
     if (message.type !== "session_list_update") return;
     const sessions = parseSessions(message.payload);
@@ -157,6 +174,8 @@ export class ConversationFeed extends Observable<ConversationSnapshot> {
   private olderController?: AbortController;
   private fallbackRunning = false;
   private hydrated = false;
+  private readonly watch: Scheduler;
+  private watchTimer?: unknown;
   constructor(
     private readonly connection: FeedConnection,
     private readonly sessionId: string,
@@ -164,6 +183,7 @@ export class ConversationFeed extends Observable<ConversationSnapshot> {
     options: Options = {},
   ) {
     super({ events: [], loading: true, loadingOlder: false, hasMore: false, stream: "connecting" });
+    this.watch = options.watch ?? timers;
     this.socket = new LiveSocket(
       socketUrl(connection.apiUrl, connection.token, sessionId),
       "session_state",
@@ -208,6 +228,35 @@ export class ConversationFeed extends Observable<ConversationSnapshot> {
     this.controller?.abort();
     this.olderController?.abort();
     this.socket.stop();
+    this.unwatch();
+  }
+  private unwatch() {
+    if (this.watchTimer !== undefined) this.watch.clear(this.watchTimer);
+    this.watchTimer = undefined;
+  }
+  private watchPresence() {
+    this.unwatch();
+    this.watchTimer = this.watch.set(() => {
+      this.watchTimer = undefined;
+      void this.checkPresence();
+    }, presenceIntervalMs);
+  }
+  // Other failures are left to the live connection's own status.
+  private async checkPresence() {
+    if (!this.active) return;
+    const generation = this.generation;
+    try {
+      await this.client.session(this.connection.token, this.sessionId);
+    } catch (error) {
+      if (error instanceof ApiError && error.kind === "not-found" && this.active && generation === this.generation) {
+        this.generation++;
+        this.controller?.abort();
+        this.socket.stop();
+        this.publish({ loading: false, error: error });
+        return;
+      }
+    }
+    if (this.active && generation === this.generation) this.watchPresence();
   }
   // A hidden conversation reconnects when it starts again, so retrying it here would only open a stray socket.
   retry() {
@@ -290,6 +339,7 @@ export class ConversationFeed extends Observable<ConversationSnapshot> {
         error: undefined,
       });
       this.hydrated = true;
+      this.watchPresence();
       if (page.questions && this.questionEpoch !== this.epoch) this.applyQuestions(page.questions, false);
       this.buffer = [];
       this.hydrating = false;

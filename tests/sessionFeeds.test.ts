@@ -360,3 +360,67 @@ test("retrying a stopped conversation opens no socket until it starts again", ()
   assert.equal(f.sockets.length, opened + 1);
   feed.stop();
 });
+
+test("mutation results show at once and an older refresh never overwrites them", async () => {
+  const f = fixture();
+  let release: (value: Response) => void = () => undefined;
+  const pending = new Promise<Response>((resolve) => {
+    release = resolve;
+  });
+  const client = new WaypointClient(connection.apiUrl, async (url) =>
+    String(url).endsWith("/api/me") ? response(metadataWire) : pending,
+  );
+  const feed = new SessionsFeed(connection, client, f);
+  feed.start();
+  f.send("session_list_update", { sessions: [sessionWire("a"), sessionWire("b")] });
+  feed.apply({ ...feed.getSnapshot().sessions[0], title: "Renamed" });
+  feed.remove("b");
+  release(response({ sessions: [sessionWire("a"), sessionWire("b")] }));
+  await tick();
+  await tick();
+  assert.deepEqual(
+    feed.getSnapshot().sessions.map((session) => [session.id, session.title]),
+    [["a", "Renamed"]],
+  );
+  f.send("session_list_update", { sessions: [sessionWire("a"), sessionWire("c")] });
+  assert.deepEqual(
+    feed.getSnapshot().sessions.map((session) => session.id),
+    ["a", "c"],
+  );
+  feed.stop();
+});
+
+test("an open conversation notices its session was deleted elsewhere", async () => {
+  const f = fixture();
+  const watch = fixture();
+  let exists = true;
+  let checks = 0;
+  const client = new WaypointClient(connection.apiUrl, async (url) => {
+    if (String(url).includes("/events")) return response({ events: [], has_more: false });
+    checks++;
+    return exists ? response({ session: sessionWire() }) : response({ detail: "session not found" }, 404);
+  });
+  const feed = new ConversationFeed(connection, "demo", client, { ...f, watch: watch.scheduler });
+  feed.start();
+  f.send("session_state", { session: sessionWire() });
+  await tick();
+  assert.equal(watch.jobs.size, 1);
+  const before = checks;
+  watch.reconnect();
+  await tick();
+  assert.equal(checks, before + 1);
+  assert.equal(feed.getSnapshot().error, undefined);
+  assert.equal(watch.jobs.size, 1);
+  exists = false;
+  watch.reconnect();
+  await tick();
+  assert.equal(feed.getSnapshot().error?.kind, "not-found");
+  assert.equal(f.sockets[0].closed, true);
+  assert.equal(watch.jobs.size, 0);
+  feed.stop();
+  const idle = fixture();
+  const hidden = new ConversationFeed(connection, "demo", client, { ...idle, watch: idle.scheduler });
+  hidden.start();
+  hidden.stop();
+  assert.equal(idle.jobs.size, 0);
+});

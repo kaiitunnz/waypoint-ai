@@ -23,7 +23,7 @@ export const nativeSocket: SocketFactory = (url, handlers) => {
   socket.addEventListener("error", handlers.error);
   return { close: () => socket.close() };
 };
-const timers: Scheduler = {
+export const timers: Scheduler = {
   set: (callback, delay) => setTimeout(callback, delay),
   clear: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
 };

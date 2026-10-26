@@ -27,6 +27,8 @@ export interface Session {
   profile?: Profile;
   usageSource: UsageSource;
   targetId?: string;
+  // A git worktree Waypoint made for this session; deleting the session removes it.
+  worktreePath?: string;
   context?: { used: number; limit?: number };
   tokens?: number;
   rateLimits: { label: string; percent: number }[];
@@ -109,6 +111,7 @@ export function parseSession(value: unknown): Session {
           }
         : { kind: "plugin" },
     targetId: optionalText(value.launch_target_id),
+    worktreePath: optionalText(value.worktree_path) || undefined,
     context: used !== undefined ? { used, limit: number(context?.context_window_tokens) } : undefined,
     tokens: number(usage?.display_total_tokens),
     rateLimits: Array.isArray(limits?.windows)

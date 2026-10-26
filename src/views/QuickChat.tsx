@@ -112,7 +112,7 @@ function QuickChatView({
 }) {
   const { state, controller } = useQuickChat(connection, forceNew, resume);
   const metadata = state.metadata;
-  const actions = (setActive: (value: boolean) => void = () => undefined) => (
+  const actions = ({ setActive }: { setActive: (value: boolean) => void } = { setActive: () => undefined }) => (
     <QuickChatActions
       controller={controller}
       connection={connection}
@@ -151,6 +151,7 @@ function QuickChatView({
         busy={state.busy}
         revision={state.revision}
         onPendingChange={() => void controller.syncPending()}
+        onMissing={(id) => controller.markMissing(id)}
         hasDraft={state.hasDraft}
         settings={{
           available: !state.busy && !state.pending,
