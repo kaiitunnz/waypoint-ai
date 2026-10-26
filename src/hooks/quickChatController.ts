@@ -573,6 +573,14 @@ export class QuickChatController {
               saved.pending = undefined;
               await persist();
             }
+            if (error instanceof ApiError && error.detail === "cwd-not-found")
+              throw new ApiError(
+                "rejected",
+                `${error.message} Update Quick Chat Defaults.`,
+                error.detail,
+                error.status,
+                error.serverDetail,
+              );
             throw this.sshFailure(error, defaults.target || undefined, fromCompose ? "compose" : "send");
           }
           saved.pointer = session.id;
