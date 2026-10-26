@@ -135,15 +135,14 @@ export function ongoing(
 }
 // Server and Mac clocks may differ; a larger skew makes failed starts unrecognizable.
 export const clockToleranceMs = 5 * 60000;
-// Waypoint stores a session before starting its agent and adds tags only after the start succeeds, so a
-// start that fails leaves an untagged, failed "Quick Chat" session while the create itself looks unconfirmed.
-export function failedStart(pending: PendingOperation, session: Session): boolean {
+// Waypoint stores a session before starting its agent and adds tags only after the start succeeds, so an
+// untagged "Quick Chat" session from the same launch may belong to a create whose outcome is unconfirmed.
+function untaggedAttempt(pending: PendingOperation, session: Session): boolean {
   const launch = pending.launch;
   const created = session.createdAt ? Date.parse(session.createdAt) : NaN;
   return (
     pending.kind === "create" &&
     !!launch &&
-    session.status === "error" &&
     !session.tags[createTag] &&
     session.title === "Quick Chat" &&
     session.backend === launch.backend &&
@@ -151,6 +150,17 @@ export function failedStart(pending: PendingOperation, session: Session): boolea
     // Waypoint normalizes local working directories, so only a remote one is compared.
     (!launch.target || session.cwd === launch.cwd) &&
     created >= pending.startedAt - clockToleranceMs
+  );
+}
+// A start that failed leaves such a session in error. One still starting may be this create's own, so
+// an earlier failed attempt is not taken as this one's outcome while it exists.
+export function failedStart(pending: PendingOperation, session: Session): boolean {
+  return untaggedAttempt(pending, session) && session.status === "error";
+}
+export function startFailed(pending: PendingOperation, sessions: Session[]): boolean {
+  return (
+    sessions.some((session) => failedStart(pending, session)) &&
+    !sessions.some((session) => untaggedAttempt(pending, session) && session.status === "starting")
   );
 }
 // A Quick Chat opened on a chosen session resumes it only on the server it was opened for.

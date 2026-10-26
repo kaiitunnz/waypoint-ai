@@ -217,6 +217,33 @@ test("deleting another session leaves Quick Chat untouched, and a confirmed-gone
       setPointer(state, "kept", 1000);
       await persist();
     });
+    f.add("raced", { status: "exited" });
+    f.failures.set("DELETE /api/sessions/raced", () => {
+      // A Quick Chat send started a checkpoint for the session while it was being deleted.
+      void f.store.transaction(connection.id, async (state, persist) => {
+        setPointer(state, "raced", 2000);
+        state.pending = {
+          kind: "reattach",
+          operationId: "op",
+          sessionId: "raced",
+          text: "",
+          draftKey: "quick",
+          startedAt: 1,
+        };
+        await persist();
+      });
+      f.sessions.delete("raced");
+      return respond({ deleted: "raced" });
+    });
+    await f.manager.remove("raced", metadata);
+    const raced = await f.store.read(connection.id);
+    assert.equal(raced.pointer, "raced");
+    assert.equal(raced.pending?.sessionId, "raced");
+    await f.store.transaction(connection.id, async (state, persist) => {
+      setPointer(state, "kept", 1000);
+      state.pending = undefined;
+      await persist();
+    });
     f.failures.set("DELETE /api/sessions/gone", () => {
       f.sessions.delete("gone");
       return respond({}, 502);

@@ -8,13 +8,13 @@ import {
   canReattach,
   createRequest,
   createTag,
-  failedStart,
   launchContext,
   launchFingerprint,
   ongoing,
   ownerTag,
   reuseDecision,
   roleTag,
+  startFailed,
 } from "../domain/quickChat";
 import { isStructured } from "../domain/sessions";
 import {
@@ -801,7 +801,7 @@ export class QuickChatController {
               pending: undefined,
               notice: "Recovered the created conversation. The prompt was not resent. Send it when ready.",
             });
-          } else if (!matches.length && sessions.some((session) => failedStart(pending, session))) {
+          } else if (!matches.length && startFailed(pending, sessions)) {
             // No input reaches a session that never started, so clearing the checkpoint cannot duplicate work.
             saved.pending = undefined;
             await persist();

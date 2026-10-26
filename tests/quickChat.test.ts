@@ -1039,3 +1039,27 @@ test("a failed start is matched by target and, on remote targets, by working dir
   const local = { ...pending, launch: { ...pending.launch, target: "" } };
   assert.equal(failedStart(local, record({ launch_target_id: null, cwd: "/Users/me/project" })), true);
 });
+
+test("an earlier failed attempt is not taken as the outcome while another attempt is still starting", async () => {
+  const { startFailed } = await import("../src/domain/quickChat");
+  const pending = {
+    kind: "create" as const,
+    operationId: "op",
+    text: "",
+    draftKey: "quick",
+    startedAt: Date.parse("2026-10-26T00:00:00Z"),
+    launch: { backend: "test-agent", target: "lab", cwd: "/home/lab/project" },
+  };
+  const record = (id: string, status: string) =>
+    parseSession({
+      ...sessionWire(id),
+      title: "Quick Chat",
+      status,
+      launch_target_id: "lab",
+      cwd: "/home/lab/project",
+      created_at: "2026-10-26T00:00:01Z",
+    });
+  assert.equal(startFailed(pending, [record("earlier", "error")]), true);
+  assert.equal(startFailed(pending, [record("earlier", "error"), record("current", "starting")]), false);
+  assert.equal(startFailed(pending, [record("current", "starting")]), false);
+});
