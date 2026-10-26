@@ -38,6 +38,8 @@ async function fixture() {
   const eventQueries: string[] = [];
   const store = new QuickChatStore(
     {
+      keys: async () => [...values.keys()],
+      removeItem: async (key) => void values.delete(key),
       getItem: async (key) => {
         storageReads++;
         await readGate;
@@ -59,7 +61,7 @@ async function fixture() {
   let inputStatus = 200;
   let uncertainCreate = false;
   let uncertainInput = false;
-  let terminate: "exit" | "refuse" | "uncertain" | "uncertain-exit" = "exit";
+  let terminate: "exit" | "refuse" | "uncertain" | "uncertain-exit" | "gone" = "exit";
   let now = 1000000;
   const client = new WaypointClient(connection.apiUrl, async (url, options) => {
     const path = new URL(String(url)).pathname;
@@ -95,6 +97,10 @@ async function fixture() {
     }
     if (path.endsWith("/terminate")) {
       if (terminate === "refuse") return respond({ detail: "target busy" }, 409);
+      if (terminate === "gone") {
+        sessions.splice(sessions.indexOf(session), 1);
+        return respond({}, 404);
+      }
       if (terminate !== "uncertain") session.status = "exited";
       if (terminate !== "exit") throw new Error("connection reset");
       return respond({ session });
@@ -1166,6 +1172,14 @@ test("a refused terminate restores the destination, and an unconfirmed one keeps
     assert.match(unconfirmed?.message ?? "", /didn't confirm/);
     assert.equal((await f.store.read(connection.id)).pointer, undefined);
     assert.equal(c.getSnapshot().session, undefined);
+    // The view moved on too, so a send can't reattach the session the user asked to end.
+    await c.changeDraft("Third");
+    await c.send();
+    assert.equal(c.getSnapshot().session?.id, "created-3");
+    assert.equal(f.sessions[1].status, "running");
+    f.setTerminate("gone");
+    assert.deepEqual(await c.terminate(), { ended: true, message: undefined });
+    assert.equal((await f.store.read(connection.id)).pointer, undefined);
   } finally {
     await f.close();
   }

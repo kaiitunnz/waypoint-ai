@@ -1,8 +1,8 @@
 import { Action, ActionPanel, Alert, Color, Icon, List, Keyboard, Toast, confirmAlert, showToast } from "@raycast/api";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ServerDetail, statusLabel } from "../components/ServerDetail";
 import { useConnections, useConnectionStatus } from "../hooks/useConnections";
-import { connectionStore } from "../storage/raycast";
+import { connectionStore, quickChatStore } from "../storage/raycast";
 import { ServerForm, SignInForm } from "./ServerForm";
 
 export function ManageServers() {
@@ -15,6 +15,10 @@ export function ManageServers() {
     state?.connections[0];
   const status = useConnectionStatus(selected, revision);
   const retry = () => setRevision((value) => value + 1);
+  // Also clears data left by servers removed earlier, or written back by a view still open on one.
+  useEffect(() => {
+    quickChatStore.sweep().catch(() => undefined);
+  }, []);
   async function reload() {
     await refresh();
     retry();
@@ -161,11 +165,20 @@ export function ManageServers() {
                             await confirmAlert({
                               title: `Remove ${connection.name}?`,
                               message:
-                                "Remove this saved connection and its local credentials. Sessions on Waypoint keep running.",
+                                "Remove this saved connection, its local credentials, and its Quick Chat drafts and settings. Sessions on Waypoint keep running.",
                               primaryAction: { title: "Remove Server", style: Alert.ActionStyle.Destructive },
                             })
-                          )
+                          ) {
                             await mutate(() => connectionStore.remove(connection.id), "Server removed");
+                            await quickChatStore.sweep().catch(() =>
+                              showToast({
+                                style: Toast.Style.Failure,
+                                title: "Server removed",
+                                message:
+                                  "Its Quick Chat drafts couldn't be cleared yet; reopening Manage Servers retries.",
+                              }),
+                            );
+                          }
                         }}
                       />
                     </ActionPanel.Section>

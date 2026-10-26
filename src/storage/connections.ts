@@ -5,6 +5,10 @@ export interface StorageAdapter {
   getItem(key: string): Promise<string | undefined>;
   setItem(key: string, value: string): Promise<void>;
 }
+export interface KeyedStorage extends StorageAdapter {
+  keys(): Promise<string[]>;
+  removeItem(key: string): Promise<void>;
+}
 
 export const connectionsKey = "waypoint.connections";
 

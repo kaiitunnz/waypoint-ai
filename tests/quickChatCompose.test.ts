@@ -27,6 +27,8 @@ async function fixture(options: { attachments?: boolean; target?: "password" | "
   };
   const store = new QuickChatStore(
     {
+      keys: async () => [...values.keys()],
+      removeItem: async (key) => void values.delete(key),
       getItem: async (key) => {
         const value = values.get(key);
         if (storage.failed && key.startsWith("waypoint.quick-chat.") && storage.afterFailedRead) {

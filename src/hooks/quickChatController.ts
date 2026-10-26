@@ -655,7 +655,9 @@ export class QuickChatController {
             if (error instanceof ApiError && error.detail === "cwd-not-found")
               throw new ApiError(
                 "rejected",
-                `${error.message} Update Quick Chat Defaults.`,
+                workspace && context.cwd === workspace
+                  ? `This server can't see the Quick Chat workspace at ${workspace}. Set a Working Directory in Quick Chat Defaults.`
+                  : `${error.message} Update Quick Chat Defaults.`,
                 error.detail,
                 error.status,
                 error.serverDetail,
@@ -984,7 +986,7 @@ export class QuickChatController {
           : await new SessionManager(this.connection, this.store, this.client, this.now).terminate(id, metadata);
       if (outcome.kind !== "done") {
         const after = outcome.kind === "ssh" ? undefined : outcome.session;
-        if (after?.status !== "exited" && !(outcome.kind === "failed" && outcome.uncertain)) {
+        if (after?.status !== "exited" && !(outcome.kind === "failed" && (outcome.uncertain || outcome.gone))) {
           await this.restore(id, released!);
           if (after) this.publish({ session: after });
           return { ended: false, message: outcome.message };
@@ -995,7 +997,7 @@ export class QuickChatController {
       this.observedPointer = undefined;
       this.observedDefaults = "manual-new";
       this.publish({ session: undefined, loading: false, revision: this.state.revision + 1 });
-      const unconfirmed = outcome.kind === "failed" && outcome.session?.status !== "exited";
+      const unconfirmed = outcome.kind === "failed" && !outcome.gone && outcome.session?.status !== "exited";
       return { ended: true, message: unconfirmed ? outcome.message : undefined };
     } catch (error) {
       if (released) await this.restore(id, released).catch(() => undefined);

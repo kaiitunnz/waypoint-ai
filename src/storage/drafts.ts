@@ -9,6 +9,11 @@ export class DraftStore {
   read(key: string) {
     return this.queued.has(key) ? Promise.resolve(this.queued.get(key)) : this.storage.getItem(key);
   }
+  // Drops queued writes and waits for ones in flight, so a removed server's drafts aren't written back.
+  async forget(prefix: string) {
+    for (const key of this.queued.keys()) if (key.startsWith(prefix)) this.queued.delete(key);
+    await Promise.all([...this.flushing].filter(([key]) => key.startsWith(prefix)).map(([, flush]) => flush));
+  }
   // Resolves once this value or a newer one is stored.
   write(key: string, value: string): Promise<void> {
     this.queued.set(key, value);
