@@ -40,7 +40,6 @@ Not exercised natively:
 - Interface switching and usage-source changes.
 - An apply whose restart outlasts the form.
 - Restore failures and reattach.
-- Windows.
 
 Unit and integration tests cover these paths.
 

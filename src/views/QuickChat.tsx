@@ -249,10 +249,7 @@ function QuickChatActions({
           <Action.Push
             title="Compose Message"
             icon={Icon.Pencil}
-            shortcut={{
-              macOS: { modifiers: ["cmd", "shift"], key: "m" },
-              Windows: { modifiers: ["ctrl", "shift"], key: "m" },
-            }}
+            shortcut={{ modifiers: ["cmd", "shift"], key: "m" }}
             target={compose}
           />
           {!state.busy && (
@@ -260,19 +257,13 @@ function QuickChatActions({
               <Action
                 title="Include Selected Text"
                 icon={Icon.Text}
-                shortcut={{
-                  macOS: { modifiers: ["cmd", "shift"], key: "e" },
-                  Windows: { modifiers: ["ctrl", "shift"], key: "e" },
-                }}
+                shortcut={{ modifiers: ["cmd", "shift"], key: "e" }}
                 onAction={() => include("selection")}
               />
               <Action
                 title="Include Clipboard"
                 icon={Icon.Clipboard}
-                shortcut={{
-                  macOS: { modifiers: ["cmd", "shift"], key: "v" },
-                  Windows: { modifiers: ["ctrl", "shift"], key: "v" },
-                }}
+                shortcut={{ modifiers: ["cmd", "shift"], key: "v" }}
                 onAction={() => include("clipboard")}
               />
             </>
@@ -327,10 +318,7 @@ function QuickChatActions({
           />
           <Action
             title="Allow Explicit Retry"
-            shortcut={{
-              macOS: { modifiers: ["cmd", "shift"], key: "y" },
-              Windows: { modifiers: ["ctrl", "shift"], key: "y" },
-            }}
+            shortcut={{ modifiers: ["cmd", "shift"], key: "y" }}
             icon={Icon.ArrowClockwise}
             onAction={async () => {
               if (
@@ -366,10 +354,7 @@ function QuickChatActions({
         <Action.Push
           title="Quick Chat Defaults"
           icon={Icon.Gear}
-          shortcut={{
-            macOS: { modifiers: ["cmd", "shift"], key: "d" },
-            Windows: { modifiers: ["ctrl", "shift"], key: "d" },
-          }}
+          shortcut={{ modifiers: ["cmd", "shift"], key: "d" }}
           onPush={() => setActive(false)}
           onPop={() => setActive(true)}
           target={
@@ -391,20 +376,14 @@ function QuickChatActions({
       <Action
         title="Reconnect Chat"
         icon={Icon.ArrowClockwise}
-        shortcut={{
-          macOS: { modifiers: ["cmd", "shift"], key: "r" },
-          Windows: { modifiers: ["ctrl", "shift"], key: "r" },
-        }}
+        shortcut={{ modifiers: ["cmd", "shift"], key: "r" }}
         onAction={() => controller.start()}
       />
       {state.session && (
         <Action
           title="Interrupt Session"
           icon={Icon.Stop}
-          shortcut={{
-            macOS: { modifiers: ["cmd", "shift"], key: "i" },
-            Windows: { modifiers: ["ctrl", "shift"], key: "i" },
-          }}
+          shortcut={{ modifiers: ["cmd", "shift"], key: "i" }}
           onAction={() => controller.action("interrupt")}
         />
       )}
@@ -415,10 +394,7 @@ function QuickChatActions({
           <Action
             title="Reattach Session"
             icon={Icon.Link}
-            shortcut={{
-              macOS: { modifiers: ["cmd", "shift"], key: "t" },
-              Windows: { modifiers: ["ctrl", "shift"], key: "t" },
-            }}
+            shortcut={{ modifiers: ["cmd", "shift"], key: "t" }}
             onAction={() => controller.action("reattach")}
           />
         )}

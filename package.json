@@ -8,7 +8,6 @@
   "icon": "extension-icon.png",
   "author": "noppanat_wadlom",
   "platforms": [
-    "Windows",
     "macOS"
   ],
   "categories": [

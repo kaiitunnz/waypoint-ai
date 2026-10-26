@@ -43,7 +43,6 @@ Not exercised natively:
 - Key-auth SSH targets.
 - Remote delivery for OpenCode and Claude Code.
 - A real SSH host.
-- Windows.
 
 Unit and integration tests cover these paths.
 

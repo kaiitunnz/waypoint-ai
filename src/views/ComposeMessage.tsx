@@ -139,19 +139,13 @@ export function ComposeMessage({
               <Action
                 title="Include Selected Text"
                 icon={Icon.Text}
-                shortcut={{
-                  macOS: { modifiers: ["cmd", "shift"], key: "e" },
-                  Windows: { modifiers: ["ctrl", "shift"], key: "e" },
-                }}
+                shortcut={{ modifiers: ["cmd", "shift"], key: "e" }}
                 onAction={() => include("selection")}
               />
               <Action
                 title="Include Clipboard"
                 icon={Icon.Clipboard}
-                shortcut={{
-                  macOS: { modifiers: ["cmd", "shift"], key: "v" },
-                  Windows: { modifiers: ["ctrl", "shift"], key: "v" },
-                }}
+                shortcut={{ modifiers: ["cmd", "shift"], key: "v" }}
                 onAction={() => include("clipboard")}
               />
             </ActionPanel.Section>

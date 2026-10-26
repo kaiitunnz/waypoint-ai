@@ -14,7 +14,7 @@ Connect Raycast to your [Waypoint](https://github.com/kaiitunnz/waypoint) server
 ## Setup
 
 1. Run a Waypoint API server and note its API URL and server password.
-2. Run this extension in Raycast and open **Manage Servers**.
+2. Run this extension in Raycast for macOS and open **Manage Servers**.
 3. Choose **Add Server**, enter a name and API URL, and save. Add a frontend URL if you want **Open in Waypoint** browser handoff.
 4. Choose **Sign in** and enter the Waypoint server password.
 
@@ -26,7 +26,7 @@ Local execution runs on the API server's machine. SSH execution targets are disc
 
 Select a row to inspect a server. **Use Server** changes the active connection; **Make Default Server** chooses the fallback when the active connection is removed. Reopening restores the active connection. A blue check marks the active server; a star marks the default.
 
-Use Actions to edit, retry, sign in again, remove a connection, or open its configured frontend. Common shortcuts include Add, Edit, Refresh, and Remove. Sign in uses Command-Shift-L on macOS / Control-Shift-L on Windows; Make Default uses Command-Shift-D / Control-Shift-D.
+Use Actions to edit, retry, sign in again, remove a connection, or open its configured frontend. Common shortcuts include Add, Edit, Refresh, and Remove. Sign in uses ⇧⌘L; Make Default uses ⇧⌘D.
 
 Reauthentication preserves the connection's identity and setup. Changing its API URL creates a fresh identity and requires sign-in, including when returning to a previously used URL. Removing a connection clears its saved credentials and leaves sessions running on Waypoint.
 
@@ -54,15 +54,15 @@ Reconnects recover missed events and preserve loaded history. Expired sign-in of
 
 Session actions appear in the Actions panel of each Search Sessions row and of conversations opened from search. Each action checks the session's current state with Waypoint first, so an action on an outdated row does nothing and says so.
 
-| Action             | Available when                                                   | Shortcut                       |
-| ------------------ | ---------------------------------------------------------------- | ------------------------------ |
-| Use for Quick Chat | The session has a native conversation and can continue           | ⇧⌘U / Ctrl+Shift+U             |
-| Rename Session     | Always                                                           | Raycast's Edit (⌘E on macOS)   |
-| Pin / Unpin        | Always                                                           | Raycast's Pin (⌘. on macOS)    |
-| Interrupt Session  | A native conversation is starting, running, or waiting for input | ⇧⌘I / Ctrl+Shift+I             |
-| Reattach Session   | The session exited or failed and its interface can resume it     | ⇧⌘T / Ctrl+Shift+T             |
-| Terminate Session  | The session has not exited                                       | None                           |
-| Delete Session     | The session exited or failed                                     | Raycast's Remove (⌃X on macOS) |
+| Action             | Available when                                                   | Shortcut |
+| ------------------ | ---------------------------------------------------------------- | -------- |
+| Use for Quick Chat | The session has a native conversation and can continue           | ⇧⌘U      |
+| Rename Session     | Always                                                           | ⌘E       |
+| Pin / Unpin        | Always                                                           | ⌘.       |
+| Interrupt Session  | A native conversation is starting, running, or waiting for input | ⇧⌘I      |
+| Reattach Session   | The session exited or failed and its interface can resume it     | ⇧⌘T      |
+| Terminate Session  | The session has not exited                                       | None     |
+| Delete Session     | The session exited or failed                                     | ⌃X       |
 
 **Terminate** stops the agent and asks for confirmation first. Terminating a terminal session that is attached to your own tmux session leaves your tmux session running. A terminated session leaves the active list; the success toast offers **Show Exited Sessions**.
 
@@ -148,7 +148,6 @@ On a remote execution target, Raycast sends only the attachments Waypoint can de
 - When a new session fails to start on its execution target, for example because its working directory doesn't exist there, Waypoint leaves a failed **Quick Chat** session without the tags Raycast uses to find its own sessions. **Check Previous Outcome** recognizes it when the server's clock is within five minutes of this Mac's; otherwise, abandon the attempt. Delete the failed session from Search Sessions afterwards.
 - Pressing Escape in Quick Chat clears the message field, as in any Raycast search bar. Use **Compose Message** for drafts you want to keep while navigating.
 - Removing a server connection deletes its credentials. Its Quick Chat drafts stay in Raycast's local storage.
-- The extension declares macOS and Windows. Acceptance passes ran on macOS; Windows has not been exercised.
 
 ## Development
 

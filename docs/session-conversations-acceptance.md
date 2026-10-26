@@ -27,7 +27,7 @@ The macOS Raycast desktop pass used the development extension, two isolated Wayp
 
 Keyboard paths exercised Add/Sign In through Manage Servers, Show Exited Sessions, server dropdown navigation, Follow Latest, Load Older, Refresh, and sign-in recovery. An initial list-selection issue and a search-state mismatch across server switches were found during the pass and fixed before the final checks.
 
-The Actions popup and actual browser navigation were not verified through computer use. Browser URLs and terminal/unknown-transport routing are covered by tests. Windows runtime, real agent execution, and native answers/composition were not exercised. There is no automated desktop e2e suite.
+The Actions popup and actual browser navigation were not verified through computer use. Browser URLs and terminal/unknown-transport routing are covered by tests. Real agent execution, and native answers/composition were not exercised. There is no automated desktop e2e suite.
 
 ## Automated coverage
 

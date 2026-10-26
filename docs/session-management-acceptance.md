@@ -47,8 +47,7 @@ The pass found and fixed:
 
 Not exercised natively:
 
-- Windows. The extension declares Windows; only macOS was exercised.
-- Include Selected Text, Include Clipboard, and attachments, which the [desktop inputs acceptance](desktop-inputs-acceptance.md) covers on macOS.
+- Include Selected Text, Include Clipboard, and attachments, which the [desktop inputs acceptance](desktop-inputs-acceptance.md) covers.
 - Recovery after a Waypoint server restart with live sessions. The isolated server does not restore sessions on boot, and the real server was not restarted.
 - Delete of a session with a git worktree.
 

@@ -38,7 +38,7 @@ The native chat sent a marker instruction to Codex and received `Remembered.`. A
 
 ## Coverage limits
 
-Windows and SSH launch/password flows were not exercised. Real-agent memory was checked with Codex. The real server's default Claude TUI preset exited before accepting input; the Codex check used a separate preset and session. Model discovery loaded against the authenticated server; all model/profile override combinations were not exercised. The isolated API has no initialized model adapter, so it also covers the recoverable discovery error. Always Continue/Always New and deleted-target abandonment are covered by controller tests. The Actions popup and browser handoff were not verified with computer use; native shortcuts exercised the tested secondary actions. No automated desktop suite is present.
+SSH launch/password flows were not exercised. Real-agent memory was checked with Codex. The real server's default Claude TUI preset exited before accepting input; the Codex check used a separate preset and session. Model discovery loaded against the authenticated server; all model/profile override combinations were not exercised. The isolated API has no initialized model adapter, so it also covers the recoverable discovery error. Always Continue/Always New and deleted-target abandonment are covered by controller tests. The Actions popup and browser handoff were not verified with computer use; native shortcuts exercised the tested secondary actions. No automated desktop suite is present.
 
 ## Screenshots
 
