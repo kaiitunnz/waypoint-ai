@@ -24,6 +24,8 @@ export interface SessionActionHandlers {
   openQuickChat: () => void;
   // Pin and unpin have a shortcut only where Paste Latest Response does not already use it.
   pinShortcut?: boolean;
+  // Offered on the success toast, such as revealing a terminated session the list now hides.
+  afterTerminate?: Toast.ActionOptions;
 }
 
 // Reports an outcome and returns whether it succeeded.
@@ -32,13 +34,16 @@ export async function reportOutcome(
   success: string,
   handlers: Pick<SessionActionHandlers, "onChanged" | "onDeleted">,
   toast?: Toast,
+  primaryAction?: Toast.ActionOptions,
 ): Promise<boolean> {
-  const show = (style: Toast.Style, title: string, message?: string) =>
-    toast ? Object.assign(toast, { style, title, message }) : showToast({ style, title, message });
+  const show = (style: Toast.Style, title: string, message?: string, action?: Toast.ActionOptions) =>
+    toast
+      ? Object.assign(toast, { style, title, message, primaryAction: action })
+      : showToast({ style, title, message, primaryAction: action });
   if (outcome.kind === "done") {
     if (outcome.deleted) handlers.onDeleted(outcome.deleted);
     else if (outcome.session) handlers.onChanged(outcome.session);
-    await show(Toast.Style.Success, success);
+    await show(Toast.Style.Success, success, undefined, primaryAction);
     return true;
   }
   if (outcome.kind !== "ssh" && outcome.session) handlers.onChanged(outcome.session);
@@ -61,9 +66,14 @@ export function SessionActions({
 }) {
   const { push } = useNavigation();
   const allowed = sessionActions(session, metadata, quickChat);
-  const run = async (progress: string, success: string, operation: () => Promise<ManageOutcome>) => {
+  const run = async (
+    progress: string,
+    success: string,
+    operation: () => Promise<ManageOutcome>,
+    primaryAction?: Toast.ActionOptions,
+  ) => {
     const toast = await showToast({ style: Toast.Style.Animated, title: progress });
-    return reportOutcome(await operation(), success, handlers, toast);
+    return reportOutcome(await operation(), success, handlers, toast, primaryAction);
   };
   const reattach = async () => {
     if (!metadata) return;
@@ -173,7 +183,12 @@ export function SessionActions({
                 primaryAction: { title: "Terminate", style: Alert.ActionStyle.Destructive },
               })
             )
-              await run("Terminating session…", "Session terminated", () => manager.terminate(session.id, metadata));
+              await run(
+                "Terminating session…",
+                "Session terminated",
+                () => manager.terminate(session.id, metadata),
+                handlers.afterTerminate,
+              );
           }}
         />
       )}

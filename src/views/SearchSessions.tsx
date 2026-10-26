@@ -137,6 +137,10 @@ function SessionsBrowser({
       push(<QuickChat connectionId={connection.id} resume />, resume);
     },
     pinShortcut: true,
+    afterTerminate:
+      filter === "active"
+        ? { title: "Show Exited Sessions", onAction: (toast: Toast) => (setFilter("all"), toast.hide()) }
+        : undefined,
   };
   const sessions = useMemo(
     () => visibleSessions(state.sessions, query, filter, state.metadata),

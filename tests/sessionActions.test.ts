@@ -80,7 +80,10 @@ test("titles and delete confirmations", () => {
   assert.equal(titleProblem("  "), "Enter a title.");
   assert.equal(titleProblem("x".repeat(501)), "Use 500 characters or fewer.");
   assert.equal(titleProblem(` ${"x".repeat(500)} `), undefined);
-  assert.match(deleteMessage(session()), /^Its transcript is removed\./);
+  assert.match(
+    deleteMessage(session()),
+    /^Its transcript, attachments, scheduled messages, and board posts are removed\./,
+  );
   const worktree = deleteMessage(session({ worktree_path: "/repo/.worktrees/s" }));
   assert.match(worktree, /worktree at \/repo\/\.worktrees\/s/);
   assert.match(worktree, /uncommitted changes/);
