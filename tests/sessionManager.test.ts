@@ -277,7 +277,7 @@ test("Use for Quick Chat records an explicit choice, and refuses while an operat
     assert.deepEqual(saved.chosen, { sessionId: "found", at: 5000 });
     assert.deepEqual(await f.manager.quickChat(), { pointer: "found", pending: false });
     const again = await f.manager.useForQuickChat("found", metadata);
-    assert.match(again.kind === "stale" ? again.message : "", /already continues/);
+    assert.match(again.kind === "stale" ? again.message : "", /already Quick Chat's destination/);
     f.add("next", { status: "idle" });
     await f.store.transaction(connection.id, async (state, persist) => {
       state.pending = {

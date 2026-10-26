@@ -117,10 +117,8 @@ export function SessionActions({
           }}
           onAction={async () => {
             if (
-              await run(
-                "Choosing for Quick Chat…",
-                ["Quick Chat destination set", "Couldn't use for Quick Chat"],
-                () => manager.useForQuickChat(session.id, metadata),
+              await run("Choosing for Quick Chat…", ["Quick Chat destination set", "Couldn't use for Quick Chat"], () =>
+                manager.useForQuickChat(session.id, metadata),
               )
             )
               handlers.openQuickChat();
