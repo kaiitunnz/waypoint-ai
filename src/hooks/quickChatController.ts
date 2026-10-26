@@ -805,9 +805,10 @@ export class QuickChatController {
             // No input reaches a session that never started, so clearing the checkpoint cannot duplicate work.
             saved.pending = undefined;
             await persist();
+            // An error, not a notice: Quick Chat shows notices only while an operation is unconfirmed.
             this.publish({
               pending: undefined,
-              notice:
+              error:
                 "The new session failed to start on its execution target. Check the working directory and target in Quick Chat Defaults. No message was sent; your draft is kept.",
             });
           } else

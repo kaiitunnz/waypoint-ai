@@ -1000,7 +1000,7 @@ test("a create whose session failed to start is recognized, cleared, and keeps t
     Object.assign(failed, { created_at: "2026-10-26T00:00:00Z" });
     await c.reconcile();
     assert.equal(c.getSnapshot().pending, undefined);
-    assert.match(c.getSnapshot().notice!, /failed to start/);
+    assert.match(c.getSnapshot().error!, /failed to start/);
     assert.equal((await f.store.read(connection.id)).pending, undefined);
     assert.equal(c.getSnapshot().draft, "Hello there");
     assert.equal(f.requests.filter((request) => request.path.endsWith("/input")).length, 0);
