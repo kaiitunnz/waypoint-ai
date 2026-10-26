@@ -21,7 +21,7 @@ Manual acceptance on 2026-10-24 used the installed macOS Raycast app, the develo
 | Select the first connection after second-server reauthentication        | First server remains independently authenticated                                          |
 | Invoke Remove                                                           | Confirmation describes local removal; cancel leaves connections intact                    |
 
-The keyboard paths for Add, Edit, Retry, Make Default, and Remove were exercised. The Actions popup could not be verified through the available computer-use surface; individual actions were exercised through their keyboard shortcuts or primary buttons. Final removal was not confirmed in the desktop pass; automated storage tests verify credential deletion and fallback selection. Browser handoff, a remote SSH target, and Windows runtime were not exercised.
+The keyboard paths for Add, Edit, Retry, Make Default, and Remove were exercised. The Actions popup could not be verified through the available computer-use surface; individual actions were exercised through their keyboard shortcuts or primary buttons. Final removal was not confirmed in the desktop pass; automated storage tests verify credential deletion and fallback selection. Browser handoff and a remote SSH target were not exercised.
 
 ## Automated checks
 

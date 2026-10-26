@@ -247,10 +247,7 @@ export function ChatConversation({
         <Action.Paste
           title="Paste Latest Response"
           content={response}
-          shortcut={{
-            macOS: { modifiers: ["cmd", "shift"], key: "p" },
-            Windows: { modifiers: ["ctrl", "shift"], key: "p" },
-          }}
+          shortcut={{ modifiers: ["cmd", "shift"], key: "p" }}
         />
       )}
       {actions?.({ setActive, browser: withAttention })}
@@ -260,10 +257,7 @@ export function ChatConversation({
           <Action
             title={mode === "conversation" ? "Show Latest Response" : "Show Conversation"}
             icon={mode === "conversation" ? Icon.ArrowDownCircle : Icon.Message}
-            shortcut={{
-              macOS: { modifiers: ["cmd", "shift"], key: "f" },
-              Windows: { modifiers: ["ctrl", "shift"], key: "f" },
-            }}
+            shortcut={{ modifiers: ["cmd", "shift"], key: "f" }}
             onAction={() => setMode((current) => (current === "conversation" ? "latest" : "conversation"))}
           />
         )}
@@ -284,10 +278,7 @@ export function ChatConversation({
           <Action.Push
             title="Conversation History"
             icon={Icon.List}
-            shortcut={{
-              macOS: { modifiers: ["cmd", "shift"], key: "h" },
-              Windows: { modifiers: ["ctrl", "shift"], key: "h" },
-            }}
+            shortcut={{ modifiers: ["cmd", "shift"], key: "h" }}
             target={
               <ConversationContent
                 connection={connection}
@@ -315,10 +306,7 @@ export function ChatConversation({
           <Action.Push
             title="Edit Current Session"
             icon={Icon.Gear}
-            shortcut={{
-              macOS: { modifiers: ["cmd", "shift"], key: "," },
-              Windows: { modifiers: ["ctrl", "shift"], key: "," },
-            }}
+            shortcut={{ modifiers: ["cmd", "shift"], key: "," }}
             target={
               <EditSession
                 connection={connection}

@@ -213,10 +213,7 @@ export function ConversationContent({
       {auth && (
         <Action.Push
           title="Sign in Again"
-          shortcut={{
-            macOS: { modifiers: ["cmd", "shift"], key: "l" },
-            Windows: { modifiers: ["ctrl", "shift"], key: "l" },
-          }}
+          shortcut={{ modifiers: ["cmd", "shift"], key: "l" }}
           icon={Icon.Lock}
           target={<SignInForm connection={connection} onSaved={refreshConnections} />}
           onPush={() => setActive(false)}
@@ -229,10 +226,7 @@ export function ConversationContent({
       <Action
         title={following ? "Pause Following" : "Follow Latest Response"}
         icon={following ? Icon.Pause : Icon.ArrowDown}
-        shortcut={{
-          macOS: { modifiers: ["cmd", "shift"], key: "f" },
-          Windows: { modifiers: ["ctrl", "shift"], key: "f" },
-        }}
+        shortcut={{ modifiers: ["cmd", "shift"], key: "f" }}
         onAction={() => {
           setQuery("");
           setFollowing((value) => !value);

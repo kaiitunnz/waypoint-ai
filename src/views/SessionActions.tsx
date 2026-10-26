@@ -111,10 +111,7 @@ export function SessionActions({
         <Action
           title="Use for Quick Chat"
           icon={Icon.Message}
-          shortcut={{
-            macOS: { modifiers: ["cmd", "shift"], key: "u" },
-            Windows: { modifiers: ["ctrl", "shift"], key: "u" },
-          }}
+          shortcut={{ modifiers: ["cmd", "shift"], key: "u" }}
           onAction={async () => {
             if (
               await run("Choosing for Quick Chat…", ["Quick Chat destination set", "Couldn't use for Quick Chat"], () =>
@@ -129,10 +126,7 @@ export function SessionActions({
         <Action
           title="Open in Quick Chat"
           icon={Icon.Message}
-          shortcut={{
-            macOS: { modifiers: ["cmd", "shift"], key: "u" },
-            Windows: { modifiers: ["ctrl", "shift"], key: "u" },
-          }}
+          shortcut={{ modifiers: ["cmd", "shift"], key: "u" }}
           onAction={handlers.openQuickChat}
         />
       )}
@@ -154,10 +148,7 @@ export function SessionActions({
         <Action
           title="Interrupt Session"
           icon={Icon.Stop}
-          shortcut={{
-            macOS: { modifiers: ["cmd", "shift"], key: "i" },
-            Windows: { modifiers: ["ctrl", "shift"], key: "i" },
-          }}
+          shortcut={{ modifiers: ["cmd", "shift"], key: "i" }}
           onAction={() =>
             run("Interrupting session…", ["Session interrupted", "Couldn't interrupt session"], () =>
               manager.interrupt(session.id, metadata),
@@ -169,10 +160,7 @@ export function SessionActions({
         <Action
           title="Reattach Session"
           icon={Icon.Link}
-          shortcut={{
-            macOS: { modifiers: ["cmd", "shift"], key: "t" },
-            Windows: { modifiers: ["ctrl", "shift"], key: "t" },
-          }}
+          shortcut={{ modifiers: ["cmd", "shift"], key: "t" }}
           onAction={reattach}
         />
       )}

@@ -28,7 +28,7 @@ The macOS Raycast pass used the development extension and an isolated Waypoint A
 
 The pass found and fixed three presentation issues before the final checks: request context collapsing onto one line with raw Markdown, a duplicated request title, and repeated unconfirmed-response copy. The reader now also shows the result of Check Previous Outcome.
 
-Not exercised natively: OpenCode nested approval IDs, `permission.replied`, and positional answers; Claude plan-mode approvals and approval notes; returning from Conversation History after answering a request there; Windows. These paths are covered by unit and integration tests. Browser handoff URLs were not opened.
+Not exercised natively: OpenCode nested approval IDs, `permission.replied`, and positional answers; Claude plan-mode approvals and approval notes; returning from Conversation History after answering a request there. These paths are covered by unit and integration tests. Browser handoff URLs were not opened.
 
 ## Automated coverage
 

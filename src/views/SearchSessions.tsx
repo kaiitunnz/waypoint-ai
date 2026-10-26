@@ -151,10 +151,7 @@ function SessionsBrowser({
       {auth && (
         <Action.Push
           title="Sign in Again"
-          shortcut={{
-            macOS: { modifiers: ["cmd", "shift"], key: "l" },
-            Windows: { modifiers: ["ctrl", "shift"], key: "l" },
-          }}
+          shortcut={{ modifiers: ["cmd", "shift"], key: "l" }}
           icon={Icon.Lock}
           target={<SignInForm connection={connection} onSaved={refreshConnections} />}
           onPush={() => setActive(false)}
@@ -174,10 +171,7 @@ function SessionsBrowser({
       <Action
         title={filter === "active" ? "Show Exited Sessions" : "Show Active Sessions Only"}
         icon={Icon.Filter}
-        shortcut={{
-          macOS: { modifiers: ["cmd", "shift"], key: "e" },
-          Windows: { modifiers: ["ctrl", "shift"], key: "e" },
-        }}
+        shortcut={{ modifiers: ["cmd", "shift"], key: "e" }}
         onAction={() => setFilter((value) => (value === "active" ? "all" : "active"))}
       />
       <Action title="Show Only Exited Sessions" icon={Icon.Stop} onAction={() => setFilter("exited")} />

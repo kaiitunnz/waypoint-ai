@@ -83,10 +83,7 @@ export function ManageServers() {
             const signIn = (
               <Action.Push
                 title={connection.token ? "Sign in Again" : "Sign in"}
-                shortcut={{
-                  macOS: { modifiers: ["cmd", "shift"], key: "l" },
-                  Windows: { modifiers: ["ctrl", "shift"], key: "l" },
-                }}
+                shortcut={{ modifiers: ["cmd", "shift"], key: "l" }}
                 icon={Icon.Lock}
                 target={<SignInForm connection={connection} onSaved={reload} />}
               />
@@ -146,10 +143,7 @@ export function ManageServers() {
                       {!isDefault && (
                         <Action
                           title="Make Default Server"
-                          shortcut={{
-                            macOS: { modifiers: ["cmd", "shift"], key: "d" },
-                            Windows: { modifiers: ["ctrl", "shift"], key: "d" },
-                          }}
+                          shortcut={{ modifiers: ["cmd", "shift"], key: "d" }}
                           icon={Icon.Star}
                           onAction={() =>
                             mutate(() => connectionStore.select(connection.id, true), "Default server updated")
