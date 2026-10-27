@@ -13,7 +13,13 @@ import {
 import { useState } from "react";
 import { ServerMetadata } from "../api/contracts";
 import { Session } from "../api/sessions";
-import { deleteMessage, sessionActions, terminateMessage, titleProblem } from "../domain/sessionActions";
+import {
+  deleteMessage,
+  quickChatMovesOn,
+  sessionActions,
+  terminateMessage,
+  titleProblem,
+} from "../domain/sessionActions";
 import { ManageOutcome, SessionManager } from "../hooks/sessionManager";
 import { ConnectTarget } from "./ConnectTarget";
 
@@ -40,7 +46,7 @@ export async function reportOutcome(
   if (outcome.kind === "done") {
     if (outcome.deleted) handlers.onDeleted(outcome.deleted);
     else if (outcome.session) handlers.onChanged(outcome.session);
-    await show(Toast.Style.Success, titles[0], undefined, primaryAction);
+    await show(Toast.Style.Success, titles[0], outcome.releasedQuickChat ? quickChatMovesOn : undefined, primaryAction);
     return true;
   }
   if (outcome.kind !== "ssh" && outcome.session) handlers.onChanged(outcome.session);
@@ -63,6 +69,8 @@ export function SessionActions({
 }) {
   const { push } = useNavigation();
   const allowed = sessionActions(session, metadata, quickChat);
+  // With an unconfirmed operation, Quick Chat keeps the session until that operation is checked.
+  const movesOn = quickChat.pointer === session.id && !quickChat.pending ? ` ${quickChatMovesOn}` : "";
   const run = async (
     progress: string,
     titles: [string, string],
@@ -173,7 +181,7 @@ export function SessionActions({
             if (
               await confirmAlert({
                 title: "Terminate this session?",
-                message: terminateMessage,
+                message: `${terminateMessage}${movesOn}`,
                 primaryAction: { title: "Terminate", style: Alert.ActionStyle.Destructive },
               })
             )
@@ -196,7 +204,7 @@ export function SessionActions({
             if (
               await confirmAlert({
                 title: "Delete this session?",
-                message: deleteMessage(session),
+                message: `${deleteMessage(session)}${movesOn}`,
                 primaryAction: { title: "Delete", style: Alert.ActionStyle.Destructive },
               })
             )

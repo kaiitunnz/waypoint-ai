@@ -61,6 +61,7 @@ export function titleProblem(title: string): string | undefined {
 }
 
 export const terminateMessage = "Any running command is stopped and pending requests are declined.";
+export const quickChatMovesOn = "Quick Chat starts a new conversation on your next send.";
 export function deleteMessage(session: Session): string {
   return session.worktreePath
     ? `Its transcript, attachments, scheduled messages, board posts, and any manager backlog it owns are removed, and so is its worktree at ${session.worktreePath}, including uncommitted changes, with the worktree's branch if it is merged. This cannot be undone.`
