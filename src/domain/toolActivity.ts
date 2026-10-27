@@ -48,6 +48,8 @@ const kindsByItemType: Record<string, ToolKind> = {
 };
 
 const targetKeys = ["command", "file_path", "filePath", "notebook_path", "path", "pattern", "glob", "url", "query"];
+// A search names its directory as well; what it looked for is the more telling target.
+const searchKeys = ["pattern", "glob", "query", ...targetKeys];
 
 function string(value: unknown) {
   return typeof value === "string" ? value : "";
@@ -67,13 +69,13 @@ function kindOf(name: string, itemType: string): ToolKind {
 }
 
 // Every backend spells the same argument differently; first match wins.
-function targetFrom(args: Record<string, unknown>): string | undefined {
-  for (const key of targetKeys) if (string(args[key])) return string(args[key]);
+function targetFrom(args: Record<string, unknown>, kind: ToolKind): string | undefined {
+  for (const key of kind === "search" ? searchKeys : targetKeys) if (string(args[key])) return string(args[key]);
   return undefined;
 }
 
 // The last resort for a backend that reports only flat text: "Bash(git status)\nRunning…" or "Read\n{json}".
-function targetFromText(text: string): string | undefined {
+function targetFromText(text: string, kind: ToolKind): string | undefined {
   const [head = "", ...rest] = text.split("\n");
   const call = /^[A-Za-z_][\w:.-]*\((.+)\)$/.exec(head.trim());
   if (call) return call[1];
@@ -81,7 +83,7 @@ function targetFromText(text: string): string | undefined {
   if (!body.startsWith("{")) return undefined;
   try {
     const parsed: unknown = JSON.parse(body);
-    return isRecord(parsed) ? targetFrom(parsed) : undefined;
+    return isRecord(parsed) ? targetFrom(parsed, kind) : undefined;
   } catch {
     return undefined;
   }
@@ -112,7 +114,7 @@ export function toolActivity(events: SessionEvent[], text: string): ToolActivity
   const previewPaths = (Array.isArray(preview?.files) ? preview.files : [])
     .map((file) => string(record(file)?.path))
     .filter(Boolean);
-  const target = (args && targetFrom(args)) || fromItem || targetFromText(text) || undefined;
+  const target = (args && targetFrom(args, kind)) || fromItem || targetFromText(text, kind) || undefined;
   // The preview names a moved file by its new path while the raw change keeps the old one, so it wins.
   const reported = previewPaths.length ? previewPaths : changePaths.length ? changePaths : [string(filediff?.path)];
   const files = [...new Set([...reported, ...(reported.some(Boolean) ? [] : [target ?? ""])])].filter(Boolean);

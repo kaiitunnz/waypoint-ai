@@ -46,17 +46,20 @@ The first run on a history page can be partial when the page boundary falls insi
 
 ## After review
 
-Review changed three behaviors, each re-checked against the same personal-server data:
+Review changed these behaviors; the first two were re-checked against the same personal-server data:
 
 - Reasoning between two calls folds into the run, as Claude Code keeps thinking within a tool group. The collapsed transcript hides reasoning, so it had split one burst of work into repeated lines. One OpenCode conversation went from eight summaries to three, shown natively: `2 commands · 1 agent · 1 tool call` and `3 commands · 1 tool call`. Notes and reasoning after a run's last call stay their own rows.
 - An edit that failed or was denied counts as a failed edit, not an edited file. Recorded Claude Code denials still carry the proposed preview's counts, which no longer reach the summary.
 - AskUserQuestion and SendUserFile show `Asked a question` and `Shared a file` in the collapsed chat.
+- A selected run keeps its place when earlier history loads in front of it.
+- A moved file counts once, under its new path.
+- Web searches and fetched pages read as their own kinds, and a search's expanded line shows its pattern rather than its directory.
 
 Rendered summaries were compared with the independent recount for five conversations' latest history pages, and for the whole of a sixth Claude Code conversation with recorded edit denials. All 189 runs agreed, including 7 failed edits.
 
 ## Automated coverage
 
-`npm run verify` checks formatting, ESLint, strict types, 232 behavior and integration tests, Raycast manifest/icon validation, and build. Tests cover classification for each backend's event shape, Codex item-type classification where no tool name is present, MCP and unknown-tool fallbacks, web searches and fetched pages, the flat-text fallback for a call with no structured fields, OpenCode's method-based failure, clause ordering and pluralization, distinct-file counting for reads and edits including multi-file changes and moves, run boundaries across assistant text, approvals, plans, notes, reasoning (between and after calls), and standalone cards, failed and denied edits, the omitted diffstat when no backend reported counts, where summaries land in the collapsed and expanded chat, fenced text for standalone calls and their collapsed line, and a selected run keeping its place when earlier history loads.
+`npm run verify` checks formatting, ESLint, strict types, 233 behavior and integration tests, Raycast manifest/icon validation, and build. Tests cover classification for each backend's event shape, Codex item-type classification where no tool name is present, MCP and unknown-tool fallbacks, web searches and fetched pages, the flat-text fallback for a call with no structured fields, OpenCode's method-based failure, clause ordering and pluralization, distinct-file counting for reads and edits including multi-file changes and moves, run boundaries across assistant text, approvals, plans, notes, reasoning (between and after calls), and standalone cards, failed and denied edits, the omitted diffstat when no backend reported counts, where summaries land in the collapsed and expanded chat, fenced text for standalone calls and their collapsed line, and a selected run keeping its place when earlier history loads.
 
 ## Screenshots
 

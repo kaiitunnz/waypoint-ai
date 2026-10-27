@@ -462,3 +462,16 @@ test("a failed or denied edit is not counted as an edited file", () => {
   assert.equal(summarizeRun([denied]), "1 failed edit");
   assert.equal(summarizeRun([denied, toolActivity(openCodeEdit(), "")]), "1 file edited (+5 −2) · 1 failed edit");
 });
+
+test("a search shows what it looked for rather than where", () => {
+  const grep = toolActivity(
+    [parse("tool_call", "Grep", { tool_name: "Grep", payload: { input: { pattern: "TODO", path: "/repo/src" } } })],
+    "",
+  );
+  const glob = toolActivity(
+    [parse("tool_call", "Running glob", { tool_name: "glob", tool_input: { pattern: "**/*.ts", path: "/repo" } })],
+    "",
+  );
+  assert.equal(grep.target, "TODO");
+  assert.equal(glob.target, "**/*.ts");
+});
