@@ -139,27 +139,17 @@ export class WaypointClient {
     });
   }
 
-  events(
-    token: string,
-    id: string,
-    options: { before?: number; cursor?: number } = {},
-    signal?: AbortSignal,
-  ): Promise<EventsPage> {
-    // Pages use the server's message page size, the same one Waypoint's web app uses.
+  events(token: string, id: string, options: { before?: number } = {}, signal?: AbortSignal): Promise<EventsPage> {
+    // Pages use the server's message page size, the same one Waypoint's web app uses. Waypoint's
+    // `cursor` read returns every later event in one response, which a long session cannot afford.
     const query = new URLSearchParams(
-      options.cursor !== undefined
-        ? { cursor: String(options.cursor) }
-        : options.before !== undefined
-          ? { before_sequence: String(options.before) }
-          : {},
+      options.before !== undefined ? { before_sequence: String(options.before) } : {},
     ).toString();
-    // Cursor reads return every later event in one response, so they get more time.
     return this.read(
       `/api/sessions/${encodeURIComponent(id)}/events${query ? `?${query}` : ""}`,
       token,
       signal,
       (value) => parseEventsPage(value, id),
-      options.cursor !== undefined ? this.timeoutMs * 5 : undefined,
     );
   }
   mutate(

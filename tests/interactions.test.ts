@@ -165,7 +165,6 @@ test("approvals use advertised decisions, notes and stable IDs while the session
     1,
     "a later running event does not resolve a pending approval",
   );
-  assert.deepEqual(sessionInteractions(waiting, metadata, [request], undefined, false), [], "needs full history");
   const noDecisions = only(sessionInteractions(waiting, capabilities({}), [request]));
   assert.equal(noDecisions.availability, "unavailable");
   assert.match(noDecisions.reason!, /Open it in Waypoint/);

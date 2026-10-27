@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { WaypointClient, ApiError } from "../api/client";
 import { ServerMetadata } from "../api/contracts";
-import { PendingQuestions, Session, SessionEvent } from "../api/sessions";
+import { EventsPage, PendingQuestions, Session, SessionEvent } from "../api/sessions";
 import {
   Interaction,
   InteractionDraft,
@@ -17,7 +17,6 @@ import { mergeEvents, newerQuestions } from "../domain/transcript";
 import { draftKeys } from "../storage/drafts";
 import { QuickChatStore, PendingOperation, isInteractionDraft } from "../storage/quickChat";
 import { FeedConnection, ConversationSnapshot } from "./sessionFeeds";
-import { isStructured } from "../domain/sessions";
 
 export interface InteractionSnapshot {
   loading: boolean;
@@ -33,13 +32,12 @@ export interface InteractionSnapshot {
 }
 export type Outcome = "pending" | "resolved" | "elsewhere";
 
-const needsHistory = (session: Session, metadata: ServerMetadata) =>
-  isStructured(session, metadata) && (isLive(session) || plansDecisions(session, metadata));
-const requestEvent = (event: SessionEvent) =>
-  event.kind === "approval_request" ||
-  event.metadata.item_type === "plan" ||
-  (event.kind === "system_note" &&
-    (typeof event.metadata.method === "string" || typeof event.metadata.plan_item_id === "string"));
+// The history one feed has loaded, from its first event that follows on without a gap.
+interface FeedBlock {
+  source: object;
+  events: SessionEvent[];
+  last: number;
+}
 const unsaved =
   "Waypoint accepted the response, but this computer could not clear its saved attempt. Check the outcome, then clear it.";
 const definitive = new Set(["expired-token", "not-found", "rejected"]);
@@ -49,17 +47,13 @@ export class InteractionController {
   private state: InteractionSnapshot = { loading: true, busy: false, interactions: [], drafts: {} };
   private listeners = new Set<() => void>();
   private session?: Session;
-  private events: SessionEvent[] = [];
+  private feed?: FeedBlock;
   private questions?: PendingQuestions;
   // What each feed last delivered, so a resumed feed's cached snapshot cannot override newer state.
   private delivered = new WeakMap<object, { session?: Session; questions?: PendingQuestions }>();
   private questionSource?: object;
   private questionChanges = 0;
   private sessionChanges = 0;
-  // Highest event ID covered by the full-history load; undefined until history is loaded.
-  private watermark?: number;
-  private historyRequested = false;
-  private historyFollowUp = false;
   // Requests Waypoint proved are no longer pending, though history still lists them.
   private notPending = new Set<string>();
   private generation = 0;
@@ -85,15 +79,9 @@ export class InteractionController {
     this.state = { ...this.state, ...patch };
     this.listeners.forEach((listener) => listener());
   }
-  private interactions() {
+  private interactions(events = this.feed?.events ?? []) {
     if (!this.session) return [];
-    return sessionInteractions(
-      this.session,
-      this.metadata,
-      this.events,
-      this.questions,
-      this.watermark !== undefined,
-    ).map((interaction) =>
+    return sessionInteractions(this.session, this.metadata, events, this.questions).map((interaction) =>
       this.notPending.has(interaction.key)
         ? {
             ...interaction,
@@ -146,7 +134,7 @@ export class InteractionController {
       this.session = snapshot.session;
       this.sessionChanges++;
     }
-    this.events = mergeEvents(this.events, snapshot.events, this.sessionId);
+    this.adoptFeed(snapshot, source);
     if (snapshot.questions && snapshot.questions !== seen.questions) {
       // A feed resolves its own socket epochs, so its newer snapshot replaces its previous one outright.
       this.questions =
@@ -155,34 +143,40 @@ export class InteractionController {
       this.questionChanges++;
     }
     this.derive();
-    if (
-      this.session &&
-      !this.historyRequested &&
-      (needsHistory(this.session, this.metadata) || snapshot.events.some(requestEvent))
-    ) {
-      this.historyRequested = true;
-      // A refresh already in flight may have decided to skip history; follow it with one that loads it.
-      if (this.state.loading) this.historyFollowUp = true;
-      else void this.refresh();
-    }
   }
-  // Full history is fetched once, only when approvals or plans can be pending; later reads fetch deltas.
+  // Conversation History and the chat behind it share this controller. Requests come from whichever feed
+  // holds the newest history; a resumed feed republishing an older block cannot displace it.
+  private adoptFeed(snapshot: ConversationSnapshot, source: object) {
+    const from = snapshot.contiguousFrom;
+    const events = from === undefined ? snapshot.events : snapshot.events.filter((event) => event.sequence >= from);
+    const last = snapshot.events.at(-1)?.sequence;
+    if (last === undefined || (this.feed && this.feed.source !== source && last < this.feed.last)) return;
+    this.feed = { source, events, last };
+  }
+  // A just-fetched latest page joins the feed's history only where the two meet, so a request is never
+  // judged across history that neither holds.
+  private window(page: EventsPage) {
+    const feed = this.feed?.events ?? [];
+    const first = page.events[0]?.sequence;
+    const last = page.events.at(-1)?.sequence;
+    const connected =
+      !page.hasMore ||
+      (first !== undefined &&
+        last !== undefined &&
+        feed.length > 0 &&
+        first <= feed[feed.length - 1].sequence + 1 &&
+        feed[0].sequence <= last + 1);
+    return { connected, events: connected ? mergeEvents(feed, page.events, this.sessionId) : page.events };
+  }
+  // The latest page is read for its question snapshot and to re-check a request; history comes from the feed.
   private async snapshot() {
     await this.verifyConnection();
-    const [session, metadata, tail] = await Promise.all([
+    const [session, metadata, page] = await Promise.all([
       this.client.session(this.connection.token, this.sessionId),
       this.client.me(this.connection.token),
       this.client.events(this.connection.token, this.sessionId),
     ]);
-    let watermark = this.watermark;
-    let events = tail.events;
-    if (watermark !== undefined || needsHistory(session, metadata) || this.historyRequested) {
-      this.historyRequested = true;
-      const history = await this.client.events(this.connection.token, this.sessionId, { cursor: watermark ?? 0 });
-      watermark = history.events.reduce((max, event) => Math.max(max, event.id ?? 0), watermark ?? 0);
-      events = mergeEvents(history.events, tail.events, this.sessionId);
-    }
-    return { session, metadata, events, questions: tail.questions, watermark };
+    return { session, metadata, page };
   }
   private adopt(
     fresh: Awaited<ReturnType<InteractionController["snapshot"]>>,
@@ -190,15 +184,18 @@ export class InteractionController {
     questionChanges = this.questionChanges,
   ) {
     this.metadata = fresh.metadata;
-    this.events = mergeEvents(fresh.events, this.events, this.sessionId);
-    if (fresh.watermark !== undefined) this.watermark = Math.max(fresh.watermark, this.watermark ?? 0);
     if (sessionChanges === this.sessionChanges) this.session = fresh.session;
-    if (fresh.questions)
+    if (fresh.page.questions)
       this.questions =
-        questionChanges === this.questionChanges ? fresh.questions : newerQuestions(this.questions, fresh.questions);
+        questionChanges === this.questionChanges
+          ? fresh.page.questions
+          : newerQuestions(this.questions, fresh.page.questions);
     this.derive();
   }
   async refresh() {
+    await this.load();
+  }
+  private async load() {
     const generation = ++this.generation;
     const sessionChanges = this.sessionChanges;
     const questionChanges = this.questionChanges;
@@ -223,6 +220,7 @@ export class InteractionController {
         drafts: { ...(stored ?? legacy), ...this.state.drafts },
       });
       await this.prune();
+      return fresh;
     } catch (error) {
       if (this.active && generation === this.generation)
         this.publish({
@@ -231,20 +229,20 @@ export class InteractionController {
           loadError: message(error, "Could not refresh requests."),
         });
     }
-    if (this.historyFollowUp && this.watermark === undefined && this.active && generation === this.generation) {
-      this.historyFollowUp = false;
-      await this.refresh();
-    }
   }
-  // Only an authoritative refresh may prune; filtered visibility must never discard a live request's draft.
+  // Only an authoritative refresh may prune. Loaded history may not reach an approval or plan that is still
+  // pending, so their drafts are kept for as long as the session could still ask for them.
   private async prune() {
-    if (!this.session || !this.questions) return;
-    const history = this.watermark !== undefined;
-    if (!history && needsHistory(this.session, this.metadata)) return;
-    const open = openInteractionKeys(history ? this.events : [], this.questions);
+    const session = this.session;
+    if (!session || !this.questions) return;
+    const open = openInteractionKeys(this.feed?.events ?? [], this.questions);
     const prefix = `${this.sessionId}:`;
+    const kept = (interaction: string) =>
+      open.has(interaction) ||
+      (interaction.startsWith("approval:") && isLive(session)) ||
+      (interaction.startsWith("plan:") && plansDecisions(session, this.metadata));
     const keep = (key: string, pending?: PendingOperation) =>
-      !key.startsWith(prefix) || open.has(key.slice(prefix.length, key.lastIndexOf(":"))) || pending?.draftKey === key;
+      !key.startsWith(prefix) || kept(key.slice(prefix.length, key.lastIndexOf(":"))) || pending?.draftKey === key;
     const drafts = Object.fromEntries(
       Object.entries(this.state.drafts).filter(([key]) => keep(key, this.state.pending)),
     );
@@ -278,7 +276,7 @@ export class InteractionController {
         this.questionChanges++;
         this.sessionChanges++;
         this.adopt(fresh);
-        const current = this.interactions().find((item) => item.key === captured.key);
+        const current = this.interactions(this.window(fresh.page).events).find((item) => item.key === captured.key);
         if (!current) throw new Error("This request was resolved or replaced.");
         if (current.signature !== captured.signature)
           throw new Error("This request changed. Review its current version.");
@@ -352,15 +350,25 @@ export class InteractionController {
     return settled;
   }
   async checkOutcome(): Promise<Outcome | undefined> {
-    await this.refresh();
+    const fresh = await this.load();
     const pending = this.state.pending;
-    if (this.state.error || pending?.kind !== "interaction") return;
-    const outcome: Outcome =
-      pending.sessionId !== this.sessionId
-        ? "elsewhere"
-        : this.state.interactions.some((item) => item.key === pending.interactionKey)
-          ? "pending"
-          : "resolved";
+    if (!fresh || this.state.error || pending?.kind !== "interaction") return;
+    const window = this.window(fresh.page);
+    const found = this.interactions(window.events).some((item) => item.key === pending.interactionKey);
+    // Questions come from Waypoint's own snapshot, which is complete whatever history is loaded.
+    if (
+      pending.sessionId === this.sessionId &&
+      !found &&
+      !window.connected &&
+      !pending.interactionKey?.startsWith("question:")
+    ) {
+      this.publish({
+        outcome: undefined,
+        notice: "Couldn't confirm from the loaded history. Reload Conversation or open it in Waypoint.",
+      });
+      return;
+    }
+    const outcome: Outcome = pending.sessionId !== this.sessionId ? "elsewhere" : found ? "pending" : "resolved";
     this.publish({
       outcome,
       notice:

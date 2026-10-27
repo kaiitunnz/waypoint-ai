@@ -236,7 +236,7 @@ test("does not forward bearer credentials through an actual HTTP redirect", asyn
   }
 });
 
-test("session HTTP endpoints preserve encoded identity and raw event cursor semantics", async () => {
+test("session HTTP endpoints preserve encoded identity and page event history", async () => {
   const { sessionWire, eventWire } = await import("./fixtures/conversation");
   const requests: string[] = [];
   const client = new WaypointClient("https://example.com/proxy", async (url) => {
@@ -250,10 +250,10 @@ test("session HTTP endpoints preserve encoded identity and raw event cursor sema
   assert.equal((await client.sessions("fixture-token"))[0].id, "a/b");
   assert.equal((await client.session("fixture-token", "a/b")).id, "a/b");
   await client.events("fixture-token", "a/b", { before: 9 });
-  await client.events("fixture-token", "a/b", { cursor: 109 });
+  await client.events("fixture-token", "a/b");
   assert.ok(requests[1].endsWith("/api/sessions/a%2Fb"));
   assert.ok(requests[2].endsWith("/events?before_sequence=9"));
-  assert.ok(requests[3].endsWith("?cursor=109"));
+  assert.ok(requests[3].endsWith("/api/sessions/a%2Fb/events"));
   await assert.rejects(
     new WaypointClient("http://localhost", async () => respond({}, 404)).session("token", "missing"),
     (error: unknown) => error instanceof ApiError && error.kind === "not-found",

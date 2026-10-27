@@ -20,6 +20,8 @@ export interface FeedConnection extends Connection {
 type Options = { factory?: SocketFactory; scheduler?: Scheduler; watch?: Scheduler };
 // Waypoint announces a deletion only on the session list, so an open conversation checks that it still exists.
 export const presenceIntervalMs = 20000;
+// How many earlier pages a resumed conversation reads to reconnect to the history it already holds.
+export const bridgePages = 5;
 const safeError = (error: unknown) =>
   error instanceof ApiError
     ? error
@@ -158,7 +160,16 @@ export interface ConversationSnapshot {
   hasMore: boolean;
   stream: StreamStatus;
   error?: ApiError;
+  // The first event of the latest activity after a gap too large to fill on resume. Only Reload clears it.
+  horizon?: number;
+  // Requests are found from this event on; earlier history may be missing events.
+  contiguousFrom?: number;
 }
+
+const highest = (...values: (number | undefined)[]) => {
+  const defined = values.filter((value): value is number => value !== undefined);
+  return defined.length ? Math.max(...defined) : undefined;
+};
 
 export class ConversationFeed extends Observable<ConversationSnapshot> {
   private socket: LiveSocket;
@@ -167,7 +178,9 @@ export class ConversationFeed extends Observable<ConversationSnapshot> {
   private epoch = 0;
   private sessionRevision = 0;
   private questionEpoch = -1;
-  private checkpoint?: number;
+  // After a failed resume: the last event held before the oldest unfilled hole, and the first one past the newest.
+  private anchor?: number;
+  private boundary?: number;
   private hydrating = false;
   private buffer: SessionEvent[] = [];
   private controller?: AbortController;
@@ -264,6 +277,16 @@ export class ConversationFeed extends Observable<ConversationSnapshot> {
     this.hydrating = true;
     this.socket.retry();
   }
+  // Starts again from the latest page, dropping loaded history and any gap left by a long absence.
+  reload() {
+    if (!this.active) return;
+    this.anchor = undefined;
+    this.boundary = undefined;
+    this.hydrated = false;
+    this.hydrating = true;
+    this.publish({ events: [], hasMore: false, horizon: undefined, contiguousFrom: undefined });
+    void this.hydrate();
+  }
   private receive(message: Envelope, initial: boolean) {
     if (message.type === "session_state") {
       const session = parseSession(message.payload.session);
@@ -298,29 +321,20 @@ export class ConversationFeed extends Observable<ConversationSnapshot> {
     const generation = ++this.generation;
     const revision = this.sessionRevision;
     const oldSequence = this.state.events.at(-1)?.sequence;
-    const cursor = this.checkpoint;
+    const target = this.anchor ?? oldSequence;
     this.publish({ loading: true, loadingOlder: false });
     const current = () => this.active && !controller.signal.aborted && generation === this.generation;
     try {
       const [session, page] = await Promise.all([
         this.client.session(this.connection.token, this.sessionId, controller.signal),
-        this.client.events(
-          this.connection.token,
-          this.sessionId,
-          cursor !== undefined ? { cursor } : {},
-          controller.signal,
-        ),
+        this.client.events(this.connection.token, this.sessionId, {}, controller.signal),
       ]);
       if (!current()) return;
       const fetched = [...page.events];
       let bridge = page;
-      while (
-        cursor === undefined &&
-        oldSequence !== undefined &&
-        bridge.hasMore &&
-        bridge.events.length &&
-        bridge.events[0].sequence > oldSequence
-      ) {
+      const short = () =>
+        target !== undefined && bridge.hasMore && bridge.events.length > 0 && bridge.events[0].sequence > target;
+      for (let pages = 0; short() && pages < bridgePages; pages++) {
         const before = bridge.events[0].sequence;
         bridge = await this.client.events(this.connection.token, this.sessionId, { before }, controller.signal);
         if (!current()) return;
@@ -328,13 +342,16 @@ export class ConversationFeed extends Observable<ConversationSnapshot> {
           throw new Error("History cursor did not advance");
         fetched.push(...bridge.events);
       }
-      if (!current()) return;
-      const ids = fetched.flatMap((event) => (event.id !== undefined ? [event.id] : []));
-      if (ids.length) this.checkpoint = ids.reduce((max, id) => Math.max(max, id), this.checkpoint ?? 0);
+      // A gap left after the bridge is shown as one rather than filled event by event.
+      const horizon = short() ? highest(this.state.horizon, bridge.events[0].sequence) : this.state.horizon;
+      this.anchor = undefined;
+      this.boundary = undefined;
       this.publish({
         events: mergeEvents(this.state.events, [...fetched, ...this.buffer], this.sessionId),
         ...(revision === this.sessionRevision ? { session } : {}),
         hasMore: !this.hydrated || oldSequence === undefined ? bridge.hasMore : this.state.hasMore,
+        horizon,
+        contiguousFrom: horizon,
         loading: false,
         error: undefined,
       });
@@ -347,8 +364,14 @@ export class ConversationFeed extends Observable<ConversationSnapshot> {
       if (!current()) return;
       const failure = safeError(error);
       if (failure.kind === "expired-token" || failure.kind === "not-found") this.socket.stop();
+      // Live events kept from here on follow a hole; the next resume bridges back to where it opened.
+      if (oldSequence !== undefined) {
+        this.anchor ??= oldSequence;
+        this.boundary = highest(this.boundary, oldSequence + 1);
+      }
       this.publish({
         events: mergeEvents(this.state.events, this.buffer, this.sessionId),
+        contiguousFrom: highest(this.boundary, this.state.horizon),
         loading: false,
         error: failure,
       });

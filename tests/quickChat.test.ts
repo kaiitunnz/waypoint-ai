@@ -36,6 +36,8 @@ async function fixture() {
   let storageReads = 0;
   let sessionReads = 0;
   const eventQueries: string[] = [];
+  // Recorded history per session, served newest first in pages of three like Waypoint's paged reads.
+  const history = new Map<string, ReturnType<typeof eventWire>[]>();
   const store = new QuickChatStore(
     {
       keys: async () => [...values.keys()],
@@ -80,10 +82,14 @@ async function fixture() {
     const session = sessions.find((item) => item.id === id);
     if (!session) return respond({}, 404);
     if (path.endsWith("/events")) {
+      const query = new URL(String(url)).searchParams;
       eventQueries.push(new URL(String(url)).search);
+      const own = history.get(id) ?? [];
+      const before = query.get("before_sequence");
+      const older = before === null ? own : own.filter((event) => event.sequence < Number(before));
       return respond({
-        events: [],
-        has_more: false,
+        events: older.slice(-3),
+        has_more: older.length > 3,
         pending_questions: { questions: [], as_of_sequence: 0, revision: 0 },
       });
     }
@@ -133,6 +139,7 @@ async function fixture() {
       readGate = value;
     },
     eventQueries,
+    history,
     sessionReads: () => sessionReads,
     setSessionGate: (value: Promise<void>) => {
       sessionGate = value;
@@ -369,6 +376,86 @@ test("uncertain input never retries on reopen; explicit outcome-aware retry is s
     assert.equal(reopened.getSnapshot().pending, undefined);
     await reopened.send();
     assert.equal(f.requests.filter((request) => request.path.endsWith("/input")).length, 2);
+  } finally {
+    await f.close();
+  }
+});
+
+test("checking an unconfirmed message pages back only to the history before it was sent", async () => {
+  const f = await fixture();
+  try {
+    const c = f.controller();
+    await c.start();
+    c.changeDraft("Seed");
+    await c.send();
+    const say = (sequence: number, kind = "agent_output", text = ".") =>
+      eventWire(sequence, kind, text, "", "created-1");
+    const outputs = (from: number, count: number) => Array.from({ length: count }, (_, index) => say(from + index));
+    const recorded = [say(1, "user_input", "Do once"), say(2)];
+    f.history.set("created-1", recorded);
+    f.setUncertainInput(true);
+    c.changeDraft("Do once");
+    await c.send();
+    f.setUncertainInput(false);
+    assert.equal((await f.store.load(connection.id)).pending?.baseline, 102);
+
+    recorded.push(...outputs(3, 10));
+    f.eventQueries.length = 0;
+    await c.reconcile();
+    assert.match(c.getSnapshot().notice!, /No matching input/, "the same message sent earlier does not count");
+    assert.deepEqual(f.eventQueries, ["", "?before_sequence=10", "?before_sequence=7", "?before_sequence=4"]);
+
+    recorded.push(say(13, "user_input", "Do once"), ...outputs(14, 10));
+    await c.reconcile();
+    assert.match(c.getSnapshot().notice!, /recorded matching input/);
+
+    recorded.push(...outputs(24, 70));
+    f.eventQueries.length = 0;
+    await c.reconcile();
+    assert.match(c.getSnapshot().notice!, /No matching input/);
+    assert.equal(f.eventQueries.length, 20, "a long history is read only so far back");
+  } finally {
+    await f.close();
+  }
+});
+
+test("an unconfirmed reattach or interrupt is checked without reading history", async () => {
+  for (const kind of ["reattach", "interrupt"] as const) {
+    const f = await fixture();
+    try {
+      const c = f.controller();
+      await c.start();
+      c.changeDraft("Seed");
+      await c.send();
+      await f.store.transaction(connection.id, async (state, persist) => {
+        state.pending = { kind, operationId: "op", sessionId: "created-1", text: "", draftKey: "quick", startedAt: 1 };
+        await persist();
+      });
+      f.eventQueries.length = 0;
+      await c.reconcile();
+      assert.match(c.getSnapshot().notice!, new RegExp(`The ${kind} outcome is not confirmed`));
+      assert.deepEqual(f.eventQueries, [], kind);
+    } finally {
+      await f.close();
+    }
+  }
+});
+
+test("an expired timed conversation is kept while the latest page shows a pending approval", async () => {
+  const f = await fixture();
+  try {
+    const c = f.controller();
+    await c.start();
+    c.changeDraft("Seed");
+    await c.send();
+    c.stop();
+    f.sessions[0].status = "waiting_input";
+    f.history.set("created-1", [eventWire(1, "approval_request", "Run tests", "", "created-1")]);
+    f.advance(30 * 60000);
+    const next = f.controller();
+    await next.start();
+    assert.equal(next.getSnapshot().session?.id, "created-1");
+    assert.ok(f.eventQueries.every((query) => !query.includes("cursor")));
   } finally {
     await f.close();
   }

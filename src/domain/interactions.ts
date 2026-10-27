@@ -234,20 +234,18 @@ function approval(event: SessionEvent, session: Session, metadata: ServerMetadat
   });
 }
 
-// Approvals and plans need the full history; without it only question snapshots are authoritative.
+// As in Waypoint's web app, approvals and plans are found in the history that has been loaded.
 export function sessionInteractions(
   session: Session,
   metadata: ServerMetadata,
   events: SessionEvent[],
   pending?: PendingQuestions,
-  history = true,
 ): Interaction[] {
   const structured = isStructured(session, metadata);
   // Requests outlive their process in history; a stopped session has no live request to answer.
-  const approvals = history && isLive(session) ? pendingApprovals(events) : [];
+  const approvals = isLive(session) ? pendingApprovals(events) : [];
   const result = approvals.map((event) => approval(event, session, metadata, structured));
-  const plan =
-    history && !approvals.length && structured && plansDecisions(session, metadata) ? latestPlan(events) : undefined;
+  const plan = !approvals.length && structured && plansDecisions(session, metadata) ? latestPlan(events) : undefined;
   if (plan?.text.trim()) {
     const decisions = plan.decisions.length ? plan.decisions.filter((entry) => planDecisions.includes(entry)) : [];
     result.push(

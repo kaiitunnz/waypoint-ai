@@ -7,7 +7,7 @@ import { transcript } from "../domain/transcript";
 import { isStructured } from "../domain/sessions";
 import { useConversationFeed } from "../hooks/useSessionFeeds";
 import { ConversationFeed, FeedConnection } from "../hooks/sessionFeeds";
-import { markdownText, sessionSummary } from "../components/SessionPresentation";
+import { gapNotice, markdownText, sessionSummary } from "../components/SessionPresentation";
 import { useSessionInteractions } from "../hooks/useSessionInteractions";
 import {
   InteractionSection,
@@ -160,6 +160,7 @@ export function ChatConversation({
   const interactions = interactionState.interactions;
   const unconfirmed = unconfirmedFor(interactionState, sessionId);
   const attention = [
+    ...(state.horizon !== undefined ? [`- **Earlier activity missing.** ${gapNotice}`] : []),
     ...(interactionState.loadError
       ? [`- **Requests unavailable.** ${markdownText(interactionState.loadError)} Refresh to retry.`]
       : []),
@@ -299,6 +300,14 @@ export function ChatConversation({
           shortcut={Keyboard.Shortcut.Common.Refresh}
           onAction={() => {
             feed.retry();
+            void interactionController.refresh();
+          }}
+        />
+        <Action
+          title="Reload Conversation"
+          icon={Icon.RotateClockwise}
+          onAction={() => {
+            feed.reload();
             void interactionController.refresh();
           }}
         />
