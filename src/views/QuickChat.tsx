@@ -15,8 +15,10 @@ import { useConnections } from "../hooks/useConnections";
 import { useQuickChat } from "../hooks/useQuickChat";
 import { FeedConnection } from "../hooks/sessionFeeds";
 import { connectionStore } from "../storage/raycast";
+import { localWorkspace } from "../storage/workspace";
 import { canReattach, launchContext, resumeFor } from "../domain/quickChat";
 import { sessionUrl } from "../domain/sessions";
+import { terminateMessage } from "../domain/sessionActions";
 import { ChatConversation } from "./ChatConversation";
 import { QuickChatController } from "../hooks/quickChatController";
 import { QuickChatDefaults } from "./QuickChatDefaults";
@@ -123,6 +125,10 @@ function QuickChatView({
 }) {
   const { state, controller } = useQuickChat(connection, forceNew, resume);
   const metadata = state.metadata;
+  const context =
+    metadata && state.defaults
+      ? launchContext(state.defaults, metadata, localWorkspace(connection.apiUrl)?.dir)
+      : undefined;
   const actions = ({ setActive, browser }: { setActive: (value: boolean) => void; browser: boolean }) => (
     <QuickChatActions
       controller={controller}
@@ -144,8 +150,8 @@ function QuickChatView({
         sessionId={state.session?.id}
         metadata={metadata}
         emptyMarkdown={
-          state.defaults
-            ? `## New conversation\n\n**${launchContext(state.defaults, metadata).agent?.label ?? "Waypoint"}** · ${launchContext(state.defaults, metadata).target?.name ?? "Local server"}\n\n${launchContext(state.defaults, metadata).cwd}`
+          context
+            ? `## New conversation\n\n**${context.agent?.label ?? "Waypoint"}** · ${context.target?.name ?? "Local server"}\n\n${context.cwd}`
             : ""
         }
         refreshConnections={refreshConnections}
@@ -173,7 +179,6 @@ function QuickChatView({
         }}
       />
     );
-  const context = metadata && state.defaults ? launchContext(state.defaults, metadata) : undefined;
   return (
     <List
       navigationTitle={`${forceNew ? "New Chat" : "Quick Chat"} · ${connection.name}`}
@@ -398,6 +403,38 @@ function QuickChatActions({
             onAction={() => controller.action("reattach")}
           />
         )}
+      {state.session && state.session.status !== "exited" && !state.busy && !state.pending && (
+        <Action
+          title="Terminate Session"
+          icon={Icon.XMarkCircle}
+          style={Action.Style.Destructive}
+          onAction={async () => {
+            if (
+              !(await confirmAlert({
+                title: "Terminate this session?",
+                message: `${terminateMessage} Quick Chat starts a new conversation on your next send.`,
+                primaryAction: { title: "Terminate", style: Alert.ActionStyle.Destructive },
+              }))
+            )
+              return;
+            const toast = await showToast({ style: Toast.Style.Animated, title: "Terminating session…" });
+            const result = await controller.terminate();
+            if (!result) return toast.hide();
+            Object.assign(
+              toast,
+              !result.ended
+                ? { style: Toast.Style.Failure, title: "Couldn't terminate session", message: result.message }
+                : result.message
+                  ? { style: Toast.Style.Failure, title: "Quick Chat moved to a new chat", message: result.message }
+                  : {
+                      style: Toast.Style.Success,
+                      title: "Session terminated",
+                      message: "A new conversation starts on your next send; your draft is kept.",
+                    },
+            );
+          }}
+        />
+      )}
       <Action.Push
         title="Sign in Again"
         icon={Icon.Lock}

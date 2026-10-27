@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import { ComposeParts } from "../domain/compose";
 import { InteractionAction, InteractionDraft, interactionActions } from "../domain/interactions";
 import { AttemptLaunch, ChatDefaults, initialDefaults } from "../domain/quickChat";
-import { isRecord } from "../domain/connections";
-import { StorageAdapter } from "./connections";
+import { decodeState, isRecord } from "../domain/connections";
+import { KeyedStorage, connectionsKey } from "./connections";
 import { DraftStore } from "./drafts";
 
 export interface PendingOperation {
@@ -146,7 +146,8 @@ export function decodeQuickChat(raw?: string): QuickChatState {
       (!isRecord(data.pending.launch) ||
         !isText(data.pending.launch.backend) ||
         !isText(data.pending.launch.target) ||
-        !isText(data.pending.launch.cwd))
+        !isText(data.pending.launch.cwd) ||
+        (data.pending.launch.title !== undefined && !isText(data.pending.launch.title)))
     )
       throw new Error();
     if (
@@ -182,10 +183,15 @@ export function lastActivity(state: QuickChatState, sessionId: string): number |
   const sent = state.sentAt[sessionId];
   return sent === undefined ? chosen : chosen === undefined ? sent : Math.max(sent, chosen);
 }
+function serverOf(key: string): string | undefined {
+  if (key.startsWith("waypoint.quick-chat.")) return key.slice("waypoint.quick-chat.".length);
+  if (key.startsWith("waypoint.draft.")) return key.slice("waypoint.draft.".length).split(".")[0];
+  return undefined;
+}
 export class QuickChatStore {
   readonly drafts: DraftStore;
   constructor(
-    private readonly storage: StorageAdapter,
+    private readonly storage: KeyedStorage,
     private readonly mutex: Mutex,
   ) {
     this.drafts = new DraftStore(storage);
@@ -215,6 +221,24 @@ export class QuickChatStore {
       await persist();
       return state;
     });
+  }
+  // Removes Quick Chat state and drafts of servers that are no longer saved. It doesn't decode the state, so
+  // damaged data is removed too, and it takes each server's lock so no transaction writes it back meanwhile.
+  // Nothing is removed unless the saved servers can be read, since a missing list would match every server.
+  async sweep() {
+    const owners = new Set((await this.storage.keys()).map(serverOf).filter((id): id is string => !!id));
+    for (const id of owners) {
+      if (!(await this.removed(id))) continue;
+      await this.drafts.forget(`waypoint.draft.${id}.`);
+      await this.mutex.run(id, async () => {
+        if (!(await this.removed(id))) return;
+        for (const key of await this.storage.keys()) if (serverOf(key) === id) await this.storage.removeItem(key);
+      });
+    }
+  }
+  private async removed(id: string) {
+    const raw = await this.storage.getItem(connectionsKey);
+    return raw !== undefined && !decodeState(raw).connections.some((connection) => connection.id === id);
   }
   defaults(id: string, defaults: ChatDefaults) {
     return this.transaction(id, async (state, persist) => {

@@ -28,7 +28,7 @@ Select a row to inspect a server. **Use Server** changes the active connection; 
 
 Use Actions to edit, retry, sign in again, remove a connection, or open its configured frontend. Common shortcuts include Add, Edit, Refresh, and Remove. Sign in uses ⇧⌘L; Make Default uses ⇧⌘D.
 
-Reauthentication preserves the connection's identity and setup. Changing its API URL creates a fresh identity and requires sign-in, including when returning to a previously used URL. Removing a connection clears its saved credentials and leaves sessions running on Waypoint.
+Reauthentication preserves the connection's identity and setup. Changing its API URL creates a fresh identity and requires sign-in, including when returning to a previously used URL. Removing a connection clears its saved credentials and its Quick Chat defaults, destination, and drafts; sessions keep running on Waypoint.
 
 Bearer tokens are kept in [Raycast's encrypted local storage](https://developers.raycast.com/api-reference/storage). Passwords are used only during sign-in. Connection failures preserve the saved configuration; use Retry Connection or Sign in Again to recover. Unknown or damaged saved-data formats are reported without overwriting the original data.
 
@@ -94,6 +94,12 @@ Type in the top message field and press Enter to send. Follow-ups continue the s
 
 Quick Chat continues its own conversation for each saved server. The default timeout is 30 minutes after the last successful user send, or after you chose the session with **Use for Quick Chat**, whichever is later. Running work and unresolved approvals, questions, or plans keep their conversation. **Quick Chat Defaults** offers Always Continue, Always New, and a configurable timeout. **New Chat** and **Start New Chat** prepare a fresh conversation; creation happens on first send, and existing sessions keep running. With Always New, **Open in Quick Chat** in Search Sessions returns to the chosen session.
 
+Each new session is titled with the time it was created, such as `Quick Chat 2026-10-27 14:05`, in this Mac's local time.
+
+When the server runs on this Mac and no working directory is set, sessions on the Local target start in `~/.waypoint-ai/workspace`. Raycast creates the folder on first use with an `AGENTS.md` describing it as a scratch workspace and a `CLAUDE.md` that imports it; edits to either file are kept. Other servers and SSH targets use the target's or server's default directory.
+
+**Terminate Session** ends the current session after confirmation and moves Quick Chat to a new conversation, keeping the draft. The terminated session stays in Search Sessions, where **Reattach Session** or **Use for Quick Chat** brings it back.
+
 Defaults apply to new conversations. Choose the server preset, execution target, working directory, agent, model, and effort. Advanced settings expose supported transport, account profile, permissions, arguments, and configuration overrides. Inherited settings and private preset values are resolved by Waypoint. Each saved server keeps its own defaults and draft.
 
 Drafts survive closing the command. Reopening catches up with Waypoint without resending. Rejected sends keep the draft and an already-created session. **Interrupt Session** is explicit; exited sessions reattach before sending when their transport supports it.
@@ -147,7 +153,7 @@ On a remote execution target, Raycast sends only the attachments Waypoint can de
 - Waypoint has no idempotency key for creating sessions or sending messages. When an operation's outcome is unconfirmed, Raycast keeps a checkpoint for that server and resends nothing until you check the outcome or explicitly allow another attempt. The checkpoint coordinates the extension's commands on this computer, not other devices.
 - When a new session fails to start on its execution target, for example because its working directory doesn't exist there, Waypoint leaves a failed **Quick Chat** session without the tags Raycast uses to find its own sessions. **Check Previous Outcome** recognizes it when the server's clock is within five minutes of this Mac's; otherwise, abandon the attempt. Delete the failed session from Search Sessions afterwards.
 - Pressing Escape in Quick Chat clears the message field, as in any Raycast search bar. Use **Compose Message** for drafts you want to keep while navigating.
-- Removing a server connection deletes its credentials. Its Quick Chat drafts stay in Raycast's local storage.
+- A server reached through a local port, such as an SSH tunnel or a container, counts as running on this Mac but can't see `~/.waypoint-ai/workspace`. Quick Chat then asks for a working directory; set one in **Quick Chat Defaults**.
 
 ## Development
 

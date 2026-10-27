@@ -34,6 +34,8 @@ import {
 } from "../domain/compose";
 import { draftKeys } from "../storage/drafts";
 import { PendingOperation, QuickChatState, QuickChatStore, lastActivity, setPointer } from "../storage/quickChat";
+import { Workspace } from "../storage/workspace";
+import { ManageOutcome, SessionManager } from "./sessionManager";
 import { FeedConnection } from "./sessionFeeds";
 
 export interface QuickChatSnapshot {
@@ -71,6 +73,16 @@ async function fileStats(file: StagedFile): Promise<FileStats> {
   if (problem) throw new Error(`${file.name}: ${problem}`);
   return { size: stats!.size, modifiedMs: stats!.mtimeMs };
 }
+// `ended` means Quick Chat no longer continues the session; `message` explains a failure or an unconfirmed result.
+export interface TerminateResult {
+  ended: boolean;
+  message?: string;
+}
+interface Released {
+  pointer?: boolean;
+  chosen?: number;
+  bindings: Record<string, string | undefined>;
+}
 export class QuickChatController {
   private state: QuickChatSnapshot = {
     loading: true,
@@ -94,6 +106,7 @@ export class QuickChatController {
   private deadPointer?: string;
   private readonly forceNew: boolean;
   private readonly resume: boolean;
+  private readonly workspace?: Workspace;
   private draftLoaded = false;
   private queue: Promise<unknown> = Promise.resolve();
   private readonly draftKey: string;
@@ -104,12 +117,13 @@ export class QuickChatController {
     private readonly store: QuickChatStore,
     private readonly verifyConnection: () => Promise<void>,
     // `resume` opens the saved destination regardless of the reuse mode and timeout.
-    options: { forceNew?: boolean; resume?: boolean } = {},
+    options: { forceNew?: boolean; resume?: boolean; workspace?: Workspace } = {},
     private readonly client = new WaypointClient(connection.apiUrl),
     private readonly now = Date.now,
   ) {
     this.forceNew = options.forceNew ?? false;
     this.resume = !this.forceNew && (options.resume ?? false);
+    this.workspace = options.workspace;
     this.draftKey = this.forceNew ? "new" : "quick";
     this.lineKey = draftKeys.line(connection.id, this.draftKey);
     this.composeKey = draftKeys.compose(connection.id, this.draftKey);
@@ -339,7 +353,13 @@ export class QuickChatController {
         this.checkOwned(session, saved, metadata);
         // Defaults changed since the session was created: the next send starts a session with the new ones.
         const launch = saved.compose?.[this.draftKey]?.launch;
-        if (!launch || launch !== launchFingerprint(createRequest(saved.defaults, metadata, saved.installation, "")))
+        if (
+          !launch ||
+          launch !==
+            launchFingerprint(
+              createRequest(saved.defaults, metadata, saved.installation, "", { workspace: this.workspace?.dir }),
+            )
+        )
           return undefined;
         const page = await this.client.events(this.connection.token, bound, { cursor: 0 });
         return page.events.some((event) => event.kind === "user_input") ? undefined : session;
@@ -597,17 +617,32 @@ export class QuickChatController {
         }
         if (!session) {
           const defaults = this.state.defaults ?? saved.defaults;
-          this.checkPolicy(draft?.files ?? [], launchContext(defaults, metadata).backend, defaults.target || undefined);
+          const workspace = this.workspace?.dir;
+          const context = launchContext(defaults, metadata, workspace);
+          this.checkPolicy(draft?.files ?? [], context.backend, defaults.target || undefined);
           const operationId = randomUUID();
-          const request = createRequest(defaults, metadata, saved.installation, operationId);
-          const context = launchContext(defaults, metadata);
+          const request = createRequest(defaults, metadata, saved.installation, operationId, {
+            workspace,
+            createdAt: new Date(this.now()),
+          });
+          if (workspace && context.cwd === workspace)
+            await this.workspace!.ensure().catch((error: Error) => {
+              throw new Error(
+                `Could not create the Quick Chat workspace at ${workspace}: ${error.message}. Your draft is kept.`,
+              );
+            });
           saved.pending = {
             kind: "create",
             operationId,
             text,
             draftKey: this.draftKey,
             startedAt: this.now(),
-            launch: { backend: context.backend, target: defaults.target, cwd: context.cwd },
+            launch: {
+              backend: context.backend,
+              target: defaults.target,
+              cwd: context.cwd,
+              title: String(request.title),
+            },
           };
           await persist();
           try {
@@ -620,7 +655,9 @@ export class QuickChatController {
             if (error instanceof ApiError && error.detail === "cwd-not-found")
               throw new ApiError(
                 "rejected",
-                `${error.message} Update Quick Chat Defaults.`,
+                workspace && context.cwd === workspace
+                  ? `This server can't see the Quick Chat workspace at ${workspace}. Set a Working Directory in Quick Chat Defaults.`
+                  : `${error.message} Update Quick Chat Defaults.`,
                 error.detail,
                 error.status,
                 error.serverDetail,
@@ -914,6 +951,79 @@ export class QuickChatController {
     } finally {
       this.publish({ busy: false });
     }
+  }
+  // The destination is released before terminating, so a closed window or an unconfirmed result can't leave Quick
+  // Chat continuing the session; only a definite refusal restores it.
+  async terminate(): Promise<TerminateResult | undefined> {
+    const session = this.state.session;
+    const metadata = this.state.metadata;
+    if (this.state.busy || this.state.pending || !session || !metadata) return;
+    const id = session.id;
+    this.publish({ busy: true, error: undefined, notice: undefined });
+    let released: Released | undefined;
+    try {
+      await this.queue;
+      const current = await this.store.transaction(this.connection.id, async (saved, persist) => {
+        if (saved.pending) throw new Error("Check the earlier operation's outcome first.");
+        await this.verifyConnection();
+        // A session deleted elsewhere is released like a terminated one.
+        const current = await this.client.session(this.connection.token, id).catch((error: unknown) => {
+          if (error instanceof ApiError && error.kind === "not-found") return undefined;
+          throw error;
+        });
+        released = { chosen: saved.chosen?.sessionId === id ? saved.chosen.at : undefined, bindings: {} };
+        if (saved.pointer === id) {
+          released.pointer = true;
+          setPointer(saved, undefined);
+        }
+        for (const [key, draft] of Object.entries(saved.compose ?? {}))
+          if (draft.sessionId === id) {
+            released.bindings[key] = draft.launch;
+            draft.sessionId = draft.launch = undefined;
+          }
+        await persist();
+        return current;
+      });
+      const outcome: ManageOutcome = !current
+        ? { kind: "failed", message: "This session is no longer on this server.", gone: true }
+        : current.status === "exited"
+          ? { kind: "done", session: current }
+          : await new SessionManager(this.connection, this.store, this.client, this.now).terminate(id, metadata);
+      if (outcome.kind !== "done") {
+        const after = outcome.kind === "ssh" ? undefined : outcome.session;
+        if (after?.status !== "exited" && !(outcome.kind === "failed" && (outcome.uncertain || outcome.gone))) {
+          await this.restore(id, released!);
+          if (after) this.publish({ session: after });
+          return { ended: false, message: outcome.message };
+        }
+      }
+      this.generation++;
+      this.prepared = true;
+      this.observedPointer = undefined;
+      this.observedDefaults = "manual-new";
+      this.publish({ session: undefined, loading: false, revision: this.state.revision + 1 });
+      // An unconfirmed result or a session that is gone is explained, since it wasn't a confirmed terminate.
+      const unconfirmed = outcome.kind === "failed" && outcome.session?.status !== "exited";
+      return { ended: true, message: unconfirmed ? outcome.message : undefined };
+    } catch (error) {
+      if (released) await this.restore(id, released).catch(() => undefined);
+      const saved = await this.store.read(this.connection.id).catch(() => undefined);
+      this.publish({ pending: saved?.pending });
+      return { ended: false, message: error instanceof Error ? error.message : "Could not terminate the session." };
+    } finally {
+      this.publish({ busy: false });
+    }
+  }
+  private restore(id: string, released: Released) {
+    return this.store.transaction(this.connection.id, async (saved, persist) => {
+      if (saved.pending) return;
+      if (released.pointer && saved.pointer === undefined) setPointer(saved, id, released.chosen);
+      for (const [key, launch] of Object.entries(released.bindings)) {
+        const draft = saved.compose?.[key];
+        if (draft && draft.sessionId === undefined) Object.assign(draft, { sessionId: id, launch });
+      }
+      await persist();
+    });
   }
   async action(action: "interrupt" | "reattach") {
     if (this.state.busy || this.state.pending || !this.state.session || !this.state.metadata) return;

@@ -8,6 +8,7 @@ import { ModelCatalog } from "../api/models";
 import { WaypointClient } from "../api/client";
 import { FeedConnection } from "../hooks/sessionFeeds";
 import { quickChatStore } from "../storage/raycast";
+import { localWorkspace } from "../storage/workspace";
 
 export function QuickChatDefaults({
   connection,
@@ -32,7 +33,8 @@ export function QuickChatDefaults({
   const pending = useRef(false);
   const mounted = useRef(true);
   const { pop } = useNavigation();
-  const context = launchContext(values, metadata);
+  const workspace = localWorkspace(connection.apiUrl)?.dir;
+  const context = launchContext(values, metadata, workspace);
   const profile = values.profile === "__default__" ? "" : values.profile || context.preset?.profile || "";
   const profiles = context.target?.profilesByAgent[context.backend] ?? context.agent?.profiles ?? [];
   const efforts = modelEfforts(models, values.model, context.preset?.model);
@@ -188,8 +190,12 @@ export function QuickChatDefaults({
         title="Working Directory"
         value={values.cwd}
         onChange={(value) => set("cwd", value)}
-        placeholder={context.target?.defaultCwd || metadata.defaultCwd || "Path on the execution target"}
-        info="Leave empty to use the target or server default. This path is on Waypoint's execution target."
+        placeholder={context.cwd || "Path on the execution target"}
+        info={
+          workspace
+            ? "Leave empty to use Quick Chat's workspace on this Mac for Local, or the target's default. This path is on Waypoint's execution target."
+            : "Leave empty to use the target or server default. This path is on Waypoint's execution target."
+        }
       />
       <Form.Dropdown id="agent" title="Agent" value={values.agent} onChange={(value) => reset("agent", value)}>
         <Form.Dropdown.Item value="" title={`Inherit · ${context.backend}`} />

@@ -57,6 +57,8 @@ async function fixture() {
   let readGate: Promise<void> | undefined;
   let reads = 0;
   const storage = {
+    keys: async () => [...values.keys()],
+    removeItem: async (key: string) => void values.delete(key),
     getItem: async (key: string) => {
       reads++;
       await readGate;

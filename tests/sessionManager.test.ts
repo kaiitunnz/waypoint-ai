@@ -28,7 +28,12 @@ async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), "session-manager-tests-"));
   const values = new Map<string, string>();
   const store = new QuickChatStore(
-    { getItem: async (key) => values.get(key), setItem: async (key, value) => void values.set(key, value) },
+    {
+      getItem: async (key) => values.get(key),
+      setItem: async (key, value) => void values.set(key, value),
+      keys: async () => [...values.keys()],
+      removeItem: async (key) => void values.delete(key),
+    },
     new ServerMutex(directory),
   );
   const sessions = new Map<string, Record<string, unknown>>();
@@ -353,7 +358,15 @@ test("a failure before anything is sent says what went wrong locally", async () 
     f.add("s", { status: "exited" });
     const broken = new SessionManager(
       connection,
-      new QuickChatStore({ getItem: async () => "{not json", setItem: async () => undefined }, new ServerMutex(dir)),
+      new QuickChatStore(
+        {
+          getItem: async () => "{not json",
+          setItem: async () => undefined,
+          keys: async () => [],
+          removeItem: async () => undefined,
+        },
+        new ServerMutex(dir),
+      ),
       new WaypointClient(connection.apiUrl, async () => respond({ session: sessionWire("s") })),
     );
     const outcome = await broken.useForQuickChat("s", metadata);

@@ -13,7 +13,9 @@ export type ManageOutcome =
   | { kind: "stale"; session: Session; message: string }
   // A password-auth SSH target must be connected before reattaching.
   | { kind: "ssh"; targetId: string; message: string }
-  | { kind: "failed"; message: string; session?: Session };
+  // `uncertain` means the request was sent but Waypoint's answer didn't say whether it applied; `gone` means
+  // the session no longer exists.
+  | { kind: "failed"; message: string; session?: Session; uncertain?: boolean; gone?: boolean };
 
 export function manageFailure(error: unknown, what: string): string {
   if (error instanceof ApiError) {
@@ -32,6 +34,7 @@ export function manageFailure(error: unknown, what: string): string {
 // Before anything is sent, a failure is local, such as another command holding the server lock, so it says so.
 const localFailure = (error: unknown, what: string) =>
   error instanceof ApiError || !(error instanceof Error) ? manageFailure(error, what) : error.message;
+const isGone = (error: unknown) => error instanceof ApiError && error.kind === "not-found";
 const quickChatOf = (saved: QuickChatState) => ({ pointer: saved.pointer, pending: !!saved.pending });
 // Quick Chat's unconfirmed operation still needs this session to be checked.
 const checkpointFor = (saved: QuickChatState, session: Session) =>
@@ -65,13 +68,14 @@ export class SessionManager {
       if (!sessionActions(session, metadata, await this.quickChat())[action])
         return { kind: "stale", session, message: `This session changed, so it can't ${what} now.` };
     } catch (error) {
-      return { kind: "failed", message: localFailure(error, what) };
+      return { kind: "failed", message: localFailure(error, what), gone: isGone(error) };
     }
     try {
       return { kind: "done", session: await mutate(session) };
     } catch (error) {
       const fresh = await this.client.session(this.connection.token, id).catch(() => undefined);
-      return { kind: "failed", message: manageFailure(error, what), session: fresh };
+      const uncertain = !(error instanceof ApiError) || error.kind === "uncertain";
+      return { kind: "failed", message: manageFailure(error, what), session: fresh, uncertain, gone: isGone(error) };
     }
   }
   rename(id: string, title: string, metadata?: ServerMetadata) {

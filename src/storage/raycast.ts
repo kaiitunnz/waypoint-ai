@@ -14,6 +14,8 @@ export const quickChatStore = new QuickChatStore(
   {
     getItem: (key) => LocalStorage.getItem<string>(key),
     setItem: (key, value) => LocalStorage.setItem(key, value),
+    keys: async () => Object.keys(await LocalStorage.allItems()),
+    removeItem: (key) => LocalStorage.removeItem(key),
   },
   new ServerMutex(join(environment.supportPath, "quick-chat-locks")),
 );

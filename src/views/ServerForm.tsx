@@ -1,7 +1,7 @@
 import { Action, ActionPanel, Form, Icon, Toast, showToast, useNavigation } from "@raycast/api";
 import { useState, useRef, useEffect } from "react";
 import { Connection, normalizeConnection } from "../domain/connections";
-import { connectionStore } from "../storage/raycast";
+import { connectionStore, quickChatStore } from "../storage/raycast";
 import { useServerSignIn } from "../hooks/useServerSignIn";
 import { runWhileActive } from "../hooks/runWhileActive";
 
@@ -34,6 +34,8 @@ export function ServerForm({ connection, onSaved }: { connection?: Connection; o
     const { signal } = lifetime.current;
     try {
       await runWhileActive(signal, () => connectionStore.save(normalized, connection?.id));
+      // A changed API URL makes a new identity; the old one's Quick Chat data goes now or on the next Manage Servers.
+      if (connection) quickChatStore.sweep().catch(() => undefined);
       await runWhileActive(signal, onSaved);
       await runWhileActive(signal, () =>
         showToast({
