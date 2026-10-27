@@ -173,6 +173,14 @@ test("a failed resume counts requests only past the hole until a later resume br
   assert.equal(feed.getSnapshot().contiguousFrom, undefined);
   assert.deepEqual(feed.getSnapshot().gaps, []);
 
+  server.fail = true;
+  await resume(f, feed, [40]);
+  server.fail = false;
+  server.last = 100;
+  await resume(f, feed);
+  assert.deepEqual(feed.getSnapshot().gaps, [26, 77], "a hole the bridge doesn't reach is marked with the gap past it");
+  assert.equal(feed.getSnapshot().contiguousFrom, 77);
+
   const empty = pagedServer(4, 10);
   empty.server.fail = true;
   const fresh = new ConversationFeed(connection, "demo", empty.client, f);

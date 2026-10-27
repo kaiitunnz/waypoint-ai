@@ -178,9 +178,8 @@ export class ConversationFeed extends Observable<ConversationSnapshot> {
   private epoch = 0;
   private sessionRevision = 0;
   private questionEpoch = -1;
-  // After a failed resume: the last event held before the oldest unfilled hole, and the first one past the newest.
-  private anchor?: number;
-  private boundary?: number;
+  // Where each hole left by a failed resume begins, oldest first; the next resume bridges back to the first.
+  private holes: number[] = [];
   private hydrating = false;
   private buffer: SessionEvent[] = [];
   private controller?: AbortController;
@@ -280,8 +279,7 @@ export class ConversationFeed extends Observable<ConversationSnapshot> {
   // Starts again from the latest page, dropping loaded history and any gap left by a long absence.
   reload() {
     if (!this.active) return;
-    this.anchor = undefined;
-    this.boundary = undefined;
+    this.holes = [];
     this.hydrated = false;
     this.hydrating = true;
     this.publish({ events: [], hasMore: false, gaps: [], contiguousFrom: undefined });
@@ -321,7 +319,7 @@ export class ConversationFeed extends Observable<ConversationSnapshot> {
     const generation = ++this.generation;
     const revision = this.sessionRevision;
     const oldSequence = this.state.events.at(-1)?.sequence;
-    const target = this.anchor ?? oldSequence;
+    const target = this.holes.length ? this.holes[0] - 1 : oldSequence;
     this.publish({ loading: true, loadingOlder: false });
     const current = () => this.active && !controller.signal.aborted && generation === this.generation;
     try {
@@ -343,10 +341,13 @@ export class ConversationFeed extends Observable<ConversationSnapshot> {
           throw new Error("History cursor did not advance");
         fetched.push(...bridge.events);
       }
-      // A gap left after the bridge is shown as one rather than filled event by event.
-      const gaps = short() ? [...this.state.gaps, bridge.events[0].sequence] : this.state.gaps;
-      this.anchor = undefined;
-      this.boundary = undefined;
+      // A gap left after the bridge is shown as one rather than filled event by event, along with the
+      // holes below it that the bridge didn't reach.
+      const start = bridge.events[0]?.sequence;
+      const gaps = short()
+        ? [...this.state.gaps, ...this.holes.filter((hole) => hole < start), start]
+        : this.state.gaps;
+      this.holes = [];
       this.publish({
         events: mergeEvents(this.state.events, [...fetched, ...this.buffer], this.sessionId),
         ...(revision === this.sessionRevision ? { session } : {}),
@@ -365,14 +366,11 @@ export class ConversationFeed extends Observable<ConversationSnapshot> {
       if (!current()) return;
       const failure = safeError(error);
       if (failure.kind === "expired-token" || failure.kind === "not-found") this.socket.stop();
-      // Live events kept from here on follow a hole; the next resume bridges back to where it opened.
-      if (oldSequence !== undefined) {
-        this.anchor ??= oldSequence;
-        this.boundary = highest(this.boundary, oldSequence + 1);
-      }
+      // Live events kept from here on follow a hole.
+      if (oldSequence !== undefined && this.holes.at(-1) !== oldSequence + 1) this.holes.push(oldSequence + 1);
       this.publish({
         events: mergeEvents(this.state.events, this.buffer, this.sessionId),
-        contiguousFrom: highest(this.boundary, this.state.gaps.at(-1)),
+        contiguousFrom: highest(this.holes.at(-1), this.state.gaps.at(-1)),
         loading: false,
         error: failure,
       });
