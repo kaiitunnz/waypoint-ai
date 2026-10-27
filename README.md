@@ -42,7 +42,9 @@ Open structured sessions in the native conversation reader. Terminal and unknown
 
 The conversation displays loaded user and assistant turns together in chronological order, with formatted responses at full width. Show Latest Response focuses the newest turn when needed. Copy Latest Response copies the current answer. Conversation Details shows server-reported context and token usage.
 
-**Conversation History** opens the detailed event inspector with paired tool activity, filtering, older history, and follow-latest controls.
+Consecutive tool calls collapse into one line where they happened, such as `3 commands · 2 files read · 1 file edited (+42 −7)`. **Show Activity** expands each call to its own command, path, or search pattern, with the lines an edit added and removed. Reads and edits count distinct files; the other kinds count calls. An edit that failed or was denied counts as a failed edit, not an edited file. Thinking between calls shows as its own line with a short preview, as in Waypoint, and the calls on either side are summarized separately. Questions and shared files keep their own line. Codex runs file reads as shell commands, so they count as commands.
+
+**Conversation History** opens the detailed event inspector with paired tool activity, filtering, older history, and follow-latest controls. It collapses the same runs into one row, which expands to the individual calls; searching still matches a command or path inside a collapsed run.
 
 Conversations opened from search are read-only. To continue one, use **Use for Quick Chat** (see [Managing sessions](#managing-sessions)).
 
@@ -90,7 +92,7 @@ If Waypoint does not confirm a response, nothing is retried. **Check Previous Ou
 
 ## Quick Chat
 
-Type in the top message field and press Enter to send. Follow-ups continue the same Waypoint session. The transcript keeps loaded turns together in chronological order, alongside the draft. The conversation row shows its turn count; Latest Response is an optional focused view. Sending returns to the continuous conversation. Activity details, copying or pasting the latest response, full-width reading, and session information are available in Actions. The side panel shows the first 4,000 characters of a very long message; full-width reading shows all of it.
+Type in the top message field and press Enter to send. Follow-ups continue the same Waypoint session. The transcript keeps loaded turns together in chronological order, alongside the draft. Consecutive tool calls collapse into one line, as in the conversation reader; **Show Activity** expands them. The conversation row shows its turn count; Latest Response is an optional focused view. Sending returns to the continuous conversation. Activity details, copying or pasting the latest response, full-width reading, and session information are available in Actions. The side panel shows the first 4,000 characters of a very long message; full-width reading shows all of it.
 
 ![Quick Chat](docs/screenshots/quick-chat.jpg)
 
@@ -176,4 +178,4 @@ The gate checks formatting, ESLint, strict TypeScript, behavior and HTTP integra
 
 Source is organized into thin command entries, `api/`, `domain/`, `storage/`, `hooks/`, `views/`, and `components/`. Tests compile into an ignored temporary build directory using the installed TypeScript compiler and Node's test runner.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contributor guidance and [connection acceptance](docs/server-connections-acceptance.md), [conversation acceptance](docs/session-conversations-acceptance.md), [Quick Chat acceptance](docs/quick-chat-acceptance.md), [session interactions acceptance](docs/session-interactions-acceptance.md), [desktop inputs acceptance](docs/desktop-inputs-acceptance.md), [session settings acceptance](docs/session-settings-acceptance.md), [session management acceptance](docs/session-management-acceptance.md), and [long session acceptance](docs/long-session-acceptance.md) for runtime coverage.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contributor guidance and [connection acceptance](docs/server-connections-acceptance.md), [conversation acceptance](docs/session-conversations-acceptance.md), [Quick Chat acceptance](docs/quick-chat-acceptance.md), [session interactions acceptance](docs/session-interactions-acceptance.md), [desktop inputs acceptance](docs/desktop-inputs-acceptance.md), [session settings acceptance](docs/session-settings-acceptance.md), [session management acceptance](docs/session-management-acceptance.md), [long session acceptance](docs/long-session-acceptance.md), and [tool activity acceptance](docs/tool-activity-acceptance.md) for runtime coverage.
