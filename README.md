@@ -42,7 +42,7 @@ Open structured sessions in the native conversation reader. Terminal and unknown
 
 The conversation displays loaded user and assistant turns together in chronological order, with formatted responses at full width. Show Latest Response focuses the newest turn when needed. Copy Latest Response copies the current answer. Conversation Details shows server-reported context and token usage.
 
-Consecutive tool calls collapse into one line where they happened, such as `3 commands · 2 files read · 1 file edited (+42 −7)`. **Show Activity** expands each call to its own command, path, or search pattern, with the lines an edit added and removed. Reads and edits count distinct files; the other kinds count calls. An edit that failed or was denied counts as a failed edit, not an edited file. Thinking between calls shows as its own line with a short preview, as in Waypoint, and the calls on either side are summarized separately. Questions and shared files keep their own line. Codex runs file reads as shell commands, so they count as commands.
+Consecutive tool calls collapse into one line marked ▸ where they happened, such as `▸ 3 commands · 2 files read · 1 file edited (+42 −7)`. **Show Activity** expands each call to its own command, path, or search pattern, with the lines an edit added and removed. Reads and edits count distinct files; the other kinds count calls. An edit that failed or was denied counts as a failed edit, not an edited file. Thinking between calls shows as its own line with a short preview, as in Waypoint, and the calls on either side are summarized separately. Questions and shared files keep their own line. Codex runs file reads as shell commands, so they count as commands.
 
 **Conversation History** opens the detailed event inspector with paired tool activity, filtering, older history, and follow-latest controls. It collapses the same runs into one row, which expands to the individual calls; searching still matches a command or path inside a collapsed run.
 
@@ -66,7 +66,7 @@ Session actions appear in the Actions panel of each Search Sessions row and of c
 | Terminate Session  | The session has not exited                                       | None     |
 | Delete Session     | The session exited or failed                                     | ⌃X       |
 
-**Terminate** stops the agent and asks for confirmation first. Terminating a terminal session that is attached to your own tmux session leaves your tmux session running. A terminated session leaves the active list; the success toast offers **Show Exited Sessions**.
+**Terminate** stops the agent and asks for confirmation first. Terminating a terminal session that is attached to your own tmux session leaves your tmux session running. A terminated session leaves the active list; the success toast offers **Show Exited Sessions**. Terminating Quick Chat's destination also moves Quick Chat to a new conversation, unless Quick Chat has an unconfirmed operation to check first.
 
 **Delete** asks for confirmation and cannot be undone. Waypoint removes the session's transcript, attachments, scheduled messages, board posts, and any manager backlog it owns. If Waypoint created a git worktree for the session, the worktree is removed, including uncommitted changes, along with its branch if that branch is merged. Terminate a running session before deleting it.
 
@@ -102,7 +102,9 @@ Each new session is titled with the time it was created, such as `Quick Chat 202
 
 When the server runs on this Mac and no working directory is set, sessions on the Local target start in `~/.waypoint-ai/workspace`. Raycast creates the folder on first use with an `AGENTS.md` describing it as a scratch workspace and a `CLAUDE.md` that imports it; edits to either file are kept. Other servers and SSH targets use the target's or server's default directory.
 
-**Terminate Session** ends the current session after confirmation and moves Quick Chat to a new conversation, keeping the draft. The terminated session stays in Search Sessions, where **Reattach Session** or **Use for Quick Chat** brings it back.
+**Terminate Session** (⌃⇧X) ends the current session after confirmation and moves Quick Chat to a new conversation, keeping the draft. The terminated session stays in Search Sessions, where **Reattach Session** or **Use for Quick Chat** brings it back.
+
+**Terminate and Delete Session** (⌃X) ends the session and deletes it in one step, then moves to a new conversation, keeping the draft. For a session that has already exited, the action is **Delete Session**.
 
 Defaults apply to new conversations. Choose the server preset, execution target, working directory, agent, model, and effort. Advanced settings expose supported transport, account profile, permissions, arguments, and configuration overrides. Inherited settings and private preset values are resolved by Waypoint. Each saved server keeps its own defaults and draft.
 
@@ -178,4 +180,4 @@ The gate checks formatting, ESLint, strict TypeScript, behavior and HTTP integra
 
 Source is organized into thin command entries, `api/`, `domain/`, `storage/`, `hooks/`, `views/`, and `components/`. Tests compile into an ignored temporary build directory using the installed TypeScript compiler and Node's test runner.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contributor guidance and [connection acceptance](docs/server-connections-acceptance.md), [conversation acceptance](docs/session-conversations-acceptance.md), [Quick Chat acceptance](docs/quick-chat-acceptance.md), [session interactions acceptance](docs/session-interactions-acceptance.md), [desktop inputs acceptance](docs/desktop-inputs-acceptance.md), [session settings acceptance](docs/session-settings-acceptance.md), [session management acceptance](docs/session-management-acceptance.md), [long session acceptance](docs/long-session-acceptance.md), and [tool activity acceptance](docs/tool-activity-acceptance.md) for runtime coverage.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contributor guidance and [connection acceptance](docs/server-connections-acceptance.md), [conversation acceptance](docs/session-conversations-acceptance.md), [Quick Chat acceptance](docs/quick-chat-acceptance.md), [session interactions acceptance](docs/session-interactions-acceptance.md), [desktop inputs acceptance](docs/desktop-inputs-acceptance.md), [session settings acceptance](docs/session-settings-acceptance.md), [session management acceptance](docs/session-management-acceptance.md), [long session acceptance](docs/long-session-acceptance.md), [tool activity acceptance](docs/tool-activity-acceptance.md), and [Quick Chat cleanup acceptance](docs/quick-chat-cleanup-acceptance.md) for runtime coverage.
