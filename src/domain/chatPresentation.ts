@@ -55,8 +55,18 @@ const more = (text: string, limit?: number) =>
 const plainText = (text: string) =>
   text.replace(/[&\\`*_{}[\]()<>#+.!|~-]/g, (character) => `&#${character.charCodeAt(0)};`);
 
+// Tools that carry their own card rather than folding into a run.
+const standaloneTools = new Set(["askuserquestion", "senduserfile"]);
+
+function isStandalone(row: TranscriptRow) {
+  return (row.sources ?? []).some((event) => {
+    const name = event.metadata.tool_name;
+    return typeof name === "string" && standaloneTools.has(name.toLocaleLowerCase());
+  });
+}
+
 // A run is a contiguous stretch of tool rows. Assistant text, a user turn, a plan, and an approval
-// all break it, so the summary sits where the work actually happened.
+// all break it; lifecycle notes fold in silently, as they do in Waypoint's own transcript.
 export function groupRuns(rows: TranscriptRow[]): ExchangeEntry[] {
   const entries: ExchangeEntry[] = [];
   const run = { rows: [] as TranscriptRow[], activities: [] as ToolActivity[] };
@@ -74,13 +84,18 @@ export function groupRuns(rows: TranscriptRow[]): ExchangeEntry[] {
     run.activities = [];
   };
   for (const row of rows) {
-    if (row.kind !== "tool") {
-      flush();
-      entries.push({ row });
+    if (row.kind === "tool" && !isStandalone(row)) {
+      run.rows.push(row);
+      run.activities.push(toolActivity(row.sources ?? [], row.text));
       continue;
     }
-    run.rows.push(row);
-    run.activities.push(toolActivity(row.sources ?? [], row.text));
+    // A quiet note joins the run it sits inside; outside one it stands alone.
+    if (row.kind === "note" && run.rows.length) {
+      run.rows.push(row);
+      continue;
+    }
+    flush();
+    entries.push({ row });
   }
   flush();
   return entries;
@@ -107,7 +122,17 @@ export function chatExchanges(rows: TranscriptRow[], gaps: number[] = []): ChatE
 
 // Expanded, each call in a run shows its own target and change counts above its output.
 export function runMarkdown(run: ToolRun, limit?: number): string {
-  return [`**${run.summary}**`, ...run.rows.map((row) => toolMarkdown(row, limit))].join("\n\n");
+  return [`**${run.summary}**`, ...run.rows.map((row) => runRowMarkdown(row, limit))].join("\n\n");
+}
+
+function runRowMarkdown(row: TranscriptRow, limit?: number): string {
+  if (row.kind === "tool") return toolMarkdown(row, limit);
+  // A note folded into the run is context, not a call.
+  return `_${plainText(row.text)}_${more(row.text, limit)}`;
+}
+
+export function runCallCount(run: ToolRun): number {
+  return run.rows.filter((row) => row.kind === "tool").length;
 }
 
 export function toolMarkdown(row: TranscriptRow, limit?: number): string {

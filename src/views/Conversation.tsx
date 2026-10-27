@@ -2,7 +2,7 @@ import { Action, ActionPanel, Detail, Icon, Keyboard, List, useNavigation } from
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { ServerMetadata } from "../api/contracts";
 import { TranscriptRow, transcript, selectedRow } from "../domain/transcript";
-import { entryId, entryKind, groupRuns, runMarkdown, toolMarkdown } from "../domain/chatPresentation";
+import { entryId, entryKind, groupRuns, runCallCount, runMarkdown, toolMarkdown } from "../domain/chatPresentation";
 import { isStructured, sessionUrl } from "../domain/sessions";
 import { useConnections } from "../hooks/useConnections";
 import { useConversationFeed } from "../hooks/useSessionFeeds";
@@ -212,17 +212,19 @@ export function ConversationContent({
   const [following, setFollowing] = useState(true);
   const [query, setQuery] = useState("");
   const rows = useMemo(() => transcript(state.events), [state.events]);
+  // Runs are grouped over the whole transcript so their ids stay stable while the search narrows the list.
+  const all = useMemo(() => groupRuns(rows), [rows]);
   // Search matches a run's own summary as well as each call inside it, so a path or command is still findable.
   const entries = useMemo(
     () =>
-      groupRuns(rows).filter((entry) => {
+      all.filter((entry) => {
         const text =
           "run" in entry
             ? `${entry.run.summary} ${entry.run.rows.map((row) => `${row.title} ${row.text}`).join(" ")}`
             : `${entry.row.title} ${entry.row.text}`;
         return text.toLocaleLowerCase().includes(query.toLocaleLowerCase());
       }),
-    [rows, query],
+    [all, query],
   );
   const url = sessionUrl(connection.frontendUrl, sessionId);
   const auth = state.error?.kind === "expired-token" || state.stream === "auth-error";
@@ -419,7 +421,7 @@ export function ConversationContent({
                 key={run.id}
                 id={run.id}
                 title={run.summary || "Tool activity"}
-                subtitle={`${run.rows.length} tool ${run.rows.length === 1 ? "call" : "calls"}`}
+                subtitle={`${runCallCount(run)} tool ${runCallCount(run) === 1 ? "call" : "calls"}`}
                 icon={Icon.Hammer}
                 detail={<List.Item.Detail markdown={runMarkdown(run)} metadata={metadata} />}
                 actions={

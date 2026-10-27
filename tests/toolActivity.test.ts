@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parseEvent } from "../src/api/sessions";
-import { groupRuns } from "../src/domain/chatPresentation";
+import { groupRuns, runCallCount } from "../src/domain/chatPresentation";
 import { transcript } from "../src/domain/transcript";
 import { summarizeRun, toolActivity } from "../src/domain/toolActivity";
 
@@ -234,4 +234,41 @@ test("a diffstat is omitted when no backend reported counts", () => {
     "Edit",
   );
   assert.equal(summarizeRun([edit]), "1 file edited");
+});
+
+test("lifecycle notes fold into the run they sit inside", () => {
+  // Waypoint's own transcript absorbs notes rather than splitting a run at each one.
+  const rows = transcript([
+    ...claudeRead(),
+    parse("system_note", "Turn changes: +414 -20", { method: "turn/diff/updated" }),
+    ...codexCommand(),
+  ]);
+  const entries = groupRuns(rows);
+  assert.equal(entries.length, 1);
+  const entry = entries[0];
+  assert.ok("run" in entry);
+  assert.equal(entry.run.summary, "1 command · 1 file read");
+  assert.equal(runCallCount(entry.run), 2);
+  // A note with no run around it stays its own row.
+  assert.deepEqual(
+    groupRuns(transcript([parse("system_note", "Session started", {})])).map((item) =>
+      "run" in item ? item.run.summary : item.row.kind,
+    ),
+    ["note"],
+  );
+});
+
+test("a call with its own card does not fold into a run", () => {
+  for (const tool of ["AskUserQuestion", "SendUserFile"])
+    assert.deepEqual(
+      groupRuns(
+        transcript([
+          ...claudeRead(),
+          parse("tool_call", tool, { item_id: `x-${tool}`, tool_name: tool }),
+          ...codexCommand(),
+        ]),
+      ).map((entry) => ("run" in entry ? entry.run.summary : entry.row.kind)),
+      ["1 file read", "tool", "1 command"],
+      tool,
+    );
 });
