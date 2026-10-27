@@ -259,9 +259,7 @@ function QuickChatActions({
           : live
             ? "Terminate and delete this session?"
             : "Delete this session?",
-        message: [live ? terminateMessage : "", deleting ? deleteMessage(session) : "", quickChatMovesOn]
-          .filter(Boolean)
-          .join(" "),
+        message: `${deleting ? deleteMessage(session, live) : terminateMessage} ${quickChatMovesOn}`,
         primaryAction: { title: deleting ? "Delete" : "Terminate", style: Alert.ActionStyle.Destructive },
       }))
     )
@@ -272,7 +270,7 @@ function QuickChatActions({
     });
     const result = deleting ? await controller.terminateAndDelete() : await controller.terminate();
     if (!result) return toast.hide();
-    const kept = "A new conversation starts on your next send; your draft is kept.";
+    const kept = "Your draft is kept.";
     Object.assign(
       toast,
       !result.ended
@@ -285,7 +283,7 @@ function QuickChatActions({
           ? {
               style: Toast.Style.Failure,
               title: "Session terminated but not deleted",
-              message: `${result.message ?? ""} Delete it from Search Sessions. ${kept}`.trim(),
+              message: "Delete it from Search Sessions.",
             }
           : result.outcome === "unconfirmed"
             ? { style: Toast.Style.Failure, title: "Quick Chat moved to a new chat", message: result.message }

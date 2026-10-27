@@ -60,10 +60,12 @@ export function titleProblem(title: string): string | undefined {
   return undefined;
 }
 
-export const terminateMessage = "Any running command is stopped and pending requests are declined.";
-export const quickChatMovesOn = "Quick Chat starts a new conversation on your next send.";
-export function deleteMessage(session: Session): string {
-  return session.worktreePath
-    ? `Its transcript, attachments, scheduled messages, board posts, and any manager backlog it owns are removed, and so is its worktree at ${session.worktreePath}, including uncommitted changes, with the worktree's branch if it is merged. This cannot be undone.`
-    : "Its transcript, attachments, scheduled messages, board posts, and any manager backlog it owns are removed. This cannot be undone.";
+export const terminateMessage = "Stops any running work.";
+export const quickChatMovesOn = "Quick Chat starts a new chat.";
+// A worktree can hold uncommitted changes, so it is named.
+export function deleteMessage(session: Session, live = false): string {
+  const removed = session.worktreePath
+    ? `its transcript and its worktree at ${session.worktreePath}, including uncommitted changes`
+    : "its transcript and attachments";
+  return `${live ? "Stops it and removes" : "Removes"} ${removed}. This can't be undone.`;
 }
