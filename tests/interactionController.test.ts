@@ -315,6 +315,23 @@ test("Check Previous Outcome gives no verdict when loaded history does not reach
   await f.close();
 });
 
+test("Check Previous Outcome gives no verdict for a request older than the loaded history", async () => {
+  const f = await fixture();
+  f.server.events.push(approval(1));
+  const c = f.controller();
+  await c.start();
+  sync(c, f);
+  f.server.status = 500;
+  await c.submit(c.getSnapshot().interactions[0], { decision: "approve" });
+  f.server.status = 200;
+  f.server.events.push(...filler(2, 10));
+  sync(c, f);
+  assert.equal(await c.checkOutcome(), undefined, "the reloaded latest page no longer shows the request");
+  assert.match(c.getSnapshot().notice!, /Couldn't confirm/);
+  assert.equal((await f.store.load(connection.id)).pending?.kind, "interaction");
+  await f.close();
+});
+
 test("approval and plan drafts outlive loaded history while the session can still ask", async () => {
   const f = await fixture();
   f.server.sessions.agent = { ...f.server.sessions.agent, status: "idle", permission_mode: "plan" };

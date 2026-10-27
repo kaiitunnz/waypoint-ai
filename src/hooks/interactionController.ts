@@ -11,6 +11,7 @@ import {
   preDispatchDetails,
   openInteractionKeys,
   plansDecisions,
+  requestKeys,
   sessionInteractions,
 } from "../domain/interactions";
 import { mergeEvents, newerQuestions } from "../domain/transcript";
@@ -167,7 +168,12 @@ export class InteractionController {
         feed.length > 0 &&
         first <= feed[feed.length - 1].sequence + 1 &&
         feed[0].sequence <= last + 1);
-    return { connected, events: connected ? mergeEvents(feed, page.events, this.sessionId) : page.events };
+    return connected ? mergeEvents(feed, page.events, this.sessionId) : page.events;
+  }
+  // A request is known to be resolved only when the history checked still shows it; questions come from
+  // Waypoint's own snapshot, which is complete whatever history is loaded.
+  private resolved(key: string, events: SessionEvent[]) {
+    return key.startsWith("question:") || requestKeys(events).has(key);
   }
   // The latest page is read for its question snapshot and to re-check a request; history comes from the feed.
   private async snapshot() {
@@ -278,10 +284,10 @@ export class InteractionController {
         this.sessionChanges++;
         this.adopt(fresh);
         const window = this.window(fresh.page);
-        const current = this.interactions(window.events).find((item) => item.key === captured.key);
+        const current = this.interactions(window).find((item) => item.key === captured.key);
         if (!current)
           throw new Error(
-            window.connected || captured.kind === "question" ? "This request was resolved or replaced." : unconfirmable,
+            this.resolved(captured.key, window) ? "This request was resolved or replaced." : unconfirmable,
           );
         if (current.signature !== captured.signature)
           throw new Error("This request changed. Review its current version.");
@@ -359,14 +365,9 @@ export class InteractionController {
     const pending = this.state.pending;
     if (!fresh || this.state.error || pending?.kind !== "interaction") return;
     const window = this.window(fresh.page);
-    const found = this.interactions(window.events).some((item) => item.key === pending.interactionKey);
-    // Questions come from Waypoint's own snapshot, which is complete whatever history is loaded.
-    if (
-      pending.sessionId === this.sessionId &&
-      !found &&
-      !window.connected &&
-      !pending.interactionKey?.startsWith("question:")
-    ) {
+    const key = pending.interactionKey ?? "";
+    const found = this.interactions(window).some((item) => item.key === key);
+    if (pending.sessionId === this.sessionId && !found && !this.resolved(key, window)) {
       this.publish({
         outcome: undefined,
         notice: unconfirmable,

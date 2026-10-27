@@ -312,6 +312,20 @@ export function openInteractionKeys(events: SessionEvent[], pending?: PendingQue
   ]);
 }
 
+// Every approval and plan request the events show, answered or not. A request missing from here may
+// simply be older than the events, so its absence from the open requests proves nothing.
+export function requestKeys(events: SessionEvent[]): Set<string> {
+  return new Set(
+    events.flatMap((event) =>
+      event.kind === "approval_request"
+        ? [`approval:${approvalId(event) || `sequence:${event.sequence}`}`]
+        : event.metadata.item_type === "plan" && planId(event)
+          ? [`plan:${planId(event)}`]
+          : [],
+    ),
+  );
+}
+
 export function interactionRequest(interaction: Interaction, draft: InteractionDraft): InteractionRequest {
   if (interaction.availability !== "actionable" || interaction.reason || !interaction.id)
     throw new Error("This request is not available here. Refresh it or open it in Waypoint.");
