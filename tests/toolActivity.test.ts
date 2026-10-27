@@ -415,3 +415,50 @@ test("a selected run keeps its place when earlier history is loaded in front of 
   assert.equal(resolved, entryId(after[0]));
   assert.ok("run" in after[0]);
 });
+
+test("notes and reasoning after a run's last call stay their own rows", () => {
+  const rows = transcript([
+    ...codexCommand(),
+    parse("agent_output", "Thinking it over", { item_id: "think-2", item_kind: "reasoning" }),
+    parse("agent_output", "Done.", { item_id: "reply-2" }),
+    ...claudeRead(),
+    parse("system_note", "Session failed", {}),
+  ]);
+  assert.deepEqual(
+    groupRuns(rows).map((entry) => ("run" in entry ? entry.run.summary : entry.row.kind)),
+    ["1 command", "reasoning", "assistant", "1 file read", "note"],
+  );
+});
+
+test("a call with its own card still shows a line in the collapsed chat", () => {
+  const exchange = chatExchanges(
+    transcript([
+      parse("user_input", "Send it", {}),
+      parse("tool_call", "SendUserFile", { item_id: "f1", tool_name: "SendUserFile" }),
+      parse("tool_call", "Which one?", { item_id: "q2", tool_name: "AskUserQuestion" }),
+      parse("agent_output", "Sent.", { item_id: "reply-3" }),
+    ]),
+  )[0];
+  const collapsed = chatMarkdown(exchange, false, false);
+  assert.ok(collapsed.indexOf("_Shared a file_") < collapsed.indexOf("_Asked a question_"));
+  assert.ok(collapsed.indexOf("_Asked a question_") < collapsed.indexOf("Sent."));
+});
+
+test("a failed or denied edit is not counted as an edited file", () => {
+  // A recorded Claude Code denial still carries the proposed preview's counts.
+  const denied = toolActivity(
+    [
+      ...claudeEdit(),
+      parse("tool_result", "Claude requested permissions to edit /a/two.ts", {
+        item_id: "e1",
+        method: "user.tool_result",
+        is_error: true,
+      }),
+    ],
+    "",
+  );
+  assert.equal(denied.kind, "failededit");
+  assert.equal(denied.additions, undefined);
+  assert.equal(summarizeRun([denied]), "1 failed edit");
+  assert.equal(summarizeRun([denied, toolActivity(openCodeEdit(), "")]), "1 file edited (+5 −2) · 1 failed edit");
+});

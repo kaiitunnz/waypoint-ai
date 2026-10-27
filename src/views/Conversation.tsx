@@ -352,7 +352,7 @@ export function ConversationContent({
       isLoading={state.loading || state.loadingOlder}
       selectedItemId={selectedId}
       onSelectionChange={(id) => {
-        const known = entries.some((entry) => ("run" in entry ? entry.run.id : entry.row.id) === id);
+        const known = entries.some((entry) => entryId(entry) === id);
         if (id && id !== selectedId && (auxiliaryIds.includes(id) || known)) {
           setSelection(id);
           setFollowing(false);

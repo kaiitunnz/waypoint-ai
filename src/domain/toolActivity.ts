@@ -2,7 +2,7 @@ import { SessionEvent } from "../api/sessions";
 import { isRecord } from "./connections";
 
 export type ToolKind =
-  "command" | "read" | "search" | "edit" | "websearch" | "fetch" | "agent" | "mcp" | "todo" | "other";
+  "command" | "read" | "search" | "edit" | "failededit" | "websearch" | "fetch" | "agent" | "mcp" | "todo" | "other";
 
 export interface ToolActivity {
   kind: ToolKind;
@@ -88,12 +88,15 @@ function targetFromText(text: string): string | undefined {
 }
 
 // A logical call can arrive as several events: a call plus a result, an OpenCode pending/running pair,
-// or a Claude diff-preview result alongside the real one. They are classified together.
+// or a Claude diff-preview result alongside the real one. They are classified together. An edit that failed
+// or was denied changed nothing, though a preview may already have reported counts, so it is kept apart.
 export function toolActivity(events: SessionEvent[], text: string): ToolActivity {
   const named = events.find((event) => !!string(event.metadata.tool_name));
   const typed = events.find((event) => !!string(event.metadata.item_type));
   const name = string(named?.metadata.tool_name) || string(typed?.metadata.tool_name);
-  const kind = kindOf(name, string(typed?.metadata.item_type));
+  const classified = kindOf(name, string(typed?.metadata.item_type));
+  const failed = events.some((event) => event.metadata.is_error === true);
+  const kind = classified === "edit" && failed ? "failededit" : classified;
   const item = events.map((event) => record(record(event.metadata.payload)?.item)).find(Boolean);
   const args = events
     .map((event) => record(record(event.metadata.payload)?.input) ?? record(event.metadata.tool_input))
@@ -127,6 +130,7 @@ const clauseOrder: ToolKind[] = [
   "read",
   "search",
   "edit",
+  "failededit",
   "websearch",
   "fetch",
   "agent",
@@ -139,6 +143,7 @@ const nouns: Record<ToolKind, [string, string]> = {
   read: ["file read", "files read"],
   search: ["search", "searches"],
   edit: ["file edited", "files edited"],
+  failededit: ["failed edit", "failed edits"],
   websearch: ["web search", "web searches"],
   fetch: ["page fetched", "pages fetched"],
   agent: ["agent", "agents"],

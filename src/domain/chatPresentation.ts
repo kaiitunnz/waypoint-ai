@@ -57,43 +57,53 @@ const more = (text: string, limit?: number, fullView = fullWidth) =>
 const plainText = (text: string) =>
   text.replace(/[&\\`*_{}[\]()<>#+.!|~-]/g, (character) => `&#${character.charCodeAt(0)};`);
 
-// Tools that carry their own card rather than folding into a run.
-const standaloneTools = new Set(["askuserquestion", "senduserfile"]);
+// Tools that stand on their own rather than folding into a run, with the line the collapsed chat shows.
+const standaloneTools: Record<string, string> = {
+  askuserquestion: "Asked a question",
+  senduserfile: "Shared a file",
+};
 
-function isStandalone(row: TranscriptRow) {
-  return (row.sources ?? []).some((event) => {
+function standaloneLine(row: TranscriptRow): string | undefined {
+  for (const event of row.sources ?? []) {
     const name = event.metadata.tool_name;
-    return typeof name === "string" && standaloneTools.has(name.toLocaleLowerCase());
-  });
+    if (typeof name === "string" && standaloneTools[name.toLocaleLowerCase()])
+      return standaloneTools[name.toLocaleLowerCase()];
+  }
+  return undefined;
 }
 
 // A run is a contiguous stretch of tool rows. Assistant text, a user turn, a plan, and an approval
-// all break it. Lifecycle notes and reasoning fold into a run they sit inside, as Claude Code keeps thinking
-// within a tool group; otherwise a collapsed transcript, which hides both, would stack identical summaries.
+// all break it. Lifecycle notes and reasoning between two calls fold into the run, as Claude Code keeps
+// thinking within a tool group; otherwise a collapsed transcript, which hides both, would stack identical
+// summaries. Notes and reasoning after a run's last call stay their own rows.
 export function groupRuns(rows: TranscriptRow[]): ExchangeEntry[] {
   const entries: ExchangeEntry[] = [];
   const run = { rows: [] as TranscriptRow[], activities: [] as ToolActivity[] };
+  let held: TranscriptRow[] = [];
   const flush = () => {
-    if (!run.rows.length) return;
-    entries.push({
-      run: {
-        id: `run:${run.rows[0].id}`,
-        rows: run.rows,
-        activities: run.activities,
-        summary: summarizeRun(run.activities),
-      },
-    });
+    if (run.rows.length)
+      entries.push({
+        run: {
+          id: `run:${run.rows[0].id}`,
+          rows: run.rows,
+          activities: run.activities,
+          summary: summarizeRun(run.activities),
+        },
+      });
+    entries.push(...held.map((row) => ({ row })));
     run.rows = [];
     run.activities = [];
+    held = [];
   };
   for (const row of rows) {
-    if (row.kind === "tool" && !isStandalone(row)) {
-      run.rows.push(row);
+    if (row.kind === "tool" && !standaloneLine(row)) {
+      run.rows.push(...held, row);
+      held = [];
       run.activities.push(toolActivity(row.sources ?? [], row.text));
       continue;
     }
     if ((row.kind === "note" || row.kind === "reasoning") && run.rows.length) {
-      run.rows.push(row);
+      held.push(row);
       continue;
     }
     flush();
@@ -199,6 +209,8 @@ export function chatMarkdown(
     } else if (showActivity) {
       // A tool with its own card is still a call, so its text stays fenced.
       parts.push(row.kind === "tool" ? toolMarkdown(row, limit) : activityMarkdown(row, limit));
+    } else if (row.kind === "tool") {
+      parts.push(`_${standaloneLine(row) ?? plainText(row.title)}_`);
     }
   }
   if (waiting && !assistant && !exchange.rows.some((row) => row.kind === "approval"))
