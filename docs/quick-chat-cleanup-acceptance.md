@@ -21,10 +21,10 @@ Not exercised natively: a delete whose result is unconfirmed, one that ends the 
 
 ## Automated coverage
 
-`npm run verify` checks formatting, ESLint, strict types, 255 behavior and integration tests, Raycast validation, and build.
+`npm run verify` checks formatting, ESLint, strict types, 258 behavior and integration tests, Raycast validation, and build.
 
 Tests cover:
 
-- **Quick Chat:** terminating and deleting a live or exited session in one request; the draft, its text, and its staged files kept without uploads to the deleted session; a refusal restoring the session; an unconfirmed result or an exited session that may still be deleting moving on as unconfirmed; a session that ended without being deleted reported apart from a deleted one; a session already gone.
-- **Search Sessions:** terminating Quick Chat's destination or a session a draft is bound to releases it, and only a definite refusal puts it back; with an unconfirmed operation the terminate goes through and Quick Chat keeps the session; a server lock held by another command doesn't stop the terminate; other sessions take no lock.
+- **Quick Chat:** terminating and deleting a live or exited session in one request; the draft, its text, and its staged files kept without uploads to the deleted session; a refusal restoring the session; an unconfirmed result or an exited session that may still be deleting moving on as unconfirmed; a session that ended without being deleted reported apart from a deleted one; a refused delete of an exited session keeping it; a session already gone; staged context after Terminate not binding the draft to the ended session.
+- **Search Sessions:** terminating Quick Chat's destination or a session a draft is bound to releases it, and only a definite refusal puts it back; with an unconfirmed operation the terminate goes through and Quick Chat keeps the session; a server lock held by another command doesn't stop the terminate; other sessions take no lock; a destination that moved after the first read is not released.
 - **Delete:** a live session is deleted only through Terminate and Delete; uncertain, refused, partial, and gone outcomes; a refused plain delete leaves Quick Chat alone.

@@ -67,10 +67,11 @@ export function release(saved: QuickChatState, id: string): Released {
     }
   return released;
 }
-// A definite refusal that left the session running; an uncertain result may still end it.
-export function refused(outcome: ManageOutcome): boolean {
+// A definite refusal that didn't end the session; an uncertain result may still end it. A session that had already
+// exited counts as not ended by the request.
+export function refused(outcome: ManageOutcome, exitedBefore = false): boolean {
   if (outcome.kind === "done" || (outcome.kind === "failed" && (outcome.uncertain || outcome.gone))) return false;
-  return (outcome.kind === "ssh" ? undefined : outcome.session)?.status !== "exited";
+  return exitedBefore || (outcome.kind === "ssh" ? undefined : outcome.session)?.status !== "exited";
 }
 
 export class SessionManager {
@@ -228,7 +229,8 @@ export class SessionManager {
           session: check.current,
           uncertain: !(error instanceof ApiError) || error.kind === "uncertain",
         };
-        if (released && refused(outcome)) await this.restore(id, released).catch(() => undefined);
+        if (released && refused(outcome, session.status === "exited"))
+          await this.restore(id, released).catch(() => undefined);
         return outcome;
       }
     }

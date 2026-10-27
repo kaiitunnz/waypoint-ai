@@ -149,10 +149,10 @@ export function chatExchanges(rows: TranscriptRow[], gaps: number[] = []): ChatE
   return exchanges;
 }
 
-// Expanded, each call in a run shows its own target and change counts above its output.
 // Marks collapsed tool activity, so it stands apart from thinking and notes, which are also italic.
 const toolMarker = "▸";
 
+// Expanded, each call in a run shows its own target and change counts above its output.
 export function runMarkdown(run: ToolRun, limit?: number, fullView = fullWidth): string {
   return [`**${run.summary}**`, ...run.rows.map((row) => runRowMarkdown(row, limit, fullView))].join("\n\n");
 }

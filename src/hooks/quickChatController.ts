@@ -1004,10 +1004,10 @@ export class QuickChatController {
           : current.status === "exited"
             ? { kind: "done", session: current }
             : await manager.terminate(id, metadata);
-      if (refused(outcome)) {
+      if (outcome.kind !== "done" && refused(outcome, current?.status === "exited")) {
         await manager.restore(id, released!);
         if (outcome.kind !== "ssh" && outcome.session) this.publish({ session: outcome.session });
-        return { ended: false, message: outcome.kind === "done" ? "" : outcome.message };
+        return { ended: false, message: outcome.message };
       }
       const uncertain = outcome.kind === "failed" && (outcome.uncertain || outcome.gone);
       const result: TerminateResult =

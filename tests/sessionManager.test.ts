@@ -482,6 +482,52 @@ test("a server lock held by another command doesn't stop terminate", async () =>
   }
 });
 
+test("terminate on a session Quick Chat doesn't use skips the lock, and a moved destination isn't released", async () => {
+  const f = await fixture();
+  try {
+    for (const id of ["dest", "plain", "moved"]) f.add(id, { status: "running" });
+    await useIn(f, "dest", "dest");
+    const other = new QuickChatStore(
+      {
+        getItem: async () => undefined,
+        setItem: async () => undefined,
+        keys: async () => [],
+        removeItem: async () => undefined,
+      },
+      new ServerMutex(f.directory, 2500, { queues: new Map() }),
+    );
+    let release!: () => void;
+    let held!: () => void;
+    const holding = new Promise<void>((resolve) => (held = resolve));
+    const holder = other.transaction(connection.id, async () => {
+      held();
+      await new Promise<void>((resolve) => (release = resolve));
+    });
+    await holding;
+    const started = Date.now();
+    assert.equal((await f.manager.terminate("plain", metadata)).kind, "done");
+    assert.ok(Date.now() - started < 1000, "it didn't wait for the lock");
+    release();
+    await holder;
+
+    // The destination moves to another session after the unlocked read and before the lock.
+    await useIn(f, "moved", "moved");
+    const read = f.store.read.bind(f.store);
+    f.store.read = async (id: string) => {
+      const state = await read(id);
+      f.store.read = read;
+      await useIn(f, "dest", "dest");
+      return state;
+    };
+    const outcome = await f.manager.terminate("moved", metadata);
+    assert.equal(outcome.kind === "done" && outcome.releasedQuickChat, undefined);
+    assert.equal(f.sessions.get("moved")!.status, "exited");
+    assert.deepEqual(await referenced(f), { pointer: "dest", chosen: { sessionId: "dest", at: 1000 }, bound: "dest" });
+  } finally {
+    await f.close();
+  }
+});
+
 test("terminate and delete removes a live session and classifies failures", async () => {
   const f = await fixture();
   try {

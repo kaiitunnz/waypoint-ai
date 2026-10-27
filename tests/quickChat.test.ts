@@ -1409,6 +1409,51 @@ test("deleting reports refusals, unconfirmed results, and sessions that ended wi
   }
 });
 
+test("a refused delete of an exited session keeps it as Quick Chat's session", async () => {
+  const f = await fixture();
+  try {
+    const c = f.controller();
+    await c.start();
+    await c.changeDraft("First");
+    await c.send();
+    const id = c.getSnapshot().session!.id;
+    f.sessions[0].status = "exited";
+    f.setRemoval("refuse");
+    const refused = await c.terminateAndDelete();
+    assert.equal(refused?.ended, false, "nothing was terminated, so it isn't reported as terminated");
+    assert.match(refused?.message ?? "", /busy/);
+    assert.equal(c.getSnapshot().session?.id, id);
+    assert.equal((await f.store.read(connection.id)).pointer, id);
+  } finally {
+    await f.close();
+  }
+});
+
+test("after terminating, staging more context doesn't bind the draft to the ended session again", async () => {
+  const f = await fixture();
+  try {
+    const first = f.controller();
+    await first.start();
+    await first.changeDraft("First");
+    await first.send();
+    const id = first.getSnapshot().session!.id;
+    first.stop();
+    await f.store.transaction(connection.id, async (state, persist) => {
+      state.compose = { quick: { context: [], files: [], sessionId: id, launch: "fingerprint" } };
+      await persist();
+    });
+    const c = f.controller();
+    await c.start();
+    assert.equal(c.getSnapshot().compose.sessionId, id);
+    assert.deepEqual(await c.terminate(), { ended: true, outcome: "done" });
+    assert.equal(c.getSnapshot().compose.sessionId, undefined);
+    await c.stageContext("clipboard", "More");
+    assert.equal((await f.store.read(connection.id)).compose?.quick.sessionId, undefined);
+  } finally {
+    await f.close();
+  }
+});
+
 test("terminate waits for an unconfirmed operation to be checked", async () => {
   const f = await fixture();
   try {
