@@ -8,6 +8,7 @@ import {
   groupRuns,
   resolveEntryId,
   runCallCount,
+  thinkingPreview,
 } from "../src/domain/chatPresentation";
 import { transcript } from "../src/domain/transcript";
 import { summarizeRun, toolActivity } from "../src/domain/toolActivity";
@@ -321,22 +322,53 @@ test("a call that names no file still counts alongside named ones", () => {
   assert.equal(summarizeRun([named, anonymous]), "2 files read");
 });
 
-test("reasoning between calls folds into the run instead of splitting it", () => {
-  // Every backend streams reasoning as agent output; the collapsed transcript hides it.
-  const rows = transcript([
-    ...codexCommand(),
-    parse("agent_output", "Checking the result", { item_id: "think-1", item_kind: "reasoning" }),
-    ...claudeRead(),
-    parse("agent_output", "Done.", { item_id: "reply-1" }),
-  ]);
-  const entries = groupRuns(rows);
+test("thinking between calls ends a run and shows as its own line", () => {
+  // Waypoint's transcript shows thinking as its own card, so the summaries sit either side of it.
+  const exchange = chatExchanges(
+    transcript([
+      parse("user_input", "Fix the build", {}),
+      ...codexCommand(),
+      parse("agent_output", "**Lint failed.** The config\n  uses require()", {
+        item_id: "think-1",
+        item_kind: "reasoning",
+      }),
+      ...claudeRead(),
+      parse("agent_output", "Done.", { item_id: "reply-1" }),
+    ]),
+  )[0];
   assert.deepEqual(
-    entries.map((entry) => ("run" in entry ? entry.run.summary : entry.row.kind)),
-    ["1 command · 1 file read", "assistant"],
+    groupRuns(exchange.rows).map((entry) => ("run" in entry ? entry.run.summary : entry.row.kind)),
+    ["1 command", "reasoning", "1 file read", "assistant"],
   );
-  const run = entries[0];
-  assert.ok("run" in run);
-  assert.equal(runCallCount(run.run), 2);
+  const collapsed = chatMarkdown(exchange, false, false);
+  const thinking = "_Thinking · Lint failed. The config uses require()_";
+  assert.ok(collapsed.includes(thinking));
+  assert.ok(collapsed.indexOf("_1 command_") < collapsed.indexOf(thinking));
+  assert.ok(collapsed.indexOf(thinking) < collapsed.indexOf("_1 file read_"));
+});
+
+test("a thinking line escapes inline markers but leaves a link intact", () => {
+  const exchange = chatExchanges(
+    transcript([
+      parse("user_input", "Ship it", {}),
+      parse("agent_output", "Opened https://github.com/a/b_c/pull/10. Next `*verify*`", {
+        item_id: "think-9",
+        item_kind: "reasoning",
+      }),
+    ]),
+  )[0];
+  assert.ok(
+    chatMarkdown(exchange, false, false).includes(
+      "_Thinking · Opened https://github.com/a/b_c/pull/10. Next \\`\\*verify\\*\\`_",
+    ),
+  );
+});
+
+test("a thinking preview keeps one line of plain text", () => {
+  assert.equal(thinkingPreview("**Plan**\n\nRead   the file"), "Plan Read the file");
+  const long = thinkingPreview("x".repeat(200));
+  assert.equal(long.length, 140);
+  assert.ok(long.endsWith("…"));
 });
 
 test("web searches and fetched pages read as their own kinds", () => {

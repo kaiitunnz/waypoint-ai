@@ -47,12 +47,30 @@ function clip(text: string, limit?: number, markdown = false) {
   const fence = markdown ? openFence(shown) : undefined;
   return fence ? `${shown}\n${fence}` : shown;
 }
+// Thinking stays one line until activity is shown, as Waypoint collapses it: bold markers stripped, whitespace
+// collapsed, and the first 140 characters kept.
+export function thinkingPreview(text: string, max = 140): string {
+  const collapsed = text
+    .replace(/(\*\*|__)(.+?)\1/g, "$2")
+    .replace(/\s+/g, " ")
+    .trim();
+  return collapsed.length <= max ? collapsed : `${collapsed.slice(0, max - 1).trimEnd()}…`;
+}
+
 // Names the action that shows a clipped message whole; the chat views read it at full width.
 const fullWidth = "Read Conversation at Full Width";
 const more = (text: string, limit?: number, fullView = fullWidth) =>
   limit !== undefined && text.length > limit
     ? `\n\n_… ${(text.length - limit).toLocaleString("en-US")} more characters. ${fullView} to see all of it._`
     : "";
+
+// Raycast links URLs from the raw markdown, so an escape inside or right after one shows in the link. A preview
+// is one line that never starts a block, so it escapes only inline markers, and none inside a URL.
+const inlineText = (text: string) =>
+  text
+    .split(/(https?:\/\/[^\s<>]*[^\s<>.,;:!?)])/)
+    .map((part, index) => (index % 2 ? part : part.replace(/[\\`*_[\]<>~&]/g, "\\$&")))
+    .join("");
 
 const plainText = (text: string) =>
   text.replace(/[&\\`*_{}[\]()<>#+.!|~-]/g, (character) => `&#${character.charCodeAt(0)};`);
@@ -72,10 +90,9 @@ function standaloneLine(row: TranscriptRow): string | undefined {
   return undefined;
 }
 
-// A run is a contiguous stretch of tool rows. Assistant text, a user turn, a plan, and an approval
-// all break it. Lifecycle notes and reasoning between two calls fold into the run, as Claude Code keeps
-// thinking within a tool group; otherwise a collapsed transcript, which hides both, would stack identical
-// summaries. Notes and reasoning after a run's last call stay their own rows.
+// A run is a contiguous stretch of tool rows, matching Waypoint's own transcript. Assistant text, thinking,
+// a user turn, a plan, and an approval all break it. Lifecycle notes between two calls fold into the run;
+// after a run's last call they stay their own rows.
 export function groupRuns(rows: TranscriptRow[]): ExchangeEntry[] {
   const entries: ExchangeEntry[] = [];
   const run = { rows: [] as TranscriptRow[], activities: [] as ToolActivity[] };
@@ -102,7 +119,7 @@ export function groupRuns(rows: TranscriptRow[]): ExchangeEntry[] {
       run.activities.push(toolActivity(row.sources ?? [], row.text));
       continue;
     }
-    if ((row.kind === "note" || row.kind === "reasoning") && run.rows.length) {
+    if (row.kind === "note" && run.rows.length) {
       held.push(row);
       continue;
     }
@@ -211,6 +228,9 @@ export function chatMarkdown(
       parts.push(row.kind === "tool" ? toolMarkdown(row, limit) : activityMarkdown(row, limit));
     } else if (row.kind === "tool") {
       parts.push(`_${standaloneLine(row) ?? plainText(row.title)}_`);
+    } else if (row.kind === "reasoning") {
+      const preview = thinkingPreview(row.text);
+      parts.push(`_${plainText(row.title)}${preview ? ` · ${inlineText(preview)}` : ""}_`);
     }
   }
   if (waiting && !assistant && !exchange.rows.some((row) => row.kind === "approval"))
