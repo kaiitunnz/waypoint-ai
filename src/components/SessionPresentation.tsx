@@ -22,6 +22,8 @@ export const statusIcon = (status: string) => ({
           : Color.SecondaryText,
 });
 export const markdownText = (value: string) => value.replace(/[\\`*_{}[\]()<>#+.!|~-]/g, "\\$&");
+export const gapNotice =
+  "Some activity while this conversation was away isn't shown. Reload Conversation to see it in order.";
 
 export function sessionSummary(session: Session): string {
   const md = markdownText;

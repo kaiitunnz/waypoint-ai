@@ -6,7 +6,7 @@ import { isStructured, sessionUrl } from "../domain/sessions";
 import { useConnections } from "../hooks/useConnections";
 import { useConversationFeed } from "../hooks/useSessionFeeds";
 import { ConversationFeed, FeedConnection } from "../hooks/sessionFeeds";
-import { LoadingView, markdownText, sessionSummary, statusIcon } from "../components/SessionPresentation";
+import { LoadingView, gapNotice, markdownText, sessionSummary, statusIcon } from "../components/SessionPresentation";
 import { ChatConversation, SessionActionContext } from "./ChatConversation";
 import { SessionActions } from "./SessionActions";
 import { SessionManager } from "../hooks/sessionManager";
@@ -196,9 +196,10 @@ export function ConversationContent({
   const url = sessionUrl(connection.frontendUrl, sessionId);
   const auth = state.error?.kind === "expired-token" || state.stream === "auth-error";
   const canRead = !state.session || isStructured(state.session, metadata);
+  const gap = state.gaps.length > 0;
   const auxiliaryIds = [
     ...interactionItemIds(interactionState, sessionId),
-    ...(auth || state.error || state.stream !== "live" ? ["connection-status"] : []),
+    ...(auth || state.error || state.stream !== "live" || gap ? ["connection-status"] : []),
   ];
   const selectedId =
     !following && selection && auxiliaryIds.includes(selection)
@@ -249,6 +250,15 @@ export function ConversationContent({
         shortcut={Keyboard.Shortcut.Common.Refresh}
         onAction={() => {
           feed.retry();
+          void interactions.refresh();
+        }}
+      />
+      <Action
+        title="Reload Conversation"
+        icon={Icon.RotateClockwise}
+        onAction={() => {
+          setFollowing(true);
+          feed.reload();
           void interactions.refresh();
         }}
       />
@@ -303,16 +313,26 @@ export function ConversationContent({
       }}
     >
       <InteractionSection controller={interactions} sessionId={sessionId} url={url} trailing={shared} />
-      {problem && (
+      {(problem || gap) && (
         <List.Section title="Connection">
           <List.Item
             id="connection-status"
             title={
-              auth ? "Sign in again to reconnect" : state.error ? "Could not refresh conversation" : "Reconnecting…"
+              auth
+                ? "Sign in again to reconnect"
+                : state.error
+                  ? "Could not refresh conversation"
+                  : problem
+                    ? "Reconnecting…"
+                    : "Earlier activity missing"
             }
-            subtitle="Loaded history is kept"
+            subtitle={problem ? "Loaded history is kept" : undefined}
             icon={Icon.ExclamationMark}
-            detail={<List.Item.Detail markdown={`## Connection status\n\n${problem}`} />}
+            detail={
+              <List.Item.Detail
+                markdown={["## Connection status", problem, gap ? gapNotice : ""].filter(Boolean).join("\n\n")}
+              />
+            }
             actions={<ActionPanel>{shared}</ActionPanel>}
           />
         </List.Section>

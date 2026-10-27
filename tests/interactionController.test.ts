@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WaypointClient } from "../src/api/client";
 import { parseEvent, parseQuestions, parseSession } from "../src/api/sessions";
-import { InteractionDraft } from "../src/domain/interactions";
+import { Interaction, InteractionDraft } from "../src/domain/interactions";
 import { ownerTag, roleTag } from "../src/domain/quickChat";
 import { InteractionController } from "../src/hooks/interactionController";
 import { QuickChatController } from "../src/hooks/quickChatController";
@@ -103,12 +103,9 @@ async function fixture() {
       return respond(server.status === 400 ? { detail: "no pending approval request" } : { session }, server.status);
     }
     if (path.endsWith("/events")) {
-      if (server.failHistory && parsed.searchParams.has("cursor")) return respond({}, 503);
       server.queries.push(`${id}${parsed.search}`);
+      if (server.failHistory) return respond({}, 503);
       const own = server.events.filter((event) => event.session_id === id);
-      const cursor = parsed.searchParams.get("cursor");
-      if (cursor !== null)
-        return respond({ events: own.filter((event) => event.id > Number(cursor)), has_more: false });
       return respond({
         events: own.slice(-3),
         has_more: own.length > 3,
@@ -163,8 +160,33 @@ const feed = (overrides: Partial<ConversationSnapshot>): ConversationSnapshot =>
   loadingOlder: false,
   hasMore: false,
   stream: "live",
+  gaps: [],
   ...overrides,
 });
+
+// What a conversation feed holds: by default the latest page, as on open.
+const loaded = (f: { server: { events: Wire[] } }, sessionId = "agent", count = 3) =>
+  f.server.events
+    .filter((event) => event.session_id === sessionId)
+    .slice(-count)
+    .map((event) => parseEvent(event, sessionId));
+const chatFeed = {};
+const sync = (
+  c: InteractionController,
+  f: { server: { events: Wire[]; sessions: Record<string, Record<string, unknown>> } },
+  overrides: Partial<ConversationSnapshot> = {},
+  source: object = chatFeed,
+  sessionId = "agent",
+) =>
+  c.ingest(
+    feed({ session: parseSession(f.server.sessions[sessionId]), events: loaded(f, sessionId), ...overrides }),
+    source,
+  );
+const keys = (c: InteractionController) => c.getSnapshot().interactions.map((item) => item.key);
+const plan = (sequence: number, id = "p1") =>
+  wire(sequence, "system_note", "", { item_type: "plan", plan: { id, text: "Plant the seedlings" } });
+const filler = (from: number, count: number) =>
+  Array.from({ length: count }, (_, index) => wire(from + index, "agent_output", `part ${from + index}`));
 
 const savedDrafts = async (
   f: { store: QuickChatStore },
@@ -172,33 +194,192 @@ const savedDrafts = async (
 ): Promise<Record<string, InteractionDraft>> =>
   JSON.parse((await f.store.drafts.read(draftKeys.interactions(connection.id, sessionId))) ?? "{}");
 
-test("refresh loads full history once for live sessions, then fetches deltas", async () => {
+test("approvals come from the history the feed has loaded, never a full read", async () => {
   const f = await fixture();
-  f.server.events.push(...[1, 2, 3, 4, 5].map((sequence) => wire(sequence, "agent_output", `part ${sequence}`)));
-  f.server.events.push(approval(6));
+  f.server.events.push(...filler(1, 5), approval(6));
   const c = f.controller();
   await c.start();
-  assert.deepEqual(
-    c.getSnapshot().interactions.map((item) => item.key),
-    ["approval:a1"],
-  );
-  assert.ok(f.server.queries.includes("agent?cursor=0"));
-  await c.refresh();
-  assert.ok(f.server.queries.includes("agent?cursor=106"), f.server.queries.join(" "));
-  assert.equal(f.server.queries.filter((query) => query === "agent?cursor=0").length, 1);
+  assert.deepEqual(keys(c), [], "nothing is loaded before the feed delivers");
+  sync(c, f);
+  assert.deepEqual(keys(c), ["approval:a1"]);
 
-  f.server.sessions.chat.status = "idle";
-  const idle = f.controller("chat");
-  await idle.start();
-  assert.ok(!f.server.queries.some((query) => query.startsWith("chat?cursor")), "stopped sessions skip full history");
+  f.server.events.push(...filler(7, 3));
+  sync(c, f);
+  assert.deepEqual(keys(c), [], "an approval older than everything loaded goes unnoticed");
+  sync(c, f, { events: loaded(f, "agent", 9) });
+  assert.deepEqual(keys(c), ["approval:a1"], "an approval in an earlier page the feed loaded appears");
+  sync(c, f, { events: loaded(f, "agent", 9), contiguousFrom: 7 });
+  assert.deepEqual(keys(c), [], "nothing before a gap counts");
+  await c.refresh();
+  assert.ok(
+    f.server.queries.every((query) => !query.includes("cursor")),
+    f.server.queries.join(" "),
+  );
   await f.close();
 });
 
+test("plans before a gap are not offered", async () => {
+  const f = await fixture();
+  f.server.sessions.agent = { ...f.server.sessions.agent, status: "idle", permission_mode: "plan" };
+  f.server.events.push(plan(1), ...filler(2, 2));
+  const c = f.controller();
+  await c.start();
+  sync(c, f);
+  assert.deepEqual(keys(c), ["plan:p1"]);
+  sync(c, f, { contiguousFrom: 2 });
+  assert.deepEqual(keys(c), []);
+  await f.close();
+});
+
+test("requests follow the feed holding the newest history", async () => {
+  const f = await fixture();
+  f.server.events.push(...filler(1, 2), approval(3));
+  const c = f.controller();
+  await c.start();
+  sync(c, f);
+  const chatBlock = loaded(f);
+  assert.deepEqual(keys(c), ["approval:a1"]);
+
+  const history = {};
+  c.ingest(feed({ session: parseSession(f.server.sessions.agent) }), history);
+  assert.deepEqual(keys(c), ["approval:a1"], "a feed with nothing loaded yet keeps the previous history");
+  f.server.events.push(wire(4, "system_note", "Approval response sent: approve", { approval_id: "a1" }));
+  f.server.events.push(...filler(5, 40));
+  sync(c, f, {}, history);
+  assert.deepEqual(keys(c), [], "an approval answered elsewhere does not reappear in a newer feed");
+  c.ingest(feed({ session: parseSession(f.server.sessions.agent), events: chatBlock }), chatFeed);
+  assert.deepEqual(keys(c), [], "a resumed feed republishing older history does not displace it");
+  await f.close();
+});
+
+test("Reload Conversation replaces the loaded history and keeps a pending question", async () => {
+  const f = await fixture();
+  f.server.events.push(approval(1));
+  f.server.questions = [question("q1")];
+  const c = f.controller();
+  await c.start();
+  sync(c, f);
+  assert.deepEqual(keys(c), ["approval:a1", "question:q1"]);
+  c.ingest(feed({ session: parseSession(f.server.sessions.agent) }), chatFeed);
+  assert.deepEqual(keys(c), ["approval:a1", "question:q1"], "the reload's empty start is ignored");
+  f.server.events.push(wire(2, "system_note", "Approval response sent: approve", { approval_id: "a1" }));
+  sync(c, f);
+  assert.deepEqual(keys(c), ["question:q1"]);
+  await f.close();
+});
+
+test("submit checks a request in an earlier loaded page against a fresh page that meets it", async () => {
+  const f = await fixture();
+  f.server.events.push(...filler(1, 2), approval(3), ...filler(4, 3));
+  const c = f.controller();
+  await c.start();
+  sync(c, f, { events: loaded(f, "agent", 6) });
+  assert.equal(await c.submit(c.getSnapshot().interactions[0], { decision: "approve" }), true);
+  assert.equal(f.server.posts.length, 1);
+  await f.close();
+});
+
+test("submit does not call a request resolved when loaded history does not reach the latest page", async () => {
+  const f = await fixture();
+  f.server.events.push(approval(1));
+  const c = f.controller();
+  await c.start();
+  sync(c, f);
+  f.server.events.push(...filler(2, 10));
+  assert.equal(await c.submit(c.getSnapshot().interactions[0], { decision: "approve" }), false);
+  assert.match(c.getSnapshot().error!, /Couldn't confirm/);
+  assert.deepEqual(f.server.posts, []);
+  await f.close();
+});
+
+test("Check Previous Outcome gives no verdict when loaded history does not reach the latest page", async () => {
+  const f = await fixture();
+  f.server.events.push(approval(1));
+  const c = f.controller();
+  await c.start();
+  sync(c, f);
+  f.server.status = 500;
+  await c.submit(c.getSnapshot().interactions[0], { decision: "approve" });
+  f.server.status = 200;
+  assert.equal(await c.checkOutcome(), "pending");
+
+  f.server.events.push(...filler(2, 10));
+  assert.equal(await c.checkOutcome(), undefined);
+  assert.match(c.getSnapshot().notice!, /Couldn't confirm/);
+  assert.equal(c.getSnapshot().outcome, undefined);
+  assert.equal((await f.store.load(connection.id)).pending?.kind, "interaction", "the checkpoint stays");
+
+  sync(c, f, { events: loaded(f, "agent", 11) });
+  assert.equal(await c.checkOutcome(), "pending", "connected history still shows it pending");
+  f.server.events.push(wire(12, "system_note", "Approval response sent: approve", { approval_id: "a1" }));
+  assert.equal(await c.checkOutcome(), "resolved");
+  await f.close();
+});
+
+test("Check Previous Outcome gives no verdict for a request older than the loaded history", async () => {
+  const f = await fixture();
+  f.server.events.push(approval(1));
+  const c = f.controller();
+  await c.start();
+  sync(c, f);
+  f.server.status = 500;
+  await c.submit(c.getSnapshot().interactions[0], { decision: "approve" });
+  f.server.status = 200;
+  f.server.events.push(...filler(2, 10));
+  sync(c, f);
+  assert.equal(await c.checkOutcome(), undefined, "the reloaded latest page no longer shows the request");
+  assert.match(c.getSnapshot().notice!, /Couldn't confirm.*Load earlier messages/);
+  assert.equal((await f.store.load(connection.id)).pending?.kind, "interaction");
+  sync(c, f, { events: loaded(f, "agent", 11), contiguousFrom: 9 });
+  assert.equal(await c.checkOutcome(), undefined);
+  assert.match(
+    c.getSnapshot().notice!,
+    /Reload Conversation, then load earlier messages/,
+    "earlier messages load below a gap, so it is reloaded first",
+  );
+  await f.close();
+});
+
+test("approval and plan drafts outlive loaded history while the session can still ask", async () => {
+  const f = await fixture();
+  f.server.sessions.agent = { ...f.server.sessions.agent, status: "idle", permission_mode: "plan" };
+  const c = f.controller();
+  await c.start();
+  const request = (key: string, kind: Interaction["kind"]): Interaction => ({
+    key,
+    id: key,
+    kind,
+    title: "Request",
+    text: "",
+    event: parseEvent(approval(1), "agent"),
+    decisions: [],
+    note: true,
+    positionalAnswers: false,
+    availability: "actionable",
+    signature: "s",
+  });
+  const planned = request("plan:p9", "plan");
+  const approved = request("approval:a9", "approval");
+  await c.changeDraft(planned, { note: "plan note" });
+  await c.changeDraft(approved, { note: "approval note" });
+  await c.refresh();
+  assert.deepEqual(Object.keys(await savedDrafts(f)), [c.draftKey(planned)], "an idle session asks no approval");
+
+  f.server.sessions.agent = { ...f.server.sessions.agent, status: "waiting_input", permission_mode: "default" };
+  await c.changeDraft(approved, { note: "approval note" });
+  await c.refresh();
+  assert.deepEqual(Object.keys(await savedDrafts(f)), [c.draftKey(approved)]);
+  f.server.sessions.agent.status = "exited";
+  await c.refresh();
+  assert.deepEqual(await savedDrafts(f), {});
+  await f.close();
+});
 test("approval submissions post the captured ID and clear their checkpoint and draft", async () => {
   const f = await fixture();
   f.server.events.push(approval());
   const c = f.controller();
   await c.start();
+  sync(c, f);
   const captured = c.getSnapshot().interactions[0];
   await c.changeDraft(captured, { note: "Looks safe" });
   f.server.onPost = () => {
@@ -213,6 +394,7 @@ test("approval submissions post the captured ID and clear their checkpoint and d
   assert.equal(saved.pending, undefined);
   assert.deepEqual(await savedDrafts(f), {});
   assert.equal(c.getSnapshot().notice, "Response sent.");
+  sync(c, f);
   assert.deepEqual(c.getSnapshot().interactions, []);
   await f.close();
 });
@@ -222,6 +404,7 @@ test("a request resolved or replaced before submit is never retargeted", async (
   f.server.events.push(approval());
   const c = f.controller();
   await c.start();
+  sync(c, f);
   const captured = c.getSnapshot().interactions[0];
   f.server.events.push(
     wire(2, "system_note", "Approval response sent: decline", { approval_id: "a1" }),
@@ -231,6 +414,7 @@ test("a request resolved or replaced before submit is never retargeted", async (
   assert.match(c.getSnapshot().error!, /resolved or replaced/);
   assert.deepEqual(f.server.posts, []);
   assert.equal((await f.store.load(connection.id)).pending, undefined);
+  sync(c, f);
   assert.deepEqual(
     c.getSnapshot().interactions.map((item) => item.key),
     ["approval:a2"],
@@ -372,13 +556,12 @@ test("question snapshots follow the feed while a refresh is in flight", async ()
   await f.close();
 });
 
-test("live approval events trigger a history load and drafts survive filtering until resolution", async () => {
+test("drafts survive filtering until their request resolves", async () => {
   const f = await fixture();
   f.server.sessions.agent.status = "idle";
   f.server.questions = [question("q1")];
   const c = f.controller();
   await c.start();
-  assert.ok(!f.server.queries.includes("agent?cursor=0"));
   const asked = c.getSnapshot().interactions[0];
   await c.changeDraft(asked, { notes: { "0": "keep me" } });
   await c.changeDraft({ ...asked, key: "question:gone", signature: "s" }, { notes: { "0": "stale" } });
@@ -388,13 +571,9 @@ test("live approval events trigger a history load and drafts survive filtering u
   f.server.questions = [{ ...question("q1"), availability: "starting" }];
   f.server.events.push(approval(1));
   f.server.sessions.agent.status = "waiting_input";
-  c.ingest(feed({ session: parseSession(f.server.sessions.agent), events: [parseEvent(approval(1), "agent")] }));
-  while (!f.server.queries.includes("agent?cursor=0")) await new Promise((resolve) => setTimeout(resolve, 5));
-  while (c.getSnapshot().loading) await new Promise((resolve) => setTimeout(resolve, 5));
-  assert.deepEqual(
-    c.getSnapshot().interactions.map((item) => item.key),
-    ["approval:a1", "question:q1"],
-  );
+  sync(c, f);
+  await c.refresh();
+  assert.deepEqual(keys(c), ["approval:a1", "question:q1"]);
   const drafts: Record<string, InteractionDraft> = { ...(await savedDrafts(f)), ...(await savedDrafts(f, "chat")) };
   assert.deepEqual(
     Object.values(drafts)
@@ -404,36 +583,12 @@ test("live approval events trigger a history load and drafts survive filtering u
   );
   await f.close();
 });
-
-test("a request event during a history-less refresh triggers a follow-up history load", async () => {
-  const f = await fixture();
-  f.server.sessions.agent.status = "idle";
-  let release!: () => void;
-  f.setReadGate(new Promise<void>((resolve) => (release = resolve)));
-  const c = f.controller();
-  const starting = c.start();
-  while (!f.server.queries.includes("agent")) await new Promise((resolve) => setTimeout(resolve, 5));
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  assert.ok(!f.server.queries.includes("agent?cursor=0"), "the first refresh skipped history");
-  f.server.events.push(approval(1));
-  f.server.sessions.agent.status = "waiting_input";
-  c.ingest(feed({ session: parseSession(f.server.sessions.agent), events: [parseEvent(approval(1), "agent")] }));
-  f.setReadGate(undefined);
-  release();
-  await starting;
-  assert.ok(f.server.queries.includes("agent?cursor=0"));
-  assert.deepEqual(
-    c.getSnapshot().interactions.map((item) => item.key),
-    ["approval:a1"],
-  );
-  await f.close();
-});
-
 test("a provably undelivered approval ends without a checkpoint", async () => {
   const f = await fixture();
   f.server.events.push(approval());
   const c = f.controller();
   await c.start();
+  sync(c, f);
   f.server.status = 400;
   assert.equal(await c.submit(c.getSnapshot().interactions[0], { decision: "approve" }), false);
   assert.match(c.getSnapshot().error!, /no longer pending/);
@@ -529,6 +684,7 @@ test("clearing an own-session checkpoint unblocks Quick Chat, and another conver
   f.server.events.push(wire(1, "approval_request", "Run", { approval_id: "c1" }, "chat"));
   const own = f.controller("chat");
   await own.start();
+  sync(own, f, {}, chatFeed, "chat");
   f.server.status = 500;
   await own.submit(own.getSnapshot().interactions[0], { decision: "approve" });
   f.server.status = 200;
@@ -582,20 +738,18 @@ test("a resumed feed's cached snapshot does not override state another feed deli
   await f.close();
 });
 
-test("a failed request refresh is visible and a retry loads the missing history", async () => {
+test("a failed request refresh is visible and keeps the loaded requests", async () => {
   const f = await fixture();
   f.server.events.push(approval());
-  f.server.failHistory = true;
   const c = f.controller();
   await c.start();
+  sync(c, f);
+  f.server.failHistory = true;
+  await c.refresh();
   assert.ok(c.getSnapshot().loadError);
-  assert.deepEqual(c.getSnapshot().interactions, []);
+  assert.deepEqual(keys(c), ["approval:a1"]);
   f.server.failHistory = false;
   await c.refresh();
   assert.equal(c.getSnapshot().loadError, undefined);
-  assert.deepEqual(
-    c.getSnapshot().interactions.map((item) => item.key),
-    ["approval:a1"],
-  );
   await f.close();
 });

@@ -46,7 +46,7 @@ The conversation displays loaded user and assistant turns together in chronologi
 
 Conversations opened from search are read-only. To continue one, use **Use for Quick Chat** (see [Managing sessions](#managing-sessions)).
 
-Reconnects recover missed events and preserve loaded history. Expired sign-in offers reauthentication. The conversation content remains in memory and is not saved to extension storage.
+Reconnects catch up on missed events and preserve loaded history. After a long absence, the conversation shows its latest activity with a notice that some is missing; **Reload Conversation** starts it again from the latest activity. Expired sign-in offers reauthentication. The conversation content remains in memory and is not saved to extension storage.
 
 ![Conversation reader](docs/screenshots/session-conversation.png)
 
@@ -80,9 +80,11 @@ The personal assistant and telemetry sessions are not listed. An open conversati
 
 Pending approvals, plan approvals, and agent questions appear under **Needs Attention** above the conversation in Quick Chat, the conversation reader, and Conversation History. Review a request to see its context and respond: approvals offer the decisions the agent supports and an optional note where supported; plans accept a note; questions take single or multiple choices, notes, and free-text answers. Answers in progress are saved, so closing the form keeps them. **Cancel Question** tells the agent to continue without an answer; closing the form does not.
 
+As in Waypoint's web app, approvals and plans are found in the conversation history that has been loaded. A request older than that appears after loading earlier messages, or in Waypoint. When earlier activity is missing after a long absence, reload the conversation first.
+
 A form stays bound to the request it opened. If the request is answered elsewhere or replaced, the form shows that and sends nothing. Requests the agent's interface cannot handle natively, such as unsupported question formats or requests without a stable ID, offer **Open in Waypoint**.
 
-If Waypoint does not confirm a response, nothing is retried. **Check Previous Outcome** shows whether the request is still pending. **Clear Checkpoint** continues once it is resolved; **Allow Another Attempt** warns that responding again can repeat its effect. Until then, other responses and Quick Chat sends on that server wait.
+If Waypoint does not confirm a response, nothing is retried. **Check Previous Outcome** shows whether the request is still pending, or says when the loaded history cannot confirm it. **Clear Checkpoint** continues once it is resolved; **Allow Another Attempt** warns that responding again can repeat its effect. Until then, other responses and Quick Chat sends on that server wait.
 
 ![Approval decisions](docs/screenshots/interaction-approval.jpg)
 
@@ -174,4 +176,4 @@ The gate checks formatting, ESLint, strict TypeScript, behavior and HTTP integra
 
 Source is organized into thin command entries, `api/`, `domain/`, `storage/`, `hooks/`, `views/`, and `components/`. Tests compile into an ignored temporary build directory using the installed TypeScript compiler and Node's test runner.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contributor guidance and [connection acceptance](docs/server-connections-acceptance.md), [conversation acceptance](docs/session-conversations-acceptance.md), [Quick Chat acceptance](docs/quick-chat-acceptance.md), [session interactions acceptance](docs/session-interactions-acceptance.md), [desktop inputs acceptance](docs/desktop-inputs-acceptance.md), [session settings acceptance](docs/session-settings-acceptance.md), and [session management acceptance](docs/session-management-acceptance.md) for runtime coverage.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contributor guidance and [connection acceptance](docs/server-connections-acceptance.md), [conversation acceptance](docs/session-conversations-acceptance.md), [Quick Chat acceptance](docs/quick-chat-acceptance.md), [session interactions acceptance](docs/session-interactions-acceptance.md), [desktop inputs acceptance](docs/desktop-inputs-acceptance.md), [session settings acceptance](docs/session-settings-acceptance.md), [session management acceptance](docs/session-management-acceptance.md), and [long session acceptance](docs/long-session-acceptance.md) for runtime coverage.

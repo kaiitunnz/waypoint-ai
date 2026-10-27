@@ -108,3 +108,36 @@ test("a clipped reply closes its open fence with the marker that opened it", () 
     assert.ok(reply.includes(`${"x".repeat(100)}\n${marker}\n\n_… `), marker);
   }
 });
+
+test("activity after a gap starts its own exchange with a marker", () => {
+  const rows = transcript([
+    event(1, "user_input", "Old prompt"),
+    event(2, "agent_output", "Old answer"),
+    event(40, "agent_output", "New output"),
+    event(41, "user_input", "New prompt"),
+  ]);
+  const exchanges = chatExchanges(rows, [40]);
+  assert.deepEqual(
+    exchanges.map((exchange) => [exchange.prompt?.text, exchange.rows.map((row) => row.text), !!exchange.afterGap]),
+    [
+      ["Old prompt", ["Old answer"], false],
+      [undefined, ["New output"], true],
+      ["New prompt", [], false],
+    ],
+  );
+  assert.match(conversationMarkdown(exchanges), /Old answer[\s\S]*Earlier activity isn't loaded[\s\S]*New output/);
+  assert.equal(chatExchanges(rows.slice(2), [40])[0].afterGap, undefined, "nothing before it, so no marker");
+  const twice = chatExchanges(
+    transcript([
+      event(1, "user_input", "Old prompt"),
+      event(20, "agent_output", "After the first gap"),
+      event(60, "agent_output", "After the second gap"),
+    ]),
+    [20, 60],
+  );
+  assert.deepEqual(
+    twice.map((exchange) => !!exchange.afterGap),
+    [false, true, true],
+    "each gap is marked",
+  );
+});

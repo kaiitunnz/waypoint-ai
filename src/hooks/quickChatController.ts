@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { ApiError, WaypointClient } from "../api/client";
 import { ServerMetadata } from "../api/contracts";
-import { Session } from "../api/sessions";
+import { Session, SessionEvent } from "../api/sessions";
 import {
   ChatDefaults,
   canReattach,
@@ -61,6 +61,8 @@ export interface QuickChatSnapshot {
 type Retry = "send" | "compose" | "reattach";
 type FileStats = { size: number; modifiedMs: number };
 
+// Pages read back when checking whether an unconfirmed message was recorded.
+const outcomePages = 20;
 const storedParts = (stored?: ComposeParts) => stored && composeParts(stored);
 const attachmentIds = (value: unknown): string[] =>
   Array.isArray(value)
@@ -204,18 +206,13 @@ export class QuickChatController {
             if (this.active && generation === this.generation) this.publish({ session });
           } else {
             const page = await this.client.events(this.connection.token, session.id);
-            const expired = last === undefined || this.now() - last >= saved.defaults.timeoutMinutes * 60000;
-            const events =
-              saved.defaults.mode === "timed" && expired && !["starting", "running"].includes(session.status)
-                ? (await this.client.events(this.connection.token, session.id, { cursor: 0 })).events
-                : page.events;
             if (
               reuseDecision(
                 saved.defaults,
                 session,
                 last,
                 this.now(),
-                ongoing(session, page.questions, events, metadata),
+                ongoing(session, page.questions, page.events, metadata),
                 false,
               ) === "continue"
             ) {
@@ -361,8 +358,8 @@ export class QuickChatController {
             )
         )
           return undefined;
-        const page = await this.client.events(this.connection.token, bound, { cursor: 0 });
-        return page.events.some((event) => event.kind === "user_input") ? undefined : session;
+        const page = await this.client.events(this.connection.token, bound);
+        return page.hasMore || page.events.some((event) => event.kind === "user_input") ? undefined : session;
       } catch {
         return undefined;
       }
@@ -864,14 +861,7 @@ export class QuickChatController {
           });
         } else {
           const session = await this.client.session(this.connection.token, pending.sessionId!);
-          const page = await this.client.events(this.connection.token, session.id, { cursor: pending.baseline ?? 0 });
-          const expected = [...(pending.attachments ?? [])].sort().join(",");
-          const recorded = page.events.some(
-            (event) =>
-              event.kind === "user_input" &&
-              event.text.trim() === pending.text &&
-              attachmentIds(event.metadata.attachments).sort().join(",") === expected,
-          );
+          const recorded = pending.kind === "input" && (await this.inputRecorded(session.id, pending));
           this.publish({
             session: this.state.session && this.state.session.id !== session.id ? this.state.session : session,
             pending,
@@ -891,6 +881,36 @@ export class QuickChatController {
     } finally {
       this.publish({ busy: false });
     }
+  }
+  // Pages back from the newest events to the send's baseline, keeping no page, so a long session is never read whole.
+  private async inputRecorded(sessionId: string, pending: PendingOperation) {
+    const { baseline } = pending;
+    const expected = [...(pending.attachments ?? [])].sort().join(",");
+    const after = (event: SessionEvent) => baseline === undefined || (event.id !== undefined && event.id > baseline);
+    let before: number | undefined;
+    for (let pages = 0; pages < outcomePages; pages++) {
+      const page = await this.client.events(this.connection.token, sessionId, before === undefined ? {} : { before });
+      if (
+        page.events.some(
+          (event) =>
+            after(event) &&
+            event.kind === "user_input" &&
+            event.text.trim() === pending.text &&
+            attachmentIds(event.metadata.attachments).sort().join(",") === expected,
+        )
+      )
+        return true;
+      const first = page.events[0]?.sequence;
+      if (
+        !page.hasMore ||
+        first === undefined ||
+        (before !== undefined && first >= before) ||
+        page.events.some((event) => !after(event))
+      )
+        return false;
+      before = first;
+    }
+    return false;
   }
   // Uploads in an unconfirmed send may have been delivered, so they are dropped from the draft, never deleted.
   private forgetUploads(saved: QuickChatState) {

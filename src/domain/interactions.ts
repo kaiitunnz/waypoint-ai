@@ -234,20 +234,18 @@ function approval(event: SessionEvent, session: Session, metadata: ServerMetadat
   });
 }
 
-// Approvals and plans need the full history; without it only question snapshots are authoritative.
+// As in Waypoint's web app, approvals and plans are found in the history that has been loaded.
 export function sessionInteractions(
   session: Session,
   metadata: ServerMetadata,
   events: SessionEvent[],
   pending?: PendingQuestions,
-  history = true,
 ): Interaction[] {
   const structured = isStructured(session, metadata);
   // Requests outlive their process in history; a stopped session has no live request to answer.
-  const approvals = history && isLive(session) ? pendingApprovals(events) : [];
+  const approvals = isLive(session) ? pendingApprovals(events) : [];
   const result = approvals.map((event) => approval(event, session, metadata, structured));
-  const plan =
-    history && !approvals.length && structured && plansDecisions(session, metadata) ? latestPlan(events) : undefined;
+  const plan = !approvals.length && structured && plansDecisions(session, metadata) ? latestPlan(events) : undefined;
   if (plan?.text.trim()) {
     const decisions = plan.decisions.length ? plan.decisions.filter((entry) => planDecisions.includes(entry)) : [];
     result.push(
@@ -312,6 +310,20 @@ export function openInteractionKeys(events: SessionEvent[], pending?: PendingQue
     ...(plan ? [`plan:${plan.id}`] : []),
     ...(pending?.questions ?? []).map((entry) => `question:${entry.id}`),
   ]);
+}
+
+// Every approval and plan request the events show, answered or not. A request missing from here may
+// simply be older than the events, so its absence from the open requests proves nothing.
+export function requestKeys(events: SessionEvent[]): Set<string> {
+  return new Set(
+    events.flatMap((event) =>
+      event.kind === "approval_request"
+        ? [`approval:${approvalId(event) || `sequence:${event.sequence}`}`]
+        : event.metadata.item_type === "plan" && planId(event)
+          ? [`plan:${planId(event)}`]
+          : [],
+    ),
+  );
 }
 
 export function interactionRequest(interaction: Interaction, draft: InteractionDraft): InteractionRequest {

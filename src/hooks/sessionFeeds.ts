@@ -20,6 +20,8 @@ export interface FeedConnection extends Connection {
 type Options = { factory?: SocketFactory; scheduler?: Scheduler; watch?: Scheduler };
 // Waypoint announces a deletion only on the session list, so an open conversation checks that it still exists.
 export const presenceIntervalMs = 20000;
+// How many earlier pages a resumed conversation reads to reconnect to the history it already holds.
+export const bridgePages = 5;
 const safeError = (error: unknown) =>
   error instanceof ApiError
     ? error
@@ -158,7 +160,16 @@ export interface ConversationSnapshot {
   hasMore: boolean;
   stream: StreamStatus;
   error?: ApiError;
+  // Where activity resumes after each gap too large to fill on resume, oldest first. Only Reload clears them.
+  gaps: number[];
+  // Requests are found from this event on; earlier history may be missing events.
+  contiguousFrom?: number;
 }
+
+const highest = (...values: (number | undefined)[]) => {
+  const defined = values.filter((value): value is number => value !== undefined);
+  return defined.length ? Math.max(...defined) : undefined;
+};
 
 export class ConversationFeed extends Observable<ConversationSnapshot> {
   private socket: LiveSocket;
@@ -167,7 +178,8 @@ export class ConversationFeed extends Observable<ConversationSnapshot> {
   private epoch = 0;
   private sessionRevision = 0;
   private questionEpoch = -1;
-  private checkpoint?: number;
+  // Where each hole left by a failed resume begins, oldest first; the next resume bridges back to the first.
+  private holes: number[] = [];
   private hydrating = false;
   private buffer: SessionEvent[] = [];
   private controller?: AbortController;
@@ -182,7 +194,7 @@ export class ConversationFeed extends Observable<ConversationSnapshot> {
     private readonly client = new WaypointClient(connection.apiUrl),
     options: Options = {},
   ) {
-    super({ events: [], loading: true, loadingOlder: false, hasMore: false, stream: "connecting" });
+    super({ events: [], loading: true, loadingOlder: false, hasMore: false, stream: "connecting", gaps: [] });
     this.watch = options.watch ?? timers;
     this.socket = new LiveSocket(
       socketUrl(connection.apiUrl, connection.token, sessionId),
@@ -264,6 +276,15 @@ export class ConversationFeed extends Observable<ConversationSnapshot> {
     this.hydrating = true;
     this.socket.retry();
   }
+  // Starts again from the latest page, dropping loaded history and any gap left by a long absence.
+  reload() {
+    if (!this.active) return;
+    this.holes = [];
+    this.hydrated = false;
+    this.hydrating = true;
+    this.publish({ events: [], hasMore: false, gaps: [], contiguousFrom: undefined });
+    void this.hydrate();
+  }
   private receive(message: Envelope, initial: boolean) {
     if (message.type === "session_state") {
       const session = parseSession(message.payload.session);
@@ -298,29 +319,21 @@ export class ConversationFeed extends Observable<ConversationSnapshot> {
     const generation = ++this.generation;
     const revision = this.sessionRevision;
     const oldSequence = this.state.events.at(-1)?.sequence;
-    const cursor = this.checkpoint;
+    const target = this.holes.length ? this.holes[0] - 1 : oldSequence;
     this.publish({ loading: true, loadingOlder: false });
     const current = () => this.active && !controller.signal.aborted && generation === this.generation;
     try {
       const [session, page] = await Promise.all([
         this.client.session(this.connection.token, this.sessionId, controller.signal),
-        this.client.events(
-          this.connection.token,
-          this.sessionId,
-          cursor !== undefined ? { cursor } : {},
-          controller.signal,
-        ),
+        this.client.events(this.connection.token, this.sessionId, {}, controller.signal),
       ]);
       if (!current()) return;
       const fetched = [...page.events];
       let bridge = page;
-      while (
-        cursor === undefined &&
-        oldSequence !== undefined &&
-        bridge.hasMore &&
-        bridge.events.length &&
-        bridge.events[0].sequence > oldSequence
-      ) {
+      // Waypoint numbers a session's events consecutively, so a page starting right after the target joins it.
+      const short = () =>
+        target !== undefined && bridge.hasMore && bridge.events.length > 0 && bridge.events[0].sequence > target + 1;
+      for (let pages = 0; short() && pages < bridgePages; pages++) {
         const before = bridge.events[0].sequence;
         bridge = await this.client.events(this.connection.token, this.sessionId, { before }, controller.signal);
         if (!current()) return;
@@ -328,13 +341,19 @@ export class ConversationFeed extends Observable<ConversationSnapshot> {
           throw new Error("History cursor did not advance");
         fetched.push(...bridge.events);
       }
-      if (!current()) return;
-      const ids = fetched.flatMap((event) => (event.id !== undefined ? [event.id] : []));
-      if (ids.length) this.checkpoint = ids.reduce((max, id) => Math.max(max, id), this.checkpoint ?? 0);
+      // A gap left after the bridge is shown as one rather than filled event by event, along with the
+      // holes below it that the bridge didn't reach.
+      const start = bridge.events[0]?.sequence;
+      const gaps = short()
+        ? [...this.state.gaps, ...this.holes.filter((hole) => hole < start), start]
+        : this.state.gaps;
+      this.holes = [];
       this.publish({
         events: mergeEvents(this.state.events, [...fetched, ...this.buffer], this.sessionId),
         ...(revision === this.sessionRevision ? { session } : {}),
         hasMore: !this.hydrated || oldSequence === undefined ? bridge.hasMore : this.state.hasMore,
+        gaps,
+        contiguousFrom: gaps.at(-1),
         loading: false,
         error: undefined,
       });
@@ -347,8 +366,11 @@ export class ConversationFeed extends Observable<ConversationSnapshot> {
       if (!current()) return;
       const failure = safeError(error);
       if (failure.kind === "expired-token" || failure.kind === "not-found") this.socket.stop();
+      // Live events kept from here on follow a hole.
+      if (oldSequence !== undefined && this.holes.at(-1) !== oldSequence + 1) this.holes.push(oldSequence + 1);
       this.publish({
         events: mergeEvents(this.state.events, this.buffer, this.sessionId),
+        contiguousFrom: highest(this.holes.at(-1), this.state.gaps.at(-1)),
         loading: false,
         error: failure,
       });

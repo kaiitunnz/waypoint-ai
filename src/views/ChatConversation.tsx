@@ -7,7 +7,7 @@ import { transcript } from "../domain/transcript";
 import { isStructured } from "../domain/sessions";
 import { useConversationFeed } from "../hooks/useSessionFeeds";
 import { ConversationFeed, FeedConnection } from "../hooks/sessionFeeds";
-import { markdownText, sessionSummary } from "../components/SessionPresentation";
+import { gapNotice, markdownText, sessionSummary } from "../components/SessionPresentation";
 import { useSessionInteractions } from "../hooks/useSessionInteractions";
 import {
   InteractionSection,
@@ -53,7 +53,7 @@ function FullConversation({
   showActivity: boolean;
 }) {
   const state = useSyncExternalStore(feed.subscribe, feed.getSnapshot);
-  const exchanges = chatExchanges(transcript(state.events));
+  const exchanges = chatExchanges(transcript(state.events), state.gaps);
   const waiting = !!state.session && ["starting", "running"].includes(state.session.status);
   const response = exchanges
     .at(-1)
@@ -145,7 +145,7 @@ export function ChatConversation({
   const [mode, setMode] = useState<ReadingMode>("conversation");
   const [interactionSelection, setInteractionSelection] = useState<string>();
   const [showActivity, setShowActivity] = useState(false);
-  const exchanges = useMemo(() => chatExchanges(transcript(state.events)), [state.events]);
+  const exchanges = useMemo(() => chatExchanges(transcript(state.events), state.gaps), [state.events, state.gaps]);
   const session = state.session;
   const waiting = !!session && ["starting", "running"].includes(session.status);
   const unsupported = session && !isStructured(session, metadata);
@@ -160,6 +160,7 @@ export function ChatConversation({
   const interactions = interactionState.interactions;
   const unconfirmed = unconfirmedFor(interactionState, sessionId);
   const attention = [
+    ...(state.gaps.length ? [`- **Earlier activity missing.** ${gapNotice}`] : []),
     ...(interactionState.loadError
       ? [`- **Requests unavailable.** ${markdownText(interactionState.loadError)} Refresh to retry.`]
       : []),
@@ -299,6 +300,14 @@ export function ChatConversation({
           shortcut={Keyboard.Shortcut.Common.Refresh}
           onAction={() => {
             feed.retry();
+            void interactionController.refresh();
+          }}
+        />
+        <Action
+          title="Reload Conversation"
+          icon={Icon.RotateClockwise}
+          onAction={() => {
+            feed.reload();
             void interactionController.refresh();
           }}
         />

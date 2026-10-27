@@ -74,6 +74,7 @@ async function fixture(options: { attachments?: boolean; target?: "password" | "
   const server = {
     sessions: [] as (ReturnType<typeof sessionWire> & { tags?: Record<string, string>; launch_target_id?: string })[],
     events: new Map<string, ReturnType<typeof eventWire>[]>(),
+    hasMore: false,
     stored: new Map<string, Set<string>>(),
     uploads: [] as { session: string; name: string; type: string }[],
     deletes: [] as string[],
@@ -139,7 +140,7 @@ async function fixture(options: { attachments?: boolean; target?: "password" | "
     if (path.endsWith("/events"))
       return respond({
         events: server.events.get(id) ?? [],
-        has_more: false,
+        has_more: server.hasMore,
         pending_questions: { questions: [], as_of_sequence: 0, revision: 0 },
       });
     if (path.endsWith("/input")) {
@@ -344,6 +345,12 @@ test("New Chat continues the session its unsent draft created, but not one that 
   const again = f.controller(true);
   await again.start();
   assert.equal(again.getSnapshot().session, undefined);
+  f.server.events.set("created-1", [{ ...eventWire(9, "agent_output", "later", "", "created-1") }]);
+  f.server.hasMore = true;
+  const earlier = f.controller(true);
+  await earlier.start();
+  assert.equal(earlier.getSnapshot().session, undefined, "earlier history may hold input");
+  f.server.hasMore = false;
   f.server.events.delete("created-1");
   await f.setDefaults({ permission: "plan" });
   const changed = f.controller(true);

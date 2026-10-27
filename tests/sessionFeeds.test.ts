@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { WaypointClient } from "../src/api/client";
 import { SocketFactory, SocketHandlers, Scheduler, LiveSocket, socketUrl } from "../src/api/liveSocket";
-import { ConversationFeed, SessionsFeed } from "../src/hooks/sessionFeeds";
+import { ConversationFeed, SessionsFeed, bridgePages } from "../src/hooks/sessionFeeds";
 import { transcript } from "../src/domain/transcript";
 import { eventWire, sessionWire, metadataWire } from "./fixtures/conversation";
 
@@ -71,39 +71,124 @@ test("hydrates only after authenticated snapshot and merges buffered REST/WS ove
   assert.equal(f.jobs.size, 0);
 });
 
-test("reconnect catches a gap larger than one tail page from REST-confirmed ID, not live maximum", async () => {
-  const f = fixture();
-  const queries: string[] = [];
+const range = (from: number, to: number) =>
+  Array.from({ length: Math.max(0, to - from + 1) }, (_, index) => from + index);
+// A session whose history is served in pages of `size` events, newest first, as Waypoint does.
+function pagedServer(size: number, last: number) {
+  const server = { last, fail: false, queries: [] as string[] };
   const client = new WaypointClient(connection.apiUrl, async (url) => {
     const path = new URL(String(url));
     if (!path.pathname.endsWith("/events")) return response({ session: sessionWire() });
-    queries.push(path.search);
+    server.queries.push(path.search);
+    if (server.fail) return response({ detail: "unavailable" }, 503);
+    const end = Number(path.searchParams.get("before_sequence") ?? server.last + 1) - 1;
+    const start = Math.max(1, end - size + 1);
     return response({
-      events: path.searchParams.has("cursor")
-        ? Array.from({ length: 80 }, (_, index) => eventWire(index + 2, "agent_output", ".", `gap-${index + 2}`))
-        : [eventWire(1, "agent_output", "start")],
-      has_more: false,
+      events: range(start, end).map((sequence) => eventWire(sequence, "agent_output", ".", `item-${sequence}`)),
+      has_more: start > 1,
     });
   });
-  const feed = new ConversationFeed(connection, "demo", client, f);
+  return { server, client };
+}
+const sequences = (feed: ConversationFeed) => feed.getSnapshot().events.map((event) => event.sequence);
+async function resume(f: ReturnType<typeof fixture>, feed: ConversationFeed, live: number[] = []) {
+  feed.stop();
   feed.start();
   f.send("session_state", { session: sessionWire() });
-  await tick();
-  f.send("event", { event: eventWire(81, "agent_output", ".", "gap-81") });
-  f.sockets[0].handlers.close(1006);
-  f.reconnect();
-  f.send("session_state", { session: sessionWire() });
-  f.send("event", { event: eventWire(82, "agent_output", "end", "end") });
-  await tick();
-  assert.ok(queries.some((query) => query.includes("cursor=101")));
-  assert.equal(feed.getSnapshot().events.length, 82);
-  assert.equal(
-    transcript(feed.getSnapshot().events)
-      .map((row) => row.text)
-      .join(""),
-    `start${".".repeat(80)}end`,
-  );
+  for (const sequence of live) f.send("event", { event: eventWire(sequence, "agent_output", ".", `item-${sequence}`) });
+  for (let index = 0; index < 20; index++) await tick();
+}
+
+test("a resumed conversation bridges a small gap from the latest page", async () => {
+  const f = fixture();
+  const { server, client } = pagedServer(3, 10);
+  const feed = new ConversationFeed(connection, "demo", client, f);
+  await resume(f, feed);
+  assert.deepEqual(sequences(feed), [8, 9, 10]);
+  server.last = 20;
+  await resume(f, feed);
+  assert.deepEqual(sequences(feed), range(8, 20));
+  assert.deepEqual(feed.getSnapshot().gaps, []);
+  assert.equal(feed.getSnapshot().contiguousFrom, undefined);
+  assert.ok(server.queries.every((query) => !query.includes("cursor")));
   feed.stop();
+});
+
+test("a gap too large to bridge is acknowledged until Reload Conversation", async () => {
+  const f = fixture();
+  const { server, client } = pagedServer(3, 10);
+  const feed = new ConversationFeed(connection, "demo", client, f);
+  await resume(f, feed);
+  server.last = 40;
+  await resume(f, feed);
+  assert.deepEqual(sequences(feed), [8, 9, 10, ...range(23, 40)]);
+  assert.equal(server.queries.filter((query) => query.includes("before_sequence")).length, bridgePages);
+  assert.deepEqual(feed.getSnapshot().gaps, [23]);
+  assert.equal(feed.getSnapshot().contiguousFrom, 23);
+  server.last = 41;
+  await resume(f, feed);
+  assert.deepEqual(feed.getSnapshot().gaps, [23], "a later catch-up keeps the notice");
+  server.last = 80;
+  await resume(f, feed);
+  assert.deepEqual(feed.getSnapshot().gaps, [23, 63], "a second long absence adds its own gap");
+  assert.equal(feed.getSnapshot().contiguousFrom, 63);
+  feed.reload();
+  for (let index = 0; index < 20; index++) await tick();
+  assert.deepEqual(sequences(feed), [78, 79, 80]);
+  assert.deepEqual(feed.getSnapshot().gaps, []);
+  assert.equal(feed.getSnapshot().contiguousFrom, undefined);
+  assert.equal(feed.getSnapshot().hasMore, true);
+  feed.stop();
+});
+
+test("a bridge whose last page starts right after the loaded history leaves no gap", async () => {
+  const f = fixture();
+  const { server, client } = pagedServer(3, 10);
+  const feed = new ConversationFeed(connection, "demo", client, f);
+  await resume(f, feed);
+  server.last = 10 + 3 * (bridgePages + 1);
+  await resume(f, feed);
+  assert.deepEqual(sequences(feed), range(8, server.last));
+  assert.deepEqual(feed.getSnapshot().gaps, []);
+  assert.equal(feed.getSnapshot().contiguousFrom, undefined);
+  feed.stop();
+});
+
+test("a failed resume counts requests only past the hole until a later resume bridges it", async () => {
+  const f = fixture();
+  const { server, client } = pagedServer(4, 10);
+  const feed = new ConversationFeed(connection, "demo", client, f);
+  await resume(f, feed);
+  assert.deepEqual(sequences(feed), [7, 8, 9, 10]);
+  server.fail = true;
+  await resume(f, feed, [22]);
+  assert.deepEqual(sequences(feed), [7, 8, 9, 10, 22]);
+  assert.equal(feed.getSnapshot().contiguousFrom, 11);
+  await resume(f, feed);
+  assert.equal(feed.getSnapshot().contiguousFrom, 23, "a second failure moves past the newer hole");
+  server.fail = false;
+  server.last = 25;
+  await resume(f, feed);
+  assert.deepEqual(sequences(feed), range(7, 25), "the bridge reaches back to the first hole");
+  assert.equal(feed.getSnapshot().contiguousFrom, undefined);
+  assert.deepEqual(feed.getSnapshot().gaps, []);
+
+  server.fail = true;
+  await resume(f, feed, [40]);
+  server.fail = false;
+  server.last = 100;
+  await resume(f, feed);
+  assert.deepEqual(feed.getSnapshot().gaps, [26, 77], "a hole the bridge doesn't reach is marked with the gap past it");
+  assert.equal(feed.getSnapshot().contiguousFrom, 77);
+
+  const empty = pagedServer(4, 10);
+  empty.server.fail = true;
+  const fresh = new ConversationFeed(connection, "demo", empty.client, f);
+  await resume(f, fresh);
+  assert.ok(fresh.getSnapshot().error);
+  assert.equal(fresh.getSnapshot().contiguousFrom, undefined, "a failure with nothing loaded leaves no hole");
+  feed.stop();
+  fresh.stop();
 });
 
 test("a socket question snapshot wins over stale REST and resets revision after reconnect", async () => {
@@ -293,7 +378,7 @@ test("ID-less reconnect pages backward until the prior sequence is bridged", asy
   f.reconnect();
   f.send("session_state", { session: sessionWire() });
   await tick();
-  assert.deepEqual(beforeQueries, ["5", "3"]);
+  assert.deepEqual(beforeQueries, ["5"], "a page starting right after the held history joins it");
   assert.deepEqual(
     feed.getSnapshot().events.map((event) => event.sequence),
     [1, 2, 3, 4, 5, 6],
