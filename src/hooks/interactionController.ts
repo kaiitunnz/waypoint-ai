@@ -38,11 +38,13 @@ interface FeedBlock {
   source: object;
   events: SessionEvent[];
   last: number;
+  cut: boolean;
 }
 const unsaved =
   "Waypoint accepted the response, but this computer could not clear its saved attempt. Check the outcome, then clear it.";
-const unconfirmable =
-  "Couldn't confirm from the loaded history. Load earlier messages until the request appears, or open it in Waypoint.";
+// Earlier messages load below a gap, so a conversation with one is reloaded first.
+const unconfirmable = (cut: boolean) =>
+  `Couldn't confirm from the loaded history. ${cut ? "Reload Conversation, then load" : "Load"} earlier messages until the request appears, or open it in Waypoint.`;
 const definitive = new Set(["expired-token", "not-found", "rejected"]);
 const message = (error: unknown, fallback: string) => (error instanceof Error ? error.message : fallback);
 
@@ -154,7 +156,7 @@ export class InteractionController {
     const events = from === undefined ? snapshot.events : snapshot.events.filter((event) => event.sequence >= from);
     const last = snapshot.events.at(-1)?.sequence;
     if (last === undefined || (this.feed && this.feed.source !== source && last < this.feed.last)) return;
-    this.feed = { source, events, last };
+    this.feed = { source, events, last, cut: from !== undefined };
   }
   // A just-fetched latest page joins the feed's history only where the two meet, so a request is never
   // judged across history that neither holds.
@@ -288,7 +290,9 @@ export class InteractionController {
         const current = this.interactions(window).find((item) => item.key === captured.key);
         if (!current)
           throw new Error(
-            this.resolved(captured.key, window) ? "This request was resolved or replaced." : unconfirmable,
+            this.resolved(captured.key, window)
+              ? "This request was resolved or replaced."
+              : unconfirmable(!!this.feed?.cut),
           );
         if (current.signature !== captured.signature)
           throw new Error("This request changed. Review its current version.");
@@ -371,7 +375,7 @@ export class InteractionController {
     if (pending.sessionId === this.sessionId && !found && !this.resolved(key, window)) {
       this.publish({
         outcome: undefined,
-        notice: unconfirmable,
+        notice: unconfirmable(!!this.feed?.cut),
       });
       return;
     }

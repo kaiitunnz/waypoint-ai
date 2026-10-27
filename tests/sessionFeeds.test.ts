@@ -108,7 +108,7 @@ test("a resumed conversation bridges a small gap from the latest page", async ()
   server.last = 20;
   await resume(f, feed);
   assert.deepEqual(sequences(feed), range(8, 20));
-  assert.equal(feed.getSnapshot().horizon, undefined);
+  assert.deepEqual(feed.getSnapshot().gaps, []);
   assert.equal(feed.getSnapshot().contiguousFrom, undefined);
   assert.ok(server.queries.every((query) => !query.includes("cursor")));
   feed.stop();
@@ -123,15 +123,19 @@ test("a gap too large to bridge is acknowledged until Reload Conversation", asyn
   await resume(f, feed);
   assert.deepEqual(sequences(feed), [8, 9, 10, ...range(23, 40)]);
   assert.equal(server.queries.filter((query) => query.includes("before_sequence")).length, bridgePages);
-  assert.equal(feed.getSnapshot().horizon, 23);
+  assert.deepEqual(feed.getSnapshot().gaps, [23]);
   assert.equal(feed.getSnapshot().contiguousFrom, 23);
   server.last = 41;
   await resume(f, feed);
-  assert.equal(feed.getSnapshot().horizon, 23, "a later catch-up keeps the notice");
+  assert.deepEqual(feed.getSnapshot().gaps, [23], "a later catch-up keeps the notice");
+  server.last = 80;
+  await resume(f, feed);
+  assert.deepEqual(feed.getSnapshot().gaps, [23, 63], "a second long absence adds its own gap");
+  assert.equal(feed.getSnapshot().contiguousFrom, 63);
   feed.reload();
   for (let index = 0; index < 20; index++) await tick();
-  assert.deepEqual(sequences(feed), [39, 40, 41]);
-  assert.equal(feed.getSnapshot().horizon, undefined);
+  assert.deepEqual(sequences(feed), [78, 79, 80]);
+  assert.deepEqual(feed.getSnapshot().gaps, []);
   assert.equal(feed.getSnapshot().contiguousFrom, undefined);
   assert.equal(feed.getSnapshot().hasMore, true);
   feed.stop();
@@ -145,7 +149,7 @@ test("a bridge whose last page starts right after the loaded history leaves no g
   server.last = 10 + 3 * (bridgePages + 1);
   await resume(f, feed);
   assert.deepEqual(sequences(feed), range(8, server.last));
-  assert.equal(feed.getSnapshot().horizon, undefined);
+  assert.deepEqual(feed.getSnapshot().gaps, []);
   assert.equal(feed.getSnapshot().contiguousFrom, undefined);
   feed.stop();
 });
@@ -167,7 +171,7 @@ test("a failed resume counts requests only past the hole until a later resume br
   await resume(f, feed);
   assert.deepEqual(sequences(feed), range(7, 25), "the bridge reaches back to the first hole");
   assert.equal(feed.getSnapshot().contiguousFrom, undefined);
-  assert.equal(feed.getSnapshot().horizon, undefined);
+  assert.deepEqual(feed.getSnapshot().gaps, []);
 
   const empty = pagedServer(4, 10);
   empty.server.fail = true;

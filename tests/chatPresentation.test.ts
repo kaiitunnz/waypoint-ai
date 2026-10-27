@@ -116,7 +116,7 @@ test("activity after a gap starts its own exchange with a marker", () => {
     event(40, "agent_output", "New output"),
     event(41, "user_input", "New prompt"),
   ]);
-  const exchanges = chatExchanges(rows, 40);
+  const exchanges = chatExchanges(rows, [40]);
   assert.deepEqual(
     exchanges.map((exchange) => [exchange.prompt?.text, exchange.rows.map((row) => row.text), !!exchange.afterGap]),
     [
@@ -126,5 +126,18 @@ test("activity after a gap starts its own exchange with a marker", () => {
     ],
   );
   assert.match(conversationMarkdown(exchanges), /Old answer[\s\S]*Earlier activity isn't loaded[\s\S]*New output/);
-  assert.equal(chatExchanges(rows.slice(2), 40)[0].afterGap, undefined, "nothing before it, so no marker");
+  assert.equal(chatExchanges(rows.slice(2), [40])[0].afterGap, undefined, "nothing before it, so no marker");
+  const twice = chatExchanges(
+    transcript([
+      event(1, "user_input", "Old prompt"),
+      event(20, "agent_output", "After the first gap"),
+      event(60, "agent_output", "After the second gap"),
+    ]),
+    [20, 60],
+  );
+  assert.deepEqual(
+    twice.map((exchange) => !!exchange.afterGap),
+    [false, true, true],
+    "each gap is marked",
+  );
 });

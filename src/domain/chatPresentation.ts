@@ -36,13 +36,13 @@ const more = (text: string, limit?: number) =>
 const plainText = (text: string) =>
   text.replace(/[&\\`*_{}[\]()<>#+.!|~-]/g, (character) => `&#${character.charCodeAt(0)};`);
 
-// Rows from `horizon` on follow a gap, so they start their own exchange rather than answering an earlier prompt.
-export function chatExchanges(rows: TranscriptRow[], horizon?: number): ChatExchange[] {
+// Activity resuming after each of `gaps` starts its own exchange rather than answering an earlier prompt.
+export function chatExchanges(rows: TranscriptRow[], gaps: number[] = []): ChatExchange[] {
   const exchanges: ChatExchange[] = [];
-  let gap = horizon !== undefined;
+  let next = 0;
   for (const row of rows) {
-    const afterGap = gap && row.sequence >= horizon!;
-    if (afterGap) gap = false;
+    const afterGap = next < gaps.length && row.sequence >= gaps[next];
+    while (next < gaps.length && row.sequence >= gaps[next]) next++;
     if (row.kind === "user" || !exchanges.length || afterGap)
       exchanges.push({
         id: row.id,

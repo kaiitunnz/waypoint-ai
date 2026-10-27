@@ -160,6 +160,7 @@ const feed = (overrides: Partial<ConversationSnapshot>): ConversationSnapshot =>
   loadingOlder: false,
   hasMore: false,
   stream: "live",
+  gaps: [],
   ...overrides,
 });
 
@@ -327,8 +328,15 @@ test("Check Previous Outcome gives no verdict for a request older than the loade
   f.server.events.push(...filler(2, 10));
   sync(c, f);
   assert.equal(await c.checkOutcome(), undefined, "the reloaded latest page no longer shows the request");
-  assert.match(c.getSnapshot().notice!, /Couldn't confirm/);
+  assert.match(c.getSnapshot().notice!, /Couldn't confirm.*Load earlier messages/);
   assert.equal((await f.store.load(connection.id)).pending?.kind, "interaction");
+  sync(c, f, { events: loaded(f, "agent", 11), contiguousFrom: 9 });
+  assert.equal(await c.checkOutcome(), undefined);
+  assert.match(
+    c.getSnapshot().notice!,
+    /Reload Conversation, then load earlier messages/,
+    "earlier messages load below a gap, so it is reloaded first",
+  );
   await f.close();
 });
 

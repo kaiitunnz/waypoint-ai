@@ -160,8 +160,8 @@ export interface ConversationSnapshot {
   hasMore: boolean;
   stream: StreamStatus;
   error?: ApiError;
-  // The first event of the latest activity after a gap too large to fill on resume. Only Reload clears it.
-  horizon?: number;
+  // Where activity resumes after each gap too large to fill on resume, oldest first. Only Reload clears them.
+  gaps: number[];
   // Requests are found from this event on; earlier history may be missing events.
   contiguousFrom?: number;
 }
@@ -195,7 +195,7 @@ export class ConversationFeed extends Observable<ConversationSnapshot> {
     private readonly client = new WaypointClient(connection.apiUrl),
     options: Options = {},
   ) {
-    super({ events: [], loading: true, loadingOlder: false, hasMore: false, stream: "connecting" });
+    super({ events: [], loading: true, loadingOlder: false, hasMore: false, stream: "connecting", gaps: [] });
     this.watch = options.watch ?? timers;
     this.socket = new LiveSocket(
       socketUrl(connection.apiUrl, connection.token, sessionId),
@@ -284,7 +284,7 @@ export class ConversationFeed extends Observable<ConversationSnapshot> {
     this.boundary = undefined;
     this.hydrated = false;
     this.hydrating = true;
-    this.publish({ events: [], hasMore: false, horizon: undefined, contiguousFrom: undefined });
+    this.publish({ events: [], hasMore: false, gaps: [], contiguousFrom: undefined });
     void this.hydrate();
   }
   private receive(message: Envelope, initial: boolean) {
@@ -344,15 +344,15 @@ export class ConversationFeed extends Observable<ConversationSnapshot> {
         fetched.push(...bridge.events);
       }
       // A gap left after the bridge is shown as one rather than filled event by event.
-      const horizon = short() ? highest(this.state.horizon, bridge.events[0].sequence) : this.state.horizon;
+      const gaps = short() ? [...this.state.gaps, bridge.events[0].sequence] : this.state.gaps;
       this.anchor = undefined;
       this.boundary = undefined;
       this.publish({
         events: mergeEvents(this.state.events, [...fetched, ...this.buffer], this.sessionId),
         ...(revision === this.sessionRevision ? { session } : {}),
         hasMore: !this.hydrated || oldSequence === undefined ? bridge.hasMore : this.state.hasMore,
-        horizon,
-        contiguousFrom: horizon,
+        gaps,
+        contiguousFrom: gaps.at(-1),
         loading: false,
         error: undefined,
       });
@@ -372,7 +372,7 @@ export class ConversationFeed extends Observable<ConversationSnapshot> {
       }
       this.publish({
         events: mergeEvents(this.state.events, this.buffer, this.sessionId),
-        contiguousFrom: highest(this.boundary, this.state.horizon),
+        contiguousFrom: highest(this.boundary, this.state.gaps.at(-1)),
         loading: false,
         error: failure,
       });

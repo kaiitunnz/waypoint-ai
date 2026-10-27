@@ -80,7 +80,7 @@ The personal assistant and telemetry sessions are not listed. An open conversati
 
 Pending approvals, plan approvals, and agent questions appear under **Needs Attention** above the conversation in Quick Chat, the conversation reader, and Conversation History. Review a request to see its context and respond: approvals offer the decisions the agent supports and an optional note where supported; plans accept a note; questions take single or multiple choices, notes, and free-text answers. Answers in progress are saved, so closing the form keeps them. **Cancel Question** tells the agent to continue without an answer; closing the form does not.
 
-As in Waypoint's web app, approvals and plans are found in the conversation history that has been loaded. A request older than that appears after loading earlier messages, or in Waypoint.
+As in Waypoint's web app, approvals and plans are found in the conversation history that has been loaded. A request older than that appears after loading earlier messages, or in Waypoint. When earlier activity is missing after a long absence, reload the conversation first.
 
 A form stays bound to the request it opened. If the request is answered elsewhere or replaced, the form shows that and sends nothing. Requests the agent's interface cannot handle natively, such as unsupported question formats or requests without a stable ID, offer **Open in Waypoint**.
 

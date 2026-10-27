@@ -196,7 +196,7 @@ export function ConversationContent({
   const url = sessionUrl(connection.frontendUrl, sessionId);
   const auth = state.error?.kind === "expired-token" || state.stream === "auth-error";
   const canRead = !state.session || isStructured(state.session, metadata);
-  const gap = state.horizon !== undefined;
+  const gap = state.gaps.length > 0;
   const auxiliaryIds = [
     ...interactionItemIds(interactionState, sessionId),
     ...(auth || state.error || state.stream !== "live" || gap ? ["connection-status"] : []),

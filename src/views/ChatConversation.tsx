@@ -53,7 +53,7 @@ function FullConversation({
   showActivity: boolean;
 }) {
   const state = useSyncExternalStore(feed.subscribe, feed.getSnapshot);
-  const exchanges = chatExchanges(transcript(state.events), state.horizon);
+  const exchanges = chatExchanges(transcript(state.events), state.gaps);
   const waiting = !!state.session && ["starting", "running"].includes(state.session.status);
   const response = exchanges
     .at(-1)
@@ -145,10 +145,7 @@ export function ChatConversation({
   const [mode, setMode] = useState<ReadingMode>("conversation");
   const [interactionSelection, setInteractionSelection] = useState<string>();
   const [showActivity, setShowActivity] = useState(false);
-  const exchanges = useMemo(
-    () => chatExchanges(transcript(state.events), state.horizon),
-    [state.events, state.horizon],
-  );
+  const exchanges = useMemo(() => chatExchanges(transcript(state.events), state.gaps), [state.events, state.gaps]);
   const session = state.session;
   const waiting = !!session && ["starting", "running"].includes(session.status);
   const unsupported = session && !isStructured(session, metadata);
@@ -163,7 +160,7 @@ export function ChatConversation({
   const interactions = interactionState.interactions;
   const unconfirmed = unconfirmedFor(interactionState, sessionId);
   const attention = [
-    ...(state.horizon !== undefined ? [`- **Earlier activity missing.** ${gapNotice}`] : []),
+    ...(state.gaps.length ? [`- **Earlier activity missing.** ${gapNotice}`] : []),
     ...(interactionState.loadError
       ? [`- **Requests unavailable.** ${markdownText(interactionState.loadError)} Refresh to retry.`]
       : []),
