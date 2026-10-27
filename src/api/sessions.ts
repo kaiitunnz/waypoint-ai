@@ -159,6 +159,97 @@ function pick(source: Record<string, unknown>, keys: string[]): Record<string, u
   return Object.fromEntries(keys.flatMap((key) => (typeof source[key] === "string" ? [[key, source[key]]] : [])));
 }
 
+// Tool arguments name a target; file bodies and prompts are dropped, so a Write call stays small.
+const argumentKeys = [
+  "command",
+  "description",
+  "filePath",
+  "file_path",
+  "glob",
+  "include",
+  "notebook_path",
+  "path",
+  "pattern",
+  "query",
+  "subagent_type",
+  "url",
+];
+const argumentLimit = 300;
+const todoLimit = 40;
+
+function toolArguments(value: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(value)) return undefined;
+  const result: Record<string, unknown> = {};
+  for (const key of argumentKeys) {
+    const entry = value[key];
+    if (typeof entry === "string" && entry) result[key] = entry.slice(0, argumentLimit);
+  }
+  if (Array.isArray(value.todos))
+    result.todos = value.todos
+      .slice(0, todoLimit)
+      .flatMap((item) =>
+        isRecord(item) && typeof item.content === "string"
+          ? [{ text: item.content.slice(0, argumentLimit), status: typeof item.status === "string" ? item.status : "" }]
+          : [],
+      );
+  return Object.keys(result).length ? result : undefined;
+}
+
+// Codex carries a command's string and a file change's paths inside the raw upstream item.
+function toolItem(value: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(value)) return undefined;
+  const result: Record<string, unknown> = {};
+  if (typeof value.command === "string" && value.command) result.command = value.command.slice(0, argumentLimit);
+  for (const key of ["server", "tool", "namespace"])
+    if (typeof value[key] === "string" && value[key]) result[key] = value[key];
+  if (Array.isArray(value.changes))
+    result.changes = value.changes
+      .slice(0, todoLimit)
+      .flatMap((item) =>
+        isRecord(item) && typeof item.path === "string" ? [{ path: item.path.slice(0, argumentLimit) }] : [],
+      );
+  if (Array.isArray(value.items))
+    result.items = value.items
+      .slice(0, todoLimit)
+      .flatMap((item) =>
+        isRecord(item) && typeof item.text === "string"
+          ? [{ text: item.text.slice(0, argumentLimit), status: typeof item.status === "string" ? item.status : "" }]
+          : [],
+      );
+  return Object.keys(result).length ? result : undefined;
+}
+
+// The per-file diff body averages 9 KB and nothing in the UI shows it; the counts are what the summary needs.
+function diffPreview(value: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(value) || !Array.isArray(value.files)) return undefined;
+  const files = value.files.flatMap((item) => {
+    if (!isRecord(item) || typeof item.path !== "string") return [];
+    return [
+      {
+        path: item.path,
+        changeType: typeof item.change_type === "string" ? item.change_type : "unknown",
+        additions: number(item.additions) ?? 0,
+        deletions: number(item.deletions) ?? 0,
+        unavailableReason: typeof item.unavailable_reason === "string" ? item.unavailable_reason : undefined,
+      },
+    ];
+  });
+  if (!files.length) return undefined;
+  return {
+    phase: typeof value.phase === "string" ? value.phase : "unknown",
+    totalAdditions: number(value.total_additions) ?? 0,
+    totalDeletions: number(value.total_deletions) ?? 0,
+    truncated: value.truncated === true,
+    files,
+  };
+}
+
+// OpenCode reports an edit's counts as structured data on the tool event; the patch body is dropped.
+function fileDiff(value: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(value) || typeof value.file !== "string") return undefined;
+  return { path: value.file, additions: number(value.additions) ?? 0, deletions: number(value.deletions) ?? 0 };
+}
+
 // Keeps question fields with their original types so malformed shapes stay detectable.
 function questions(value: unknown): unknown {
   if (!Array.isArray(value)) return null;
@@ -215,12 +306,27 @@ export function parseEvent(value: unknown, sessionId: string): SessionEvent {
   if (isRecord(source.approval)) metadata.approval = pick(source.approval, ["approval_id"]);
   if (isRecord(source.interaction))
     metadata.interaction = pick(source.interaction, ["kind", "request_id", "title", "body", "plan_item_id"]);
+  // OpenCode marks a failed tool by method, since it reports no is_error.
+  if (source.method === "tool.error") metadata.is_error = true;
+  const preview = diffPreview(source.diff_preview);
+  if (preview) metadata.diff_preview = preview;
   if (isRecord(source.payload)) {
     const payload = pick(source.payload, ["id", "requestID", "permissionID"]);
     if (isRecord(source.payload.input) && source.payload.input.questions !== undefined)
       payload.input = { questions: questions(source.payload.input.questions) };
+    else {
+      const args = toolArguments(source.payload.input);
+      if (args) payload.input = args;
+    }
     if (isRecord(source.payload.item) && source.payload.item.type === "plan")
       payload.item = pick(source.payload.item, ["id", "text"]);
+    else {
+      const item = toolItem(source.payload.item);
+      if (item) payload.item = item;
+    }
+    const state = isRecord(source.payload.state) ? source.payload.state : undefined;
+    const diff = state && isRecord(state.metadata) ? fileDiff(state.metadata.filediff) : undefined;
+    if (diff) payload.filediff = diff;
     if (Object.keys(payload).length) metadata.payload = payload;
   }
   return {

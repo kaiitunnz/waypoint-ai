@@ -8,6 +8,8 @@ export interface TranscriptRow {
   text: string;
   timestamp: string;
   sequence: number;
+  // The events a tool row merged, kept so tool activity can be classified from structured fields.
+  sources?: SessionEvent[];
 }
 
 export function mergeEvents(current: SessionEvent[], incoming: SessionEvent[], sessionId: string): SessionEvent[] {
@@ -45,7 +47,10 @@ function withAttachments(event: SessionEvent) {
 export function transcript(events: SessionEvent[]): TranscriptRow[] {
   const rows: TranscriptRow[] = [];
   const messages = new Map<string, TranscriptRow>();
-  const tools = new Map<string, { row: TranscriptRow; call: string; output: string; streamed: boolean }>();
+  const tools = new Map<
+    string,
+    { row: TranscriptRow; call: string; output: string; streamed: boolean; sources: SessionEvent[] }
+  >();
   for (const event of events) {
     if (event.kind === "raw_terminal_chunk") continue;
     const item = string(event.metadata.item_id);
@@ -93,10 +98,11 @@ export function transcript(events: SessionEvent[]): TranscriptRow[] {
           timestamp: event.timestamp,
           sequence: event.sequence,
         };
-        tool = { row, call: "", output: "", streamed: false };
+        tool = { row, call: "", output: "", streamed: false, sources: [] };
         tools.set(key, tool);
         rows.push(row);
       }
+      tool.sources.push(event);
       if (event.kind === "tool_call") {
         tool.call = event.text || JSON.stringify(event.metadata.tool_input ?? "");
         if (event.metadata.tool_name) tool.row.title = string(event.metadata.tool_name);
@@ -110,6 +116,7 @@ export function transcript(events: SessionEvent[]): TranscriptRow[] {
         else if (!tool.output) tool.output = event.text;
         tool.streamed ||= delta;
       }
+      tool.row.sources = tool.sources;
       tool.row.text = [tool.call, tool.output].filter(Boolean).join("\n\n");
       if (event.metadata.is_error === true) tool.row.title = `${tool.row.title} · Error`;
       continue;
@@ -162,11 +169,12 @@ export function newerQuestions(current: PendingQuestions | undefined, next: Pend
     : current;
 }
 
+// Entries may be a single row or a collapsed tool run, so both are addressed by id.
 export function selectedRow(
-  rows: TranscriptRow[],
+  entries: { id: string; kind?: TranscriptRow["kind"] }[],
   previousId: string | undefined,
   following: boolean,
 ): string | undefined {
-  if (following) return rows.findLast((row) => row.kind === "assistant")?.id ?? rows.at(-1)?.id;
-  return rows.some((row) => row.id === previousId) ? previousId : rows.at(-1)?.id;
+  if (following) return entries.findLast((entry) => entry.kind === "assistant")?.id ?? entries.at(-1)?.id;
+  return entries.some((entry) => entry.id === previousId) ? previousId : entries.at(-1)?.id;
 }

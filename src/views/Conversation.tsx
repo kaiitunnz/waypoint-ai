@@ -2,6 +2,7 @@ import { Action, ActionPanel, Detail, Icon, Keyboard, List, useNavigation } from
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { ServerMetadata } from "../api/contracts";
 import { TranscriptRow, transcript, selectedRow } from "../domain/transcript";
+import { entryId, entryKind, groupRuns, runMarkdown, toolMarkdown } from "../domain/chatPresentation";
 import { isStructured, sessionUrl } from "../domain/sessions";
 import { useConnections } from "../hooks/useConnections";
 import { useConversationFeed } from "../hooks/useSessionFeeds";
@@ -146,8 +147,8 @@ function ConversationSessionActions({
 }
 
 function rowMarkdown(row: TranscriptRow): string {
-  const body = row.kind === "tool" ? `\`\`\`text\n${row.text.replaceAll("```", "` ` `")}\n\`\`\`` : row.text;
-  return `### ${markdownText(row.title)}\n\n${body || "Waiting for content…"}`;
+  if (row.kind === "tool") return toolMarkdown(row);
+  return `### ${markdownText(row.title)}\n\n${row.text || "Waiting for content…"}`;
 }
 
 function FullResponse({ feed, rowId }: { feed: ConversationFeed; rowId: string }) {
@@ -161,6 +162,28 @@ function FullResponse({ feed, rowId }: { feed: ConversationFeed; rowId: string }
         row ? (
           <ActionPanel>
             <Action.CopyToClipboard title="Copy Response" content={row.text} />
+          </ActionPanel>
+        ) : undefined
+      }
+    />
+  );
+}
+
+function FullRun({ feed, runId }: { feed: ConversationFeed; runId: string }) {
+  const state = useSyncExternalStore(feed.subscribe, feed.getSnapshot);
+  const run = groupRuns(transcript(state.events)).find((entry) => "run" in entry && entry.run.id === runId);
+  const toolRun = run && "run" in run ? run.run : undefined;
+  return (
+    <Detail
+      navigationTitle={toolRun?.summary ?? "Tool activity"}
+      markdown={toolRun ? runMarkdown(toolRun) : "This activity is no longer in the loaded history."}
+      actions={
+        toolRun ? (
+          <ActionPanel>
+            <Action.CopyToClipboard
+              title="Copy Tool Activity"
+              content={toolRun.rows.map((row) => row.text).join("\n\n")}
+            />
           </ActionPanel>
         ) : undefined
       }
@@ -189,8 +212,16 @@ export function ConversationContent({
   const [following, setFollowing] = useState(true);
   const [query, setQuery] = useState("");
   const rows = useMemo(() => transcript(state.events), [state.events]);
-  const filtered = useMemo(
-    () => rows.filter((row) => `${row.title} ${row.text}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())),
+  // Search matches a run's own summary as well as each call inside it, so a path or command is still findable.
+  const entries = useMemo(
+    () =>
+      groupRuns(rows).filter((entry) => {
+        const text =
+          "run" in entry
+            ? `${entry.run.summary} ${entry.run.rows.map((row) => `${row.title} ${row.text}`).join(" ")}`
+            : `${entry.row.title} ${entry.row.text}`;
+        return text.toLocaleLowerCase().includes(query.toLocaleLowerCase());
+      }),
     [rows, query],
   );
   const url = sessionUrl(connection.frontendUrl, sessionId);
@@ -204,7 +235,11 @@ export function ConversationContent({
   const selectedId =
     !following && selection && auxiliaryIds.includes(selection)
       ? selection
-      : (selectedRow(filtered, selection, following && !query) ?? auxiliaryIds[0]);
+      : (selectedRow(
+          entries.map((entry) => ({ id: entryId(entry), kind: entryKind(entry) })),
+          selection,
+          following && !query,
+        ) ?? auxiliaryIds[0]);
 
   useEffect(() => {
     if (selectedId && selectedId !== selection) setSelection(selectedId);
@@ -306,7 +341,8 @@ export function ConversationContent({
       isLoading={state.loading || state.loadingOlder}
       selectedItemId={selectedId}
       onSelectionChange={(id) => {
-        if (id && id !== selectedId && (auxiliaryIds.includes(id) || filtered.some((row) => row.id === id))) {
+        const known = entries.some((entry) => ("run" in entry ? entry.run.id : entry.row.id) === id);
+        if (id && id !== selectedId && (auxiliaryIds.includes(id) || known)) {
           setSelection(id);
           setFollowing(false);
         }
@@ -341,77 +377,103 @@ export function ConversationContent({
         title={following ? "Conversation · Following latest" : "Conversation · Reviewing history"}
         subtitle={state.session?.status.replaceAll("_", " ")}
       >
-        {filtered.map((row) => (
-          <List.Item
-            key={row.id}
-            id={row.id}
-            title={row.title}
-            subtitle={row.text.replace(/\s+/g, " ").slice(0, 100)}
-            icon={
-              row.kind === "user"
-                ? Icon.Person
-                : row.kind === "tool"
-                  ? Icon.Hammer
+        {entries.map((entry) => {
+          const metadata = (
+            <List.Item.Detail.Metadata>
+              {state.session && (
+                <>
+                  <List.Item.Detail.Metadata.Label
+                    title="Session"
+                    text={state.session.status.replaceAll("_", " ")}
+                    icon={statusIcon(state.session.status)}
+                  />
+                  {state.session.context && (
+                    <List.Item.Detail.Metadata.Label
+                      title="Context"
+                      text={`${state.session.context.used.toLocaleString()}${state.session.context.limit ? ` / ${state.session.context.limit.toLocaleString()}` : ""} tokens`}
+                    />
+                  )}
+                  {state.session.tokens !== undefined && (
+                    <List.Item.Detail.Metadata.Label
+                      title="Tracked Tokens"
+                      text={state.session.tokens.toLocaleString()}
+                    />
+                  )}
+                </>
+              )}
+            </List.Item.Detail.Metadata>
+          );
+          const sessionInfo = state.session && (
+            <Action.Push
+              title="Session Information"
+              icon={Icon.Info}
+              target={<Detail markdown={sessionSummary(state.session)} />}
+              onPush={() => setActive(false)}
+              onPop={() => setActive(true)}
+            />
+          );
+          if ("run" in entry) {
+            const run = entry.run;
+            return (
+              <List.Item
+                key={run.id}
+                id={run.id}
+                title={run.summary || "Tool activity"}
+                subtitle={`${run.rows.length} tool ${run.rows.length === 1 ? "call" : "calls"}`}
+                icon={Icon.Hammer}
+                detail={<List.Item.Detail markdown={runMarkdown(run)} metadata={metadata} />}
+                actions={
+                  <ActionPanel>
+                    <Action.Push
+                      title="View Tool Activity"
+                      icon={Icon.Maximize}
+                      target={<FullRun feed={feed} runId={run.id} />}
+                    />
+                    <Action.CopyToClipboard
+                      title="Copy Tool Activity"
+                      content={run.rows.map((row) => row.text).join("\n\n")}
+                    />
+                    <ActionPanel.Section>{shared}</ActionPanel.Section>
+                    {sessionInfo}
+                  </ActionPanel>
+                }
+              />
+            );
+          }
+          const row = entry.row;
+          return (
+            <List.Item
+              key={row.id}
+              id={row.id}
+              title={row.title}
+              subtitle={row.text.replace(/\s+/g, " ").slice(0, 100)}
+              icon={
+                row.kind === "user"
+                  ? Icon.Person
                   : row.kind === "approval"
                     ? Icon.ExclamationMark
                     : row.kind === "reasoning"
                       ? Icon.LightBulb
                       : Icon.Message
-            }
-            detail={
-              <List.Item.Detail
-                markdown={rowMarkdown(row)}
-                metadata={
-                  <List.Item.Detail.Metadata>
-                    {state.session && (
-                      <>
-                        <List.Item.Detail.Metadata.Label
-                          title="Session"
-                          text={state.session.status.replaceAll("_", " ")}
-                          icon={statusIcon(state.session.status)}
-                        />
-                        {state.session.context && (
-                          <List.Item.Detail.Metadata.Label
-                            title="Context"
-                            text={`${state.session.context.used.toLocaleString()}${state.session.context.limit ? ` / ${state.session.context.limit.toLocaleString()}` : ""} tokens`}
-                          />
-                        )}
-                        {state.session.tokens !== undefined && (
-                          <List.Item.Detail.Metadata.Label
-                            title="Tracked Tokens"
-                            text={state.session.tokens.toLocaleString()}
-                          />
-                        )}
-                      </>
-                    )}
-                  </List.Item.Detail.Metadata>
-                }
-              />
-            }
-            actions={
-              <ActionPanel>
-                <Action.Push
-                  title="View Full Response"
-                  icon={Icon.Maximize}
-                  target={<FullResponse feed={feed} rowId={row.id} />}
-                />
-                <Action.CopyToClipboard title="Copy Response" content={row.text} />
-                <ActionPanel.Section>{shared}</ActionPanel.Section>
-                {state.session && (
+              }
+              detail={<List.Item.Detail markdown={rowMarkdown(row)} metadata={metadata} />}
+              actions={
+                <ActionPanel>
                   <Action.Push
-                    title="Session Information"
-                    icon={Icon.Info}
-                    target={<Detail markdown={sessionSummary(state.session)} />}
-                    onPush={() => setActive(false)}
-                    onPop={() => setActive(true)}
+                    title="View Full Response"
+                    icon={Icon.Maximize}
+                    target={<FullResponse feed={feed} rowId={row.id} />}
                   />
-                )}
-              </ActionPanel>
-            }
-          />
-        ))}
+                  <Action.CopyToClipboard title="Copy Response" content={row.text} />
+                  <ActionPanel.Section>{shared}</ActionPanel.Section>
+                  {sessionInfo}
+                </ActionPanel>
+              }
+            />
+          );
+        })}
       </List.Section>
-      {!filtered.length && (
+      {!entries.length && (
         <List.EmptyView
           title={state.loading ? "Loading conversation…" : query ? "No matching messages" : "No messages yet"}
           description={state.error?.message ?? "Messages and tool activity appear here as Waypoint records them."}

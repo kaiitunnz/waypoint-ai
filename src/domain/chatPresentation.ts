@@ -1,4 +1,23 @@
 import { TranscriptRow } from "./transcript";
+import { ToolActivity, summarizeRun, toolActivity } from "./toolActivity";
+
+// A run of consecutive tool calls, collapsed to one summary line.
+export interface ToolRun {
+  id: string;
+  rows: TranscriptRow[];
+  activities: ToolActivity[];
+  summary: string;
+}
+
+export type ExchangeEntry = { run: ToolRun } | { row: TranscriptRow };
+
+export function entryId(entry: ExchangeEntry): string {
+  return "run" in entry ? entry.run.id : entry.row.id;
+}
+
+export function entryKind(entry: ExchangeEntry): TranscriptRow["kind"] {
+  return "run" in entry ? "tool" : entry.row.kind;
+}
 
 export interface ChatExchange {
   id: string;
@@ -36,6 +55,37 @@ const more = (text: string, limit?: number) =>
 const plainText = (text: string) =>
   text.replace(/[&\\`*_{}[\]()<>#+.!|~-]/g, (character) => `&#${character.charCodeAt(0)};`);
 
+// A run is a contiguous stretch of tool rows. Assistant text, a user turn, a plan, and an approval
+// all break it, so the summary sits where the work actually happened.
+export function groupRuns(rows: TranscriptRow[]): ExchangeEntry[] {
+  const entries: ExchangeEntry[] = [];
+  const run = { rows: [] as TranscriptRow[], activities: [] as ToolActivity[] };
+  const flush = () => {
+    if (!run.rows.length) return;
+    entries.push({
+      run: {
+        id: `run:${run.rows[0].id}`,
+        rows: run.rows,
+        activities: run.activities,
+        summary: summarizeRun(run.activities),
+      },
+    });
+    run.rows = [];
+    run.activities = [];
+  };
+  for (const row of rows) {
+    if (row.kind !== "tool") {
+      flush();
+      entries.push({ row });
+      continue;
+    }
+    run.rows.push(row);
+    run.activities.push(toolActivity(row.sources ?? [], row.text));
+  }
+  flush();
+  return entries;
+}
+
 // Activity resuming after each of `gaps` starts its own exchange rather than answering an earlier prompt.
 export function chatExchanges(rows: TranscriptRow[], gaps: number[] = []): ChatExchange[] {
   const exchanges: ChatExchange[] = [];
@@ -53,6 +103,24 @@ export function chatExchanges(rows: TranscriptRow[], gaps: number[] = []): ChatE
     if (row.kind !== "user") exchanges.at(-1)!.rows.push(row);
   }
   return exchanges;
+}
+
+// Expanded, each call in a run shows its own target and change counts above its output.
+export function runMarkdown(run: ToolRun, limit?: number): string {
+  return [`**${run.summary}**`, ...run.rows.map((row) => toolMarkdown(row, limit))].join("\n\n");
+}
+
+export function toolMarkdown(row: TranscriptRow, limit?: number): string {
+  const activity = toolActivity(row.sources ?? [], row.text);
+  const facts = [
+    activity.target,
+    activity.additions !== undefined ? `+${activity.additions} −${activity.deletions}` : "",
+  ]
+    .filter(Boolean)
+    .map((line) => plainText(line!))
+    .join(" · ");
+  const body = `\`\`\`text\n${clip(row.text, limit).replaceAll("```", "` ` `")}\n\`\`\``;
+  return `### ${plainText(row.title)}${facts ? `\n\n${facts}` : ""}\n\n${body}${more(row.text, limit)}`;
 }
 
 export function chatMarkdown(
@@ -74,8 +142,14 @@ export function chatMarkdown(
     parts.push("---");
   }
   let assistant = false;
-  const activity = exchange.rows.filter((row) => row.kind === "tool");
-  for (const row of exchange.rows) {
+  for (const entry of groupRuns(exchange.rows)) {
+    if ("run" in entry) {
+      if (!entry.run.summary) continue;
+      // The summary is built from counts and nouns, so it needs no escaping.
+      parts.push(showActivity ? runMarkdown(entry.run, limit) : `_${entry.run.summary}_`);
+      continue;
+    }
+    const row = entry.row;
     if (row.kind === "assistant") {
       if (!assistant) parts.push("**Waypoint**");
       parts.push(row.text ? `${clip(row.text, limit, true)}${more(row.text, limit)}` : "_Thinking…_");
@@ -83,15 +157,11 @@ export function chatMarkdown(
     } else if (row.kind === "approval") {
       parts.push(`### Approval request\n\n${clip(row.text, limit, true)}${more(row.text, limit)}`);
     } else if (showActivity) {
-      parts.push(
-        `**${plainText(row.title)}**\n\n${row.kind === "tool" ? `\`\`\`text\n${clip(row.text, limit).replaceAll("```", "` ` `")}\n\`\`\`` : clip(row.text, limit, true)}${more(row.text, limit)}`,
-      );
+      parts.push(`**${plainText(row.title)}**\n\n${clip(row.text, limit, true)}${more(row.text, limit)}`);
     }
   }
   if (waiting && !assistant && !exchange.rows.some((row) => row.kind === "approval"))
     parts.push("**Waypoint**\n\n_Waiting for a response…_");
-  if (activity.length && !showActivity)
-    parts.push(`---\n\n_${activity.length} ${activity.length === 1 ? "activity item" : "activity items"}_`);
   return parts.join("\n\n");
 }
 
