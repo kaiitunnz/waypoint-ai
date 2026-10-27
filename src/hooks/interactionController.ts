@@ -41,7 +41,8 @@ interface FeedBlock {
 }
 const unsaved =
   "Waypoint accepted the response, but this computer could not clear its saved attempt. Check the outcome, then clear it.";
-const unconfirmable = "Couldn't confirm from the loaded history. Reload Conversation or open it in Waypoint.";
+const unconfirmable =
+  "Couldn't confirm from the loaded history. Load earlier messages until the request appears, or open it in Waypoint.";
 const definitive = new Set(["expired-token", "not-found", "rejected"]);
 const message = (error: unknown, fallback: string) => (error instanceof Error ? error.message : fallback);
 

@@ -53,7 +53,7 @@ function FullConversation({
   showActivity: boolean;
 }) {
   const state = useSyncExternalStore(feed.subscribe, feed.getSnapshot);
-  const exchanges = chatExchanges(transcript(state.events));
+  const exchanges = chatExchanges(transcript(state.events), state.horizon);
   const waiting = !!state.session && ["starting", "running"].includes(state.session.status);
   const response = exchanges
     .at(-1)
@@ -145,7 +145,10 @@ export function ChatConversation({
   const [mode, setMode] = useState<ReadingMode>("conversation");
   const [interactionSelection, setInteractionSelection] = useState<string>();
   const [showActivity, setShowActivity] = useState(false);
-  const exchanges = useMemo(() => chatExchanges(transcript(state.events)), [state.events]);
+  const exchanges = useMemo(
+    () => chatExchanges(transcript(state.events), state.horizon),
+    [state.events, state.horizon],
+  );
   const session = state.session;
   const waiting = !!session && ["starting", "running"].includes(session.status);
   const unsupported = session && !isStructured(session, metadata);

@@ -4,6 +4,8 @@ export interface ChatExchange {
   id: string;
   prompt?: TranscriptRow;
   rows: TranscriptRow[];
+  // The first exchange after activity that isn't loaded.
+  afterGap?: boolean;
 }
 
 // Raycast lays out the side panel's markdown again on every render, so the preview collapses oversized messages.
@@ -34,11 +36,20 @@ const more = (text: string, limit?: number) =>
 const plainText = (text: string) =>
   text.replace(/[&\\`*_{}[\]()<>#+.!|~-]/g, (character) => `&#${character.charCodeAt(0)};`);
 
-export function chatExchanges(rows: TranscriptRow[]): ChatExchange[] {
+// Rows from `horizon` on follow a gap, so they start their own exchange rather than answering an earlier prompt.
+export function chatExchanges(rows: TranscriptRow[], horizon?: number): ChatExchange[] {
   const exchanges: ChatExchange[] = [];
+  let gap = horizon !== undefined;
   for (const row of rows) {
-    if (row.kind === "user" || !exchanges.length)
-      exchanges.push({ id: row.id, prompt: row.kind === "user" ? row : undefined, rows: [] });
+    const afterGap = gap && row.sequence >= horizon!;
+    if (afterGap) gap = false;
+    if (row.kind === "user" || !exchanges.length || afterGap)
+      exchanges.push({
+        id: row.id,
+        prompt: row.kind === "user" ? row : undefined,
+        rows: [],
+        ...(afterGap && exchanges.length ? { afterGap } : {}),
+      });
     if (row.kind !== "user") exchanges.at(-1)!.rows.push(row);
   }
   return exchanges;
@@ -91,7 +102,14 @@ export function conversationMarkdown(
   limit?: number,
 ): string {
   return exchanges
-    .map((exchange, index) => chatMarkdown(exchange, showActivity, waiting && index === exchanges.length - 1, limit))
+    .map((exchange, index) =>
+      [
+        exchange.afterGap ? "_Earlier activity isn't loaded._" : "",
+        chatMarkdown(exchange, showActivity, waiting && index === exchanges.length - 1, limit),
+      ]
+        .filter(Boolean)
+        .join("\n\n---\n\n"),
+    )
     .filter(Boolean)
     .join("\n\n---\n\n");
 }
