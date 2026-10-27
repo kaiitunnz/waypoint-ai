@@ -65,6 +65,8 @@ async function fixture() {
   let uncertainInput = false;
   let terminate: "exit" | "refuse" | "uncertain" | "uncertain-exit" | "gone" = "exit";
   let duringTerminate: (() => Promise<void>) | undefined;
+  let removal: "delete" | "refuse" | "uncertain" | "uncertain-exit" | "partial" = "delete";
+  const deletes: string[] = [];
   let now = 1000000;
   const client = new WaypointClient(connection.apiUrl, async (url, options) => {
     const path = new URL(String(url)).pathname;
@@ -97,6 +99,15 @@ async function fixture() {
       await inputGate;
       if (uncertainInput) throw new Error("private connection failure");
       return respond({ session }, inputStatus);
+    }
+    if (options?.method === "DELETE") {
+      deletes.push(id);
+      if (removal === "refuse") return respond({ detail: "target busy" }, 409);
+      if (removal !== "uncertain") session.status = "exited";
+      if (removal === "partial") return respond({ detail: "worktree has changes" }, 409);
+      if (removal.startsWith("uncertain")) throw new Error("connection reset");
+      sessions.splice(sessions.indexOf(session), 1);
+      return respond({ deleted: id });
     }
     if (path.endsWith("/reattach")) {
       session.status = "idle";
@@ -161,6 +172,10 @@ async function fixture() {
     },
     setTerminate: (value: typeof terminate) => {
       terminate = value;
+    },
+    deletes,
+    setRemoval: (value: typeof removal) => {
+      removal = value;
     },
     setDuringTerminate: (value: typeof duringTerminate) => {
       duringTerminate = value;
@@ -1217,7 +1232,7 @@ test("terminating releases Quick Chat's session, and the next send starts a new 
       await persist();
     });
     await c.changeDraft("Keep this");
-    assert.deepEqual(await c.terminate(), { ended: true, message: undefined });
+    assert.deepEqual(await c.terminate(), { ended: true, outcome: "done" });
     assert.equal(f.sessions[0].status, "exited");
     assert.equal(c.getSnapshot().session, undefined);
     assert.equal(c.getSnapshot().draft, "Keep this");
@@ -1255,7 +1270,7 @@ test("a refused terminate restores the destination, and an unconfirmed one keeps
     assert.equal(restored.pointer, id);
     assert.deepEqual(restored.chosen, { sessionId: id, at: 5000 });
     f.setTerminate("uncertain-exit");
-    assert.deepEqual(await c.terminate(), { ended: true, message: undefined });
+    assert.deepEqual(await c.terminate(), { ended: true, outcome: "done" });
     await c.changeDraft("Second");
     await c.send();
     f.setTerminate("uncertain");
@@ -1270,7 +1285,11 @@ test("a refused terminate restores the destination, and an unconfirmed one keeps
     assert.equal(c.getSnapshot().session?.id, "created-3");
     assert.equal(f.sessions[1].status, "running");
     f.setTerminate("gone");
-    assert.deepEqual(await c.terminate(), { ended: true, message: "This session is no longer on this server." });
+    assert.deepEqual(await c.terminate(), {
+      ended: true,
+      outcome: "unconfirmed",
+      message: "This session is no longer on this server.",
+    });
     assert.equal((await f.store.read(connection.id)).pointer, undefined);
     // Deleted before Terminate was chosen: Quick Chat moves on rather than reporting a failure.
     await c.changeDraft("Fourth");
@@ -1280,9 +1299,156 @@ test("a refused terminate restores the destination, and an unconfirmed one keeps
       f.sessions.findIndex((session) => session.id === deleted),
       1,
     );
-    assert.deepEqual(await c.terminate(), { ended: true, message: "This session is no longer on this server." });
+    assert.deepEqual(await c.terminate(), {
+      ended: true,
+      outcome: "unconfirmed",
+      message: "This session is no longer on this server.",
+    });
     assert.equal(c.getSnapshot().session, undefined);
     assert.equal((await f.store.read(connection.id)).pointer, undefined);
+  } finally {
+    await f.close();
+  }
+});
+
+test("terminating and deleting removes Quick Chat's session and keeps the draft", async () => {
+  const f = await fixture();
+  try {
+    const first = f.controller();
+    await first.start();
+    await first.changeDraft("First");
+    await first.send();
+    const id = first.getSnapshot().session!.id;
+    first.stop();
+    const upload = { sessionId: id, attachmentId: "a1", uploadedAt: 1 };
+    const file = { id: "f1", path: "/tmp/notes.txt", name: "notes.txt", size: 1, modifiedMs: 1, upload };
+    await f.store.transaction(connection.id, async (state, persist) => {
+      state.compose = { quick: { context: [], files: [file], sessionId: id, launch: "fingerprint" } };
+      await persist();
+    });
+    const c = f.controller();
+    await c.start();
+    assert.equal(c.getSnapshot().session?.id, id);
+    await c.changeDraft("Keep this");
+    assert.deepEqual(await c.terminateAndDelete(), { ended: true, outcome: "done" });
+    assert.deepEqual(f.deletes, [id]);
+    assert.ok(
+      !f.requests.some((request) => request.path.endsWith("/terminate")),
+      "Waypoint terminates it while deleting",
+    );
+    assert.equal(f.sessions.length, 0);
+    assert.equal(c.getSnapshot().session, undefined);
+    assert.equal(c.getSnapshot().draft, "Keep this");
+    const kept = c.getSnapshot().compose;
+    assert.equal(kept.sessionId, undefined);
+    assert.equal(kept.files[0].name, "notes.txt");
+    assert.equal(kept.files[0].upload, undefined, "the deleted session's attachments are gone");
+    const saved = await f.store.read(connection.id);
+    assert.equal(saved.pointer, undefined);
+    assert.equal(saved.compose?.quick.sessionId, undefined);
+    assert.equal(saved.compose?.quick.files[0].upload, undefined);
+    // Staging more context saves the in-memory parts, which no longer bind the deleted session.
+    await c.stageContext("clipboard", "More");
+    assert.equal((await f.store.read(connection.id)).compose?.quick.sessionId, undefined);
+  } finally {
+    await f.close();
+  }
+});
+
+test("deleting reports refusals, unconfirmed results, and sessions that ended without being deleted", async () => {
+  const f = await fixture();
+  try {
+    const c = f.controller();
+    await c.start();
+    const next = async (text: string) => {
+      await c.changeDraft(text);
+      await c.send();
+      return c.getSnapshot().session!.id;
+    };
+    const first = await next("First");
+    f.setRemoval("refuse");
+    const refused = await c.terminateAndDelete();
+    assert.equal(refused?.ended, false);
+    assert.match(refused?.message ?? "", /busy/);
+    assert.equal(c.getSnapshot().session?.id, first);
+    assert.equal((await f.store.read(connection.id)).pointer, first);
+
+    f.setRemoval("uncertain");
+    const uncertain = await c.terminateAndDelete();
+    assert.equal(uncertain?.ended && uncertain.outcome, "unconfirmed");
+    assert.equal((await f.store.read(connection.id)).pointer, undefined, "Waypoint may still be deleting it");
+    const second = await next("Second");
+    f.setRemoval("uncertain-exit");
+    const exited = await c.terminateAndDelete();
+    assert.equal(exited?.ended && exited.outcome, "unconfirmed", "an exited session may still be deleting");
+    assert.notEqual(second, first);
+
+    await next("Third");
+    f.setRemoval("partial");
+    const partial = await c.terminateAndDelete();
+    assert.equal(partial?.ended && partial.outcome, "partial");
+    assert.equal(c.getSnapshot().session, undefined);
+
+    const gone = await next("Fourth");
+    f.sessions.splice(
+      f.sessions.findIndex((session) => session.id === gone),
+      1,
+    );
+    assert.deepEqual(await c.terminateAndDelete(), {
+      ended: true,
+      outcome: "unconfirmed",
+      message: "This session is no longer on this server.",
+    });
+
+    f.setRemoval("delete");
+    await next("Fifth");
+    f.sessions.at(-1)!.status = "exited";
+    assert.deepEqual(await c.terminateAndDelete(), { ended: true, outcome: "done" }, "an exited session is deleted");
+  } finally {
+    await f.close();
+  }
+});
+
+test("a refused delete of an exited session keeps it as Quick Chat's session", async () => {
+  const f = await fixture();
+  try {
+    const c = f.controller();
+    await c.start();
+    await c.changeDraft("First");
+    await c.send();
+    const id = c.getSnapshot().session!.id;
+    f.sessions[0].status = "exited";
+    f.setRemoval("refuse");
+    const refused = await c.terminateAndDelete();
+    assert.equal(refused?.ended, false, "nothing was terminated, so it isn't reported as terminated");
+    assert.match(refused?.message ?? "", /busy/);
+    assert.equal(c.getSnapshot().session?.id, id);
+    assert.equal((await f.store.read(connection.id)).pointer, id);
+  } finally {
+    await f.close();
+  }
+});
+
+test("after terminating, staging more context doesn't bind the draft to the ended session again", async () => {
+  const f = await fixture();
+  try {
+    const first = f.controller();
+    await first.start();
+    await first.changeDraft("First");
+    await first.send();
+    const id = first.getSnapshot().session!.id;
+    first.stop();
+    await f.store.transaction(connection.id, async (state, persist) => {
+      state.compose = { quick: { context: [], files: [], sessionId: id, launch: "fingerprint" } };
+      await persist();
+    });
+    const c = f.controller();
+    await c.start();
+    assert.equal(c.getSnapshot().compose.sessionId, id);
+    assert.deepEqual(await c.terminate(), { ended: true, outcome: "done" });
+    assert.equal(c.getSnapshot().compose.sessionId, undefined);
+    await c.stageContext("clipboard", "More");
+    assert.equal((await f.store.read(connection.id)).compose?.quick.sessionId, undefined);
   } finally {
     await f.close();
   }

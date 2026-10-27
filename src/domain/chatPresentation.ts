@@ -149,6 +149,9 @@ export function chatExchanges(rows: TranscriptRow[], gaps: number[] = []): ChatE
   return exchanges;
 }
 
+// Marks collapsed tool activity, so it stands apart from thinking and notes, which are also italic.
+const toolMarker = "▸";
+
 // Expanded, each call in a run shows its own target and change counts above its output.
 export function runMarkdown(run: ToolRun, limit?: number, fullView = fullWidth): string {
   return [`**${run.summary}**`, ...run.rows.map((row) => runRowMarkdown(row, limit, fullView))].join("\n\n");
@@ -213,7 +216,7 @@ export function chatMarkdown(
     if ("run" in entry) {
       if (!entry.run.summary) continue;
       // The summary is built from counts and nouns, so it needs no escaping.
-      parts.push(showActivity ? runMarkdown(entry.run, limit) : `_${entry.run.summary}_`);
+      parts.push(showActivity ? runMarkdown(entry.run, limit) : `${toolMarker} _${entry.run.summary}_`);
       continue;
     }
     const row = entry.row;
@@ -227,7 +230,7 @@ export function chatMarkdown(
       // A tool with its own card is still a call, so its text stays fenced.
       parts.push(row.kind === "tool" ? toolMarkdown(row, limit) : activityMarkdown(row, limit));
     } else if (row.kind === "tool") {
-      parts.push(`_${standaloneLine(row) ?? plainText(row.title)}_`);
+      parts.push(`${toolMarker} _${standaloneLine(row) ?? plainText(row.title)}_`);
     } else if (row.kind === "reasoning") {
       const preview = thinkingPreview(row.text);
       parts.push(`_${plainText(row.title)}${preview ? ` · ${inlineText(preview)}` : ""}_`);

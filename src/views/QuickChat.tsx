@@ -18,7 +18,7 @@ import { connectionStore } from "../storage/raycast";
 import { localWorkspace } from "../storage/workspace";
 import { canReattach, launchContext, resumeFor } from "../domain/quickChat";
 import { sessionUrl } from "../domain/sessions";
-import { terminateMessage } from "../domain/sessionActions";
+import { deleteMessage, quickChatMovesOn, terminateMessage } from "../domain/sessionActions";
 import { ChatConversation } from "./ChatConversation";
 import { QuickChatController } from "../hooks/quickChatController";
 import { QuickChatDefaults } from "./QuickChatDefaults";
@@ -247,6 +247,49 @@ function QuickChatActions({
   const include = async (kind: ContextKind) => {
     if (compose && (await includeContext(controller, kind))) push(compose);
   };
+  const end = async (kind: "terminate" | "delete") => {
+    const session = state.session;
+    if (!session) return;
+    const live = session.status !== "exited";
+    const deleting = kind === "delete";
+    if (
+      !(await confirmAlert({
+        title: !deleting
+          ? "Terminate this session?"
+          : live
+            ? "Terminate and delete this session?"
+            : "Delete this session?",
+        message: `${deleting ? deleteMessage(session, live) : terminateMessage} ${quickChatMovesOn}`,
+        primaryAction: { title: deleting ? "Delete" : "Terminate", style: Alert.ActionStyle.Destructive },
+      }))
+    )
+      return;
+    const toast = await showToast({
+      style: Toast.Style.Animated,
+      title: deleting ? "Deleting session…" : "Terminating session…",
+    });
+    const result = deleting ? await controller.terminateAndDelete() : await controller.terminate();
+    if (!result) return toast.hide();
+    const kept = "Your draft is kept.";
+    Object.assign(
+      toast,
+      !result.ended
+        ? {
+            style: Toast.Style.Failure,
+            title: deleting ? "Couldn't delete session" : "Couldn't terminate session",
+            message: result.message,
+          }
+        : result.outcome === "partial"
+          ? {
+              style: Toast.Style.Failure,
+              title: "Session terminated but not deleted",
+              message: "Delete it from Search Sessions.",
+            }
+          : result.outcome === "unconfirmed"
+            ? { style: Toast.Style.Failure, title: "Quick Chat moved to a new chat", message: result.message }
+            : { style: Toast.Style.Success, title: deleting ? "Session deleted" : "Session terminated", message: kept },
+    );
+  };
   return (
     <>
       {compose && (
@@ -408,31 +451,17 @@ function QuickChatActions({
           title="Terminate Session"
           icon={Icon.XMarkCircle}
           style={Action.Style.Destructive}
-          onAction={async () => {
-            if (
-              !(await confirmAlert({
-                title: "Terminate this session?",
-                message: `${terminateMessage} Quick Chat starts a new conversation on your next send.`,
-                primaryAction: { title: "Terminate", style: Alert.ActionStyle.Destructive },
-              }))
-            )
-              return;
-            const toast = await showToast({ style: Toast.Style.Animated, title: "Terminating session…" });
-            const result = await controller.terminate();
-            if (!result) return toast.hide();
-            Object.assign(
-              toast,
-              !result.ended
-                ? { style: Toast.Style.Failure, title: "Couldn't terminate session", message: result.message }
-                : result.message
-                  ? { style: Toast.Style.Failure, title: "Quick Chat moved to a new chat", message: result.message }
-                  : {
-                      style: Toast.Style.Success,
-                      title: "Session terminated",
-                      message: "A new conversation starts on your next send; your draft is kept.",
-                    },
-            );
-          }}
+          shortcut={{ modifiers: ["ctrl", "shift"], key: "x" }}
+          onAction={() => end("terminate")}
+        />
+      )}
+      {state.session && !state.busy && !state.pending && (
+        <Action
+          title={state.session.status === "exited" ? "Delete Session" : "Terminate and Delete Session"}
+          icon={Icon.Trash}
+          style={Action.Style.Destructive}
+          shortcut={Keyboard.Shortcut.Common.Remove}
+          onAction={() => end("delete")}
         />
       )}
       <Action.Push

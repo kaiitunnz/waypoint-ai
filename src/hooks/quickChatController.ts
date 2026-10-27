@@ -35,7 +35,7 @@ import {
 import { draftKeys } from "../storage/drafts";
 import { PendingOperation, QuickChatState, QuickChatStore, lastActivity, setPointer } from "../storage/quickChat";
 import { Workspace } from "../storage/workspace";
-import { ManageOutcome, SessionManager } from "./sessionManager";
+import { ManageOutcome, Released, SessionManager, refused, release } from "./sessionManager";
 import { FeedConnection } from "./sessionFeeds";
 
 export interface QuickChatSnapshot {
@@ -76,15 +76,9 @@ async function fileStats(file: StagedFile): Promise<FileStats> {
   return { size: stats!.size, modifiedMs: stats!.mtimeMs };
 }
 // `ended` means Quick Chat no longer continues the session; `message` explains a failure or an unconfirmed result.
-export interface TerminateResult {
-  ended: boolean;
-  message?: string;
-}
-interface Released {
-  pointer?: boolean;
-  chosen?: number;
-  bindings: Record<string, string | undefined>;
-}
+// `partial` is a delete that ended the session but didn't remove it; `unconfirmed` may still have done either.
+export type TerminateResult =
+  { ended: false; message: string } | { ended: true; outcome: "done" | "unconfirmed" | "partial"; message?: string };
 export class QuickChatController {
   private state: QuickChatSnapshot = {
     loading: true,
@@ -972,13 +966,21 @@ export class QuickChatController {
       this.publish({ busy: false });
     }
   }
-  // The destination is released before terminating, so a closed window or an unconfirmed result can't leave Quick
-  // Chat continuing the session; only a definite refusal restores it.
-  async terminate(): Promise<TerminateResult | undefined> {
+  // The destination is released before ending the session, so a closed window or an unconfirmed result can't leave
+  // Quick Chat continuing it; only a definite refusal restores it.
+  terminate() {
+    return this.end("terminate");
+  }
+  // Waypoint terminates a live session before deleting it.
+  terminateAndDelete() {
+    return this.end("delete");
+  }
+  private async end(kind: "terminate" | "delete"): Promise<TerminateResult | undefined> {
     const session = this.state.session;
     const metadata = this.state.metadata;
     if (this.state.busy || this.state.pending || !session || !metadata) return;
     const id = session.id;
+    const manager = new SessionManager(this.connection, this.store, this.client, this.now);
     this.publish({ busy: true, error: undefined, notice: undefined });
     let released: Released | undefined;
     try {
@@ -986,64 +988,66 @@ export class QuickChatController {
       const current = await this.store.transaction(this.connection.id, async (saved, persist) => {
         if (saved.pending) throw new Error("Check the earlier operation's outcome first.");
         await this.verifyConnection();
-        // A session deleted elsewhere is released like a terminated one.
+        // A session deleted elsewhere is released like an ended one.
         const current = await this.client.session(this.connection.token, id).catch((error: unknown) => {
           if (error instanceof ApiError && error.kind === "not-found") return undefined;
           throw error;
         });
-        released = { chosen: saved.chosen?.sessionId === id ? saved.chosen.at : undefined, bindings: {} };
-        if (saved.pointer === id) {
-          released.pointer = true;
-          setPointer(saved, undefined);
-        }
-        for (const [key, draft] of Object.entries(saved.compose ?? {}))
-          if (draft.sessionId === id) {
-            released.bindings[key] = draft.launch;
-            draft.sessionId = draft.launch = undefined;
-          }
+        released = release(saved, id);
         await persist();
         return current;
       });
       const outcome: ManageOutcome = !current
         ? { kind: "failed", message: "This session is no longer on this server.", gone: true }
-        : current.status === "exited"
-          ? { kind: "done", session: current }
-          : await new SessionManager(this.connection, this.store, this.client, this.now).terminate(id, metadata);
-      if (outcome.kind !== "done") {
-        const after = outcome.kind === "ssh" ? undefined : outcome.session;
-        if (after?.status !== "exited" && !(outcome.kind === "failed" && (outcome.uncertain || outcome.gone))) {
-          await this.restore(id, released!);
-          if (after) this.publish({ session: after });
-          return { ended: false, message: outcome.message };
-        }
+        : kind === "delete"
+          ? await manager.terminateAndRemove(id, metadata)
+          : current.status === "exited"
+            ? { kind: "done", session: current }
+            : await manager.terminate(id, metadata);
+      if (outcome.kind !== "done" && refused(outcome, current?.status === "exited")) {
+        await manager.restore(id, released!);
+        if (outcome.kind !== "ssh" && outcome.session) this.publish({ session: outcome.session });
+        return { ended: false, message: outcome.message };
       }
+      const uncertain = outcome.kind === "failed" && (outcome.uncertain || outcome.gone);
+      const result: TerminateResult =
+        outcome.kind === "done"
+          ? { ended: true, outcome: "done" }
+          : kind === "delete"
+            ? { ended: true, outcome: uncertain ? "unconfirmed" : "partial", message: outcome.message }
+            : outcome.kind === "failed" && outcome.session?.status !== "exited"
+              ? { ended: true, outcome: "unconfirmed", message: outcome.message }
+              : { ended: true, outcome: "done" };
       this.generation++;
       this.prepared = true;
       this.observedPointer = undefined;
       this.observedDefaults = "manual-new";
-      this.publish({ session: undefined, loading: false, revision: this.state.revision + 1 });
-      // An unconfirmed result or a session that is gone is explained, since it wasn't a confirmed terminate.
-      const unconfirmed = outcome.kind === "failed" && outcome.session?.status !== "exited";
-      return { ended: true, message: unconfirmed ? outcome.message : undefined };
+      this.publish({
+        session: undefined,
+        loading: false,
+        revision: this.state.revision + 1,
+        compose: this.unbound(id, kind === "delete"),
+      });
+      return result;
     } catch (error) {
-      if (released) await this.restore(id, released).catch(() => undefined);
+      if (released) await manager.restore(id, released).catch(() => undefined);
       const saved = await this.store.read(this.connection.id).catch(() => undefined);
       this.publish({ pending: saved?.pending });
-      return { ended: false, message: error instanceof Error ? error.message : "Could not terminate the session." };
+      return { ended: false, message: error instanceof Error ? error.message : "Could not end the session." };
     } finally {
       this.publish({ busy: false });
     }
   }
-  private restore(id: string, released: Released) {
-    return this.store.transaction(this.connection.id, async (saved, persist) => {
-      if (saved.pending) return;
-      if (released.pointer && saved.pointer === undefined) setPointer(saved, id, released.chosen);
-      for (const [key, launch] of Object.entries(released.bindings)) {
-        const draft = saved.compose?.[key];
-        if (draft && draft.sessionId === undefined) Object.assign(draft, { sessionId: id, launch });
-      }
-      await persist();
-    });
+  // The staged parts kept in memory are saved again on the next edit, so they drop the ended session too.
+  private unbound(id: string, deleted: boolean): ComposeParts {
+    const compose = this.state.compose;
+    return {
+      ...compose,
+      ...(compose.sessionId === id ? { sessionId: undefined, launch: undefined } : {}),
+      files: deleted
+        ? compose.files.map((file) => (file.upload?.sessionId === id ? { ...file, upload: undefined } : file))
+        : compose.files,
+    };
   }
   async action(action: "interrupt" | "reattach") {
     if (this.state.busy || this.state.pending || !this.state.session || !this.state.metadata) return;
