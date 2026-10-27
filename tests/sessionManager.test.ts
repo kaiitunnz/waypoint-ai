@@ -66,6 +66,7 @@ async function fixture() {
   let now = 5000;
   const manager = new SessionManager(connection, store, client, () => now);
   return {
+    directory,
     store,
     sessions,
     calls,
@@ -377,6 +378,159 @@ test("a failure before anything is sent says what went wrong locally", async () 
     assert.match(removal.kind === "failed" ? removal.message : "", /Saved Quick Chat data could not be read/);
   } finally {
     await rm(dir, { recursive: true, force: true });
+    await f.close();
+  }
+});
+
+const referenced = async (f: Awaited<ReturnType<typeof fixture>>) => {
+  const saved = await f.store.read(connection.id);
+  return { pointer: saved.pointer, chosen: saved.chosen, bound: saved.compose?.new?.sessionId };
+};
+const useIn = (f: Awaited<ReturnType<typeof fixture>>, pointer: string, bound: string) =>
+  f.store.transaction(connection.id, async (state, persist) => {
+    setPointer(state, pointer, 1000);
+    state.compose = { new: { context: [], files: [], sessionId: bound, launch: "fingerprint" } };
+    await persist();
+  });
+
+test("terminating a session Quick Chat uses releases it, and only a definite refusal puts it back", async () => {
+  const f = await fixture();
+  try {
+    for (const id of ["dest", "plain"]) f.add(id, { status: "running" });
+    await useIn(f, "dest", "dest");
+    const plain = await f.manager.terminate("plain", metadata);
+    assert.equal(plain.kind === "done" && plain.releasedQuickChat, undefined);
+    assert.deepEqual(await referenced(f), { pointer: "dest", chosen: { sessionId: "dest", at: 1000 }, bound: "dest" });
+
+    f.failures.set("POST /api/sessions/dest/terminate", () => respond({ detail: "target busy" }, 409));
+    assert.equal((await f.manager.terminate("dest", metadata)).kind, "failed");
+    assert.deepEqual(await referenced(f), { pointer: "dest", chosen: { sessionId: "dest", at: 1000 }, bound: "dest" });
+
+    f.failures.set("POST /api/sessions/dest/terminate", () => respond({}, 502));
+    const uncertain = await f.manager.terminate("dest", metadata);
+    assert.equal(uncertain.kind === "failed" && uncertain.uncertain, true);
+    assert.deepEqual(await referenced(f), { pointer: undefined, chosen: undefined, bound: undefined });
+
+    f.failures.clear();
+    await useIn(f, "dest", "dest");
+    const done = await f.manager.terminate("dest", metadata);
+    assert.equal(done.kind === "done" && done.releasedQuickChat, true);
+    assert.deepEqual(await referenced(f), { pointer: undefined, chosen: undefined, bound: undefined });
+  } finally {
+    await f.close();
+  }
+});
+
+test("with an unconfirmed operation, terminate still goes through and Quick Chat keeps the session", async () => {
+  for (const owner of ["dest", "other"]) {
+    const f = await fixture();
+    try {
+      f.add("dest", { status: "running" });
+      await useIn(f, "dest", "dest");
+      await f.store.transaction(connection.id, async (state, persist) => {
+        state.pending = {
+          kind: "input",
+          operationId: "op",
+          sessionId: owner,
+          text: "x",
+          draftKey: "quick",
+          startedAt: 1,
+        };
+        await persist();
+      });
+      const outcome = await f.manager.terminate("dest", metadata);
+      assert.equal(outcome.kind === "done" && outcome.releasedQuickChat, undefined, owner);
+      assert.equal(f.sessions.get("dest")!.status, "exited");
+      assert.equal((await referenced(f)).pointer, "dest", owner);
+    } finally {
+      await f.close();
+    }
+  }
+});
+
+test("a server lock held by another command doesn't stop terminate", async () => {
+  const f = await fixture();
+  try {
+    f.add("dest", { status: "running" });
+    await useIn(f, "dest", "dest");
+    // Another command has its own queue, so this command waits for the lock and gives up rather than queueing.
+    const other = new QuickChatStore(
+      {
+        getItem: async () => undefined,
+        setItem: async () => undefined,
+        keys: async () => [],
+        removeItem: async () => undefined,
+      },
+      new ServerMutex(f.directory, 2500, { queues: new Map() }),
+    );
+    let release!: () => void;
+    let held!: () => void;
+    const holding = new Promise<void>((resolve) => (held = resolve));
+    const holder = other.transaction(connection.id, async () => {
+      held();
+      await new Promise<void>((resolve) => (release = resolve));
+    });
+    await holding;
+    const outcome = await f.manager.terminate("dest", metadata);
+    release();
+    await holder;
+    assert.equal(outcome.kind === "done" && outcome.releasedQuickChat, undefined);
+    assert.equal(f.sessions.get("dest")!.status, "exited");
+    assert.equal((await referenced(f)).pointer, "dest");
+  } finally {
+    await f.close();
+  }
+});
+
+test("terminate and delete removes a live session and classifies failures", async () => {
+  const f = await fixture();
+  try {
+    f.add("live", { status: "running" });
+    assert.equal((await f.manager.remove("live", metadata)).kind, "stale", "plain delete still needs an ended session");
+    await useIn(f, "live", "live");
+    const done = await f.manager.terminateAndRemove("live", metadata);
+    assert.deepEqual(done, { kind: "done", deleted: "live", releasedQuickChat: true });
+    assert.ok(f.calls.includes("DELETE /api/sessions/live"));
+    assert.ok(!f.calls.includes("POST /api/sessions/live/terminate"));
+    assert.deepEqual(await referenced(f), { pointer: undefined, chosen: undefined, bound: undefined });
+
+    f.add("refused", { status: "running" });
+    await useIn(f, "refused", "refused");
+    f.failures.set("DELETE /api/sessions/refused", () => respond({ detail: "target busy" }, 409));
+    const refused = await f.manager.terminateAndRemove("refused", metadata);
+    assert.equal(refused.kind === "failed" && refused.uncertain, false);
+    assert.equal((await referenced(f)).pointer, "refused", "a definite refusal puts Quick Chat's session back");
+
+    f.failures.set("DELETE /api/sessions/refused", () => {
+      f.add("refused", { status: "exited" });
+      return respond({}, 502);
+    });
+    const uncertain = await f.manager.terminateAndRemove("refused", metadata);
+    assert.equal(uncertain.kind === "failed" && uncertain.uncertain, true, "it may still be deleting");
+    assert.equal(uncertain.kind === "failed" && uncertain.session?.status, "exited");
+    assert.equal((await referenced(f)).pointer, undefined);
+
+    f.add("ended", { status: "running" });
+    await useIn(f, "ended", "ended");
+    f.failures.set("DELETE /api/sessions/ended", () => {
+      f.add("ended", { status: "exited" });
+      return respond({ detail: "worktree has changes" }, 409);
+    });
+    const partial = await f.manager.terminateAndRemove("ended", metadata);
+    assert.equal(partial.kind === "failed" && !partial.uncertain && partial.session?.status, "exited");
+    assert.equal((await referenced(f)).pointer, undefined, "it ended, so Quick Chat doesn't go back to it");
+
+    await useIn(f, "missing", "missing");
+    const gone = await f.manager.terminateAndRemove("missing", metadata);
+    assert.equal(gone.kind === "failed" && gone.gone, true);
+    assert.deepEqual(await referenced(f), { pointer: undefined, chosen: undefined, bound: undefined });
+
+    f.add("exited", { status: "exited" });
+    await useIn(f, "exited", "exited");
+    f.failures.set("DELETE /api/sessions/exited", () => respond({ detail: "not allowed" }, 403));
+    assert.equal((await f.manager.remove("exited", metadata)).kind, "failed");
+    assert.equal((await referenced(f)).pointer, "exited", "a refused plain delete leaves Quick Chat alone");
+  } finally {
     await f.close();
   }
 });
