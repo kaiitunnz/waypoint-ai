@@ -2,7 +2,16 @@ import { Action, ActionPanel, Detail, Icon, Keyboard, List, useNavigation } from
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { ServerMetadata } from "../api/contracts";
 import { TranscriptRow, transcript, selectedRow } from "../domain/transcript";
-import { entryId, entryKind, groupRuns, runCallCount, runMarkdown, toolMarkdown } from "../domain/chatPresentation";
+import {
+  entryId,
+  entryKind,
+  groupRuns,
+  previewMessageLimit,
+  resolveEntryId,
+  runCallCount,
+  runMarkdown,
+  toolMarkdown,
+} from "../domain/chatPresentation";
 import { isStructured, sessionUrl } from "../domain/sessions";
 import { useConnections } from "../hooks/useConnections";
 import { useConversationFeed } from "../hooks/useSessionFeeds";
@@ -239,7 +248,7 @@ export function ConversationContent({
       ? selection
       : (selectedRow(
           entries.map((entry) => ({ id: entryId(entry), kind: entryKind(entry) })),
-          selection,
+          resolveEntryId(entries, selection),
           following && !query,
         ) ?? auxiliaryIds[0]);
 
@@ -423,7 +432,12 @@ export function ConversationContent({
                 title={run.summary || "Tool activity"}
                 subtitle={`${runCallCount(run)} tool ${runCallCount(run) === 1 ? "call" : "calls"}`}
                 icon={Icon.Hammer}
-                detail={<List.Item.Detail markdown={runMarkdown(run)} metadata={metadata} />}
+                detail={
+                  <List.Item.Detail
+                    markdown={runMarkdown(run, previewMessageLimit, "View Tool Activity")}
+                    metadata={metadata}
+                  />
+                }
                 actions={
                   <ActionPanel>
                     <Action.Push

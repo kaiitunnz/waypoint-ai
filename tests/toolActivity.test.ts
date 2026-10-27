@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parseEvent } from "../src/api/sessions";
-import { groupRuns, runCallCount } from "../src/domain/chatPresentation";
+import {
+  chatExchanges,
+  chatMarkdown,
+  entryId,
+  groupRuns,
+  resolveEntryId,
+  runCallCount,
+} from "../src/domain/chatPresentation";
 import { transcript } from "../src/domain/transcript";
 import { summarizeRun, toolActivity } from "../src/domain/toolActivity";
 
@@ -95,12 +102,10 @@ test("each backend's call shape classifies with its own target and change counts
   const read = toolActivity(claudeRead(), "Read\n{}");
   assert.deepEqual(read, {
     kind: "read",
-    label: "Read",
     target: "/a/one.ts",
     files: undefined,
     additions: undefined,
     deletions: undefined,
-    error: false,
   });
 
   const edit = toolActivity(claudeEdit(), "Edit\n{}");
@@ -125,7 +130,7 @@ test("Codex item types classify the calls that carry no tool name", () => {
     ["commandExecution", "command"],
     ["fileChange", "edit"],
     ["mcpToolCall", "mcp"],
-    ["webSearch", "web"],
+    ["webSearch", "websearch"],
     ["collabAgentToolCall", "agent"],
     ["subAgentActivity", "agent"],
     ["todo_list", "todo"],
@@ -155,19 +160,17 @@ test("a call with no structured fields falls back to its flat text", () => {
 });
 
 test("OpenCode failure is recognised without an is_error field", () => {
-  const failed = toolActivity(
-    [
-      parse("tool_result", "Error: command not found", {
-        item_id: "o2",
-        item_type: "tool_result",
-        method: "tool.error",
-        tool_name: "bash",
-      }),
-    ],
-    "Error: command not found",
-  );
-  assert.equal(failed.error, true);
-  assert.equal(failed.kind, "command");
+  const events = [
+    parse("tool_result", "Error: command not found", {
+      item_id: "o2",
+      item_type: "tool_result",
+      method: "tool.error",
+      tool_name: "bash",
+    }),
+  ];
+  assert.equal(events[0].metadata.is_error, true);
+  assert.equal(transcript(events)[0].title, "bash · Error");
+  assert.equal(toolActivity(events, "").kind, "command");
 });
 
 test("the summary counts per kind, pluralizes, and orders its clauses", () => {
@@ -215,10 +218,12 @@ test("an approval or a plan breaks a run, and a single call still forms one", ()
     ...claudeRead(),
     parse("approval_request", "May I read the file?", { approval_id: "a1", tool_name: "Read" }),
     ...codexCommand(),
+    parse("system_note", "Plan updated", { plan: { id: "plan-1", text: "1. Water the seedlings" } }),
+    ...claudeEdit(),
   ]);
   assert.deepEqual(
     groupRuns(rows).map((entry) => ("run" in entry ? entry.run.summary : entry.row.kind)),
-    ["1 file read", "approval", "1 command"],
+    ["1 file read", "approval", "1 command", "assistant", "1 file edited (+42 −7)"],
   );
 });
 
@@ -314,4 +319,99 @@ test("a call that names no file still counts alongside named ones", () => {
   const named = toolActivity(claudeRead(), "");
   const anonymous = toolActivity([parse("tool_call", "x", { tool_name: "Read" })], "x");
   assert.equal(summarizeRun([named, anonymous]), "2 files read");
+});
+
+test("reasoning between calls folds into the run instead of splitting it", () => {
+  // Every backend streams reasoning as agent output; the collapsed transcript hides it.
+  const rows = transcript([
+    ...codexCommand(),
+    parse("agent_output", "Checking the result", { item_id: "think-1", item_kind: "reasoning" }),
+    ...claudeRead(),
+    parse("agent_output", "Done.", { item_id: "reply-1" }),
+  ]);
+  const entries = groupRuns(rows);
+  assert.deepEqual(
+    entries.map((entry) => ("run" in entry ? entry.run.summary : entry.row.kind)),
+    ["1 command · 1 file read", "assistant"],
+  );
+  const run = entries[0];
+  assert.ok("run" in run);
+  assert.equal(runCallCount(run.run), 2);
+});
+
+test("web searches and fetched pages read as their own kinds", () => {
+  const search = toolActivity([parse("tool_call", "WebSearch", { tool_name: "WebSearch" })], "");
+  const codexSearch = toolActivity([parse("tool_result", "Started webSearch", { item_type: "webSearch" })], "");
+  const fetch = toolActivity([parse("tool_call", "WebFetch", { tool_name: "WebFetch" })], "");
+  assert.equal(summarizeRun([search, codexSearch, fetch]), "2 web searches · 1 page fetched");
+});
+
+test("a moved file counts once, under the preview's new path", () => {
+  const move = toolActivity(
+    [
+      parse("tool_result", "File changes completed: /a/old.md", {
+        item_id: "mv1",
+        item_type: "fileChange",
+        method: "item/completed",
+        tool_name: "Edit",
+        payload: { item: { type: "fileChange", changes: [{ path: "/a/old.md", kind: { type: "update" } }] } },
+        diff_preview: {
+          total_additions: 1,
+          total_deletions: 1,
+          files: [{ path: "/a/new.md", old_path: "/a/old.md", change_type: "move", additions: 1, deletions: 1 }],
+        },
+      }),
+    ],
+    "",
+  );
+  assert.deepEqual(move.files, ["/a/new.md"]);
+  assert.equal(summarizeRun([move]), "1 file edited (+1 −1)");
+});
+
+test("the collapsed chat shows each run's summary where it happened", () => {
+  const exchange = chatExchanges(
+    transcript([
+      parse("user_input", "Tidy up", {}),
+      ...codexCommand(),
+      parse("agent_output", "Halfway.", { item_id: "reply-1" }),
+      ...claudeEdit(),
+    ]),
+  )[0];
+  const collapsed = chatMarkdown(exchange, false, false);
+  assert.ok(collapsed.indexOf("_1 command_") < collapsed.indexOf("Halfway."));
+  assert.ok(collapsed.indexOf("Halfway.") < collapsed.indexOf("_1 file edited (+42 −7)_"));
+  assert.ok(!collapsed.includes("activity item"));
+  assert.ok(!collapsed.includes("npm run verify"), "call details stay hidden until Show Activity");
+
+  const expanded = chatMarkdown(exchange, true, false);
+  assert.match(expanded, /\*\*1 command\*\*\n\n### Bash\n\nnpm run verify\n\n```text/);
+  assert.match(expanded, /### Edit\n\n\/a\/two&#46;ts · &#43;42 −7/);
+});
+
+test("a call with its own card keeps its text fenced when activity is shown", () => {
+  const exchange = chatExchanges(
+    transcript([
+      parse("user_input", "Ask me", {}),
+      parse("tool_call", "Which fence?\n```ts\ncode", { item_id: "q1", tool_name: "AskUserQuestion" }),
+      parse("agent_output", "Answer below.", { item_id: "reply-1" }),
+    ]),
+  )[0];
+  const expanded = chatMarkdown(exchange, true, false);
+  const reply = expanded.slice(expanded.indexOf("**Waypoint**"));
+  assert.equal((expanded.slice(0, expanded.indexOf("**Waypoint**")).match(/^```/gm) ?? []).length % 2, 0);
+  assert.ok(reply.includes("Answer below."));
+});
+
+test("a selected run keeps its place when earlier history is loaded in front of it", () => {
+  const earlier = claudeRead();
+  const recent = codexCommand();
+  const tail = [parse("agent_output", "Done.", { item_id: "reply-1" })];
+  const before = groupRuns(transcript([...recent, ...tail]));
+  const selected = entryId(before[0]);
+  // Loading earlier history prepends the same run's earlier calls, which renames it.
+  const after = groupRuns(transcript([...earlier, ...recent, ...tail]));
+  assert.ok(!after.some((entry) => entryId(entry) === selected));
+  const resolved = resolveEntryId(after, selected);
+  assert.equal(resolved, entryId(after[0]));
+  assert.ok("run" in after[0]);
 });

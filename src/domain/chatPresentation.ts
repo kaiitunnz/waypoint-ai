@@ -47,9 +47,11 @@ function clip(text: string, limit?: number, markdown = false) {
   const fence = markdown ? openFence(shown) : undefined;
   return fence ? `${shown}\n${fence}` : shown;
 }
-const more = (text: string, limit?: number) =>
+// Names the action that shows a clipped message whole; the chat views read it at full width.
+const fullWidth = "Read Conversation at Full Width";
+const more = (text: string, limit?: number, fullView = fullWidth) =>
   limit !== undefined && text.length > limit
-    ? `\n\n_… ${(text.length - limit).toLocaleString("en-US")} more characters. Read Conversation at Full Width to see all of it._`
+    ? `\n\n_… ${(text.length - limit).toLocaleString("en-US")} more characters. ${fullView} to see all of it._`
     : "";
 
 const plainText = (text: string) =>
@@ -66,7 +68,8 @@ function isStandalone(row: TranscriptRow) {
 }
 
 // A run is a contiguous stretch of tool rows. Assistant text, a user turn, a plan, and an approval
-// all break it; lifecycle notes fold in silently, as they do in Waypoint's own transcript.
+// all break it. Lifecycle notes and reasoning fold into a run they sit inside, as Claude Code keeps thinking
+// within a tool group; otherwise a collapsed transcript, which hides both, would stack identical summaries.
 export function groupRuns(rows: TranscriptRow[]): ExchangeEntry[] {
   const entries: ExchangeEntry[] = [];
   const run = { rows: [] as TranscriptRow[], activities: [] as ToolActivity[] };
@@ -89,8 +92,7 @@ export function groupRuns(rows: TranscriptRow[]): ExchangeEntry[] {
       run.activities.push(toolActivity(row.sources ?? [], row.text));
       continue;
     }
-    // A quiet note joins the run it sits inside; outside one it stands alone.
-    if (row.kind === "note" && run.rows.length) {
+    if ((row.kind === "note" || row.kind === "reasoning") && run.rows.length) {
       run.rows.push(row);
       continue;
     }
@@ -121,21 +123,34 @@ export function chatExchanges(rows: TranscriptRow[], gaps: number[] = []): ChatE
 }
 
 // Expanded, each call in a run shows its own target and change counts above its output.
-export function runMarkdown(run: ToolRun, limit?: number): string {
-  return [`**${run.summary}**`, ...run.rows.map((row) => runRowMarkdown(row, limit))].join("\n\n");
+export function runMarkdown(run: ToolRun, limit?: number, fullView = fullWidth): string {
+  return [`**${run.summary}**`, ...run.rows.map((row) => runRowMarkdown(row, limit, fullView))].join("\n\n");
 }
 
-function runRowMarkdown(row: TranscriptRow, limit?: number): string {
-  if (row.kind === "tool") return toolMarkdown(row, limit);
-  // A note folded into the run is context, not a call.
-  return `_${plainText(row.text)}_${more(row.text, limit)}`;
+function runRowMarkdown(row: TranscriptRow, limit?: number, fullView = fullWidth): string {
+  return row.kind === "tool" ? toolMarkdown(row, limit, fullView) : activityMarkdown(row, limit, fullView);
+}
+
+function activityMarkdown(row: TranscriptRow, limit?: number, fullView = fullWidth): string {
+  return `**${plainText(row.title)}**\n\n${clip(row.text, limit, true)}${more(row.text, limit, fullView)}`;
+}
+
+// A run is named after its first row, which loading earlier history can change; a selection that no longer
+// names an entry moves to the entry now holding the row it started from.
+export function resolveEntryId(entries: ExchangeEntry[], id: string | undefined): string | undefined {
+  if (!id || entries.some((entry) => entryId(entry) === id)) return id;
+  const rowId = id.startsWith("run:") ? id.slice("run:".length) : id;
+  const holder = entries.find((entry) =>
+    "run" in entry ? entry.run.rows.some((row) => row.id === rowId) : entry.row.id === rowId,
+  );
+  return holder ? entryId(holder) : id;
 }
 
 export function runCallCount(run: ToolRun): number {
   return run.rows.filter((row) => row.kind === "tool").length;
 }
 
-export function toolMarkdown(row: TranscriptRow, limit?: number): string {
+export function toolMarkdown(row: TranscriptRow, limit?: number, fullView = fullWidth): string {
   const activity = toolActivity(row.sources ?? [], row.text);
   const facts = [
     activity.files?.join(", ") ?? activity.target,
@@ -145,7 +160,7 @@ export function toolMarkdown(row: TranscriptRow, limit?: number): string {
     .map((line) => plainText(line!))
     .join(" · ");
   const body = `\`\`\`text\n${clip(row.text, limit).replaceAll("```", "` ` `")}\n\`\`\``;
-  return `### ${plainText(row.title)}${facts ? `\n\n${facts}` : ""}\n\n${body}${more(row.text, limit)}`;
+  return `### ${plainText(row.title)}${facts ? `\n\n${facts}` : ""}\n\n${body}${more(row.text, limit, fullView)}`;
 }
 
 export function chatMarkdown(
@@ -182,7 +197,8 @@ export function chatMarkdown(
     } else if (row.kind === "approval") {
       parts.push(`### Approval request\n\n${clip(row.text, limit, true)}${more(row.text, limit)}`);
     } else if (showActivity) {
-      parts.push(`**${plainText(row.title)}**\n\n${clip(row.text, limit, true)}${more(row.text, limit)}`);
+      // A tool with its own card is still a call, so its text stays fenced.
+      parts.push(row.kind === "tool" ? toolMarkdown(row, limit) : activityMarkdown(row, limit));
     }
   }
   if (waiting && !assistant && !exchange.rows.some((row) => row.kind === "approval"))

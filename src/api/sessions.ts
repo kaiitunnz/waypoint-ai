@@ -159,23 +159,11 @@ function pick(source: Record<string, unknown>, keys: string[]): Record<string, u
   return Object.fromEntries(keys.flatMap((key) => (typeof source[key] === "string" ? [[key, source[key]]] : [])));
 }
 
-// Tool arguments name a target; file bodies and prompts are dropped, so a Write call stays small.
-const argumentKeys = [
-  "command",
-  "description",
-  "filePath",
-  "file_path",
-  "glob",
-  "include",
-  "notebook_path",
-  "path",
-  "pattern",
-  "query",
-  "subagent_type",
-  "url",
-];
+// Only the fields that name a call's target are kept from payload.input and payload.item; file bodies,
+// prompts, and command output in those payloads are dropped.
+const argumentKeys = ["command", "filePath", "file_path", "glob", "notebook_path", "path", "pattern", "query", "url"];
 const argumentLimit = 300;
-const todoLimit = 40;
+const changeLimit = 40;
 
 function toolArguments(value: unknown): Record<string, unknown> | undefined {
   if (!isRecord(value)) return undefined;
@@ -184,14 +172,6 @@ function toolArguments(value: unknown): Record<string, unknown> | undefined {
     const entry = value[key];
     if (typeof entry === "string" && entry) result[key] = entry.slice(0, argumentLimit);
   }
-  if (Array.isArray(value.todos))
-    result.todos = value.todos
-      .slice(0, todoLimit)
-      .flatMap((item) =>
-        isRecord(item) && typeof item.content === "string"
-          ? [{ text: item.content.slice(0, argumentLimit), status: typeof item.status === "string" ? item.status : "" }]
-          : [],
-      );
   return Object.keys(result).length ? result : undefined;
 }
 
@@ -200,21 +180,12 @@ function toolItem(value: unknown): Record<string, unknown> | undefined {
   if (!isRecord(value)) return undefined;
   const result: Record<string, unknown> = {};
   if (typeof value.command === "string" && value.command) result.command = value.command.slice(0, argumentLimit);
-  for (const key of ["server", "tool", "namespace"])
-    if (typeof value[key] === "string" && value[key]) result[key] = value[key];
+  for (const key of ["server", "tool"]) if (typeof value[key] === "string" && value[key]) result[key] = value[key];
   if (Array.isArray(value.changes))
     result.changes = value.changes
-      .slice(0, todoLimit)
+      .slice(0, changeLimit)
       .flatMap((item) =>
         isRecord(item) && typeof item.path === "string" ? [{ path: item.path.slice(0, argumentLimit) }] : [],
-      );
-  if (Array.isArray(value.items))
-    result.items = value.items
-      .slice(0, todoLimit)
-      .flatMap((item) =>
-        isRecord(item) && typeof item.text === "string"
-          ? [{ text: item.text.slice(0, argumentLimit), status: typeof item.status === "string" ? item.status : "" }]
-          : [],
       );
   return Object.keys(result).length ? result : undefined;
 }
@@ -222,24 +193,13 @@ function toolItem(value: unknown): Record<string, unknown> | undefined {
 // The per-file diff body averages 9 KB and nothing in the UI shows it; the counts are what the summary needs.
 function diffPreview(value: unknown): Record<string, unknown> | undefined {
   if (!isRecord(value) || !Array.isArray(value.files)) return undefined;
-  const files = value.files.flatMap((item) => {
-    if (!isRecord(item) || typeof item.path !== "string") return [];
-    return [
-      {
-        path: item.path,
-        changeType: typeof item.change_type === "string" ? item.change_type : "unknown",
-        additions: number(item.additions) ?? 0,
-        deletions: number(item.deletions) ?? 0,
-        unavailableReason: typeof item.unavailable_reason === "string" ? item.unavailable_reason : undefined,
-      },
-    ];
-  });
+  const files = value.files.flatMap((item) =>
+    isRecord(item) && typeof item.path === "string" ? [{ path: item.path }] : [],
+  );
   if (!files.length) return undefined;
   return {
-    phase: typeof value.phase === "string" ? value.phase : "unknown",
     totalAdditions: number(value.total_additions) ?? 0,
     totalDeletions: number(value.total_deletions) ?? 0,
-    truncated: value.truncated === true,
     files,
   };
 }

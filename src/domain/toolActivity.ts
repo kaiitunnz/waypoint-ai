@@ -1,17 +1,16 @@
 import { SessionEvent } from "../api/sessions";
 import { isRecord } from "./connections";
 
-export type ToolKind = "command" | "read" | "search" | "edit" | "web" | "agent" | "mcp" | "todo" | "other";
+export type ToolKind =
+  "command" | "read" | "search" | "edit" | "websearch" | "fetch" | "agent" | "mcp" | "todo" | "other";
 
 export interface ToolActivity {
   kind: ToolKind;
-  label: string;
   target?: string;
   // Every file an edit reports; one Codex file change can add, delete, and update several.
   files?: string[];
   additions?: number;
   deletions?: number;
-  error: boolean;
 }
 
 const kindsByName: Record<string, ToolKind> = {
@@ -26,8 +25,8 @@ const kindsByName: Record<string, ToolKind> = {
   notebookedit: "edit",
   patch: "edit",
   apply_patch: "edit",
-  webfetch: "web",
-  websearch: "web",
+  webfetch: "fetch",
+  websearch: "websearch",
   task: "agent",
   agent: "agent",
   subagent: "agent",
@@ -42,7 +41,7 @@ const kindsByItemType: Record<string, ToolKind> = {
   commandexecution: "command",
   filechange: "edit",
   mcptoolcall: "mcp",
-  websearch: "web",
+  websearch: "websearch",
   collabagenttoolcall: "agent",
   subagentactivity: "agent",
   todo_list: "todo",
@@ -111,25 +110,37 @@ export function toolActivity(events: SessionEvent[], text: string): ToolActivity
     .map((file) => string(record(file)?.path))
     .filter(Boolean);
   const target = (args && targetFrom(args)) || fromItem || targetFromText(text) || undefined;
-  const files = [...new Set([...previewPaths, ...changePaths, string(filediff?.path), target ?? ""])].filter(Boolean);
+  // The preview names a moved file by its new path while the raw change keeps the old one, so it wins.
+  const reported = previewPaths.length ? previewPaths : changePaths.length ? changePaths : [string(filediff?.path)];
+  const files = [...new Set([...reported, ...(reported.some(Boolean) ? [] : [target ?? ""])])].filter(Boolean);
   return {
     kind,
-    label: name || (kind === "other" ? "Tool" : kind),
     target,
     files: kind === "edit" && files.length ? files : undefined,
     additions: kind === "edit" ? (integer(preview?.totalAdditions) ?? integer(filediff?.additions)) : undefined,
     deletions: kind === "edit" ? (integer(preview?.totalDeletions) ?? integer(filediff?.deletions)) : undefined,
-    error: events.some((event) => event.metadata.is_error === true),
   };
 }
 
-const clauseOrder: ToolKind[] = ["command", "read", "search", "edit", "web", "agent", "mcp", "todo", "other"];
+const clauseOrder: ToolKind[] = [
+  "command",
+  "read",
+  "search",
+  "edit",
+  "websearch",
+  "fetch",
+  "agent",
+  "mcp",
+  "todo",
+  "other",
+];
 const nouns: Record<ToolKind, [string, string]> = {
   command: ["command", "commands"],
   read: ["file read", "files read"],
   search: ["search", "searches"],
   edit: ["file edited", "files edited"],
-  web: ["fetch", "fetches"],
+  websearch: ["web search", "web searches"],
+  fetch: ["page fetched", "pages fetched"],
   agent: ["agent", "agents"],
   mcp: ["MCP tool", "MCP tools"],
   todo: ["todo update", "todo updates"],

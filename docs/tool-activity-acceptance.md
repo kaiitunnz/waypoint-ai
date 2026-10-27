@@ -46,7 +46,7 @@ The first run on a history page can be partial when the page boundary falls insi
 
 ## Automated coverage
 
-`npm run verify` checks formatting, ESLint, strict types, 223 behavior and integration tests, Raycast manifest/icon validation, and build. Tests cover classification for each backend's event shape, Codex item-type classification where no tool name is present, MCP and unknown-tool fallbacks, the flat-text fallback for a call with no structured fields, OpenCode's method-based failure, clause ordering and pluralization, distinct-file counting for reads and edits including multi-file changes, run boundaries across assistant text, approvals, notes, and standalone cards, and the omitted diffstat when no backend reported counts.
+`npm run verify` checks formatting, ESLint, strict types, 229 behavior and integration tests, Raycast manifest/icon validation, and build. Tests cover classification for each backend's event shape, Codex item-type classification where no tool name is present, MCP and unknown-tool fallbacks, web searches and fetched pages, the flat-text fallback for a call with no structured fields, OpenCode's method-based failure, clause ordering and pluralization, distinct-file counting for reads and edits including multi-file changes and moves, run boundaries across assistant text, approvals, plans, notes, reasoning, and standalone cards, the omitted diffstat when no backend reported counts, where summaries land in the collapsed and expanded chat, fenced text for standalone calls, and a selected run keeping its place when earlier history loads.
 
 ## Screenshots
 
