@@ -278,6 +278,19 @@ test("submit checks a request in an earlier loaded page against a fresh page tha
   await f.close();
 });
 
+test("submit does not call a request resolved when loaded history does not reach the latest page", async () => {
+  const f = await fixture();
+  f.server.events.push(approval(1));
+  const c = f.controller();
+  await c.start();
+  sync(c, f);
+  f.server.events.push(...filler(2, 10));
+  assert.equal(await c.submit(c.getSnapshot().interactions[0], { decision: "approve" }), false);
+  assert.match(c.getSnapshot().error!, /Couldn't confirm/);
+  assert.deepEqual(f.server.posts, []);
+  await f.close();
+});
+
 test("Check Previous Outcome gives no verdict when loaded history does not reach the latest page", async () => {
   const f = await fixture();
   f.server.events.push(approval(1));

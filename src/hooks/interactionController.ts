@@ -40,6 +40,7 @@ interface FeedBlock {
 }
 const unsaved =
   "Waypoint accepted the response, but this computer could not clear its saved attempt. Check the outcome, then clear it.";
+const unconfirmable = "Couldn't confirm from the loaded history. Reload Conversation or open it in Waypoint.";
 const definitive = new Set(["expired-token", "not-found", "rejected"]);
 const message = (error: unknown, fallback: string) => (error instanceof Error ? error.message : fallback);
 
@@ -276,8 +277,12 @@ export class InteractionController {
         this.questionChanges++;
         this.sessionChanges++;
         this.adopt(fresh);
-        const current = this.interactions(this.window(fresh.page).events).find((item) => item.key === captured.key);
-        if (!current) throw new Error("This request was resolved or replaced.");
+        const window = this.window(fresh.page);
+        const current = this.interactions(window.events).find((item) => item.key === captured.key);
+        if (!current)
+          throw new Error(
+            window.connected || captured.kind === "question" ? "This request was resolved or replaced." : unconfirmable,
+          );
         if (current.signature !== captured.signature)
           throw new Error("This request changed. Review its current version.");
         if (current.availability !== "actionable")
@@ -364,7 +369,7 @@ export class InteractionController {
     ) {
       this.publish({
         outcome: undefined,
-        notice: "Couldn't confirm from the loaded history. Reload Conversation or open it in Waypoint.",
+        notice: unconfirmable,
       });
       return;
     }

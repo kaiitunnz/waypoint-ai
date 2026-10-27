@@ -137,6 +137,19 @@ test("a gap too large to bridge is acknowledged until Reload Conversation", asyn
   feed.stop();
 });
 
+test("a bridge whose last page starts right after the loaded history leaves no gap", async () => {
+  const f = fixture();
+  const { server, client } = pagedServer(3, 10);
+  const feed = new ConversationFeed(connection, "demo", client, f);
+  await resume(f, feed);
+  server.last = 10 + 3 * (bridgePages + 1);
+  await resume(f, feed);
+  assert.deepEqual(sequences(feed), range(8, server.last));
+  assert.equal(feed.getSnapshot().horizon, undefined);
+  assert.equal(feed.getSnapshot().contiguousFrom, undefined);
+  feed.stop();
+});
+
 test("a failed resume counts requests only past the hole until a later resume bridges it", async () => {
   const f = fixture();
   const { server, client } = pagedServer(4, 10);
@@ -353,7 +366,7 @@ test("ID-less reconnect pages backward until the prior sequence is bridged", asy
   f.reconnect();
   f.send("session_state", { session: sessionWire() });
   await tick();
-  assert.deepEqual(beforeQueries, ["5", "3"]);
+  assert.deepEqual(beforeQueries, ["5"], "a page starting right after the held history joins it");
   assert.deepEqual(
     feed.getSnapshot().events.map((event) => event.sequence),
     [1, 2, 3, 4, 5, 6],

@@ -332,8 +332,9 @@ export class ConversationFeed extends Observable<ConversationSnapshot> {
       if (!current()) return;
       const fetched = [...page.events];
       let bridge = page;
+      // Waypoint numbers a session's events consecutively, so a page starting right after the target joins it.
       const short = () =>
-        target !== undefined && bridge.hasMore && bridge.events.length > 0 && bridge.events[0].sequence > target;
+        target !== undefined && bridge.hasMore && bridge.events.length > 0 && bridge.events[0].sequence > target + 1;
       for (let pages = 0; short() && pages < bridgePages; pages++) {
         const before = bridge.events[0].sequence;
         bridge = await this.client.events(this.connection.token, this.sessionId, { before }, controller.signal);
