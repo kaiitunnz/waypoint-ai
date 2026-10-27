@@ -343,7 +343,9 @@ test("thinking between calls ends a run and shows as its own line", () => {
   const collapsed = chatMarkdown(exchange, false, false);
   const thinking = "_Thinking · Lint failed. The config uses require()_";
   assert.ok(collapsed.includes(thinking));
-  assert.ok(collapsed.indexOf("_1 command_") < collapsed.indexOf(thinking));
+  assert.ok(collapsed.includes("▸ _1 command_"), "a collapsed run is marked apart from thinking");
+  assert.ok(!collapsed.includes(`▸ ${thinking}`));
+  assert.ok(collapsed.indexOf("▸ _1 command_") < collapsed.indexOf(thinking));
   assert.ok(collapsed.indexOf(thinking) < collapsed.indexOf("_1 file read_"));
 });
 
@@ -410,7 +412,7 @@ test("the collapsed chat shows each run's summary where it happened", () => {
     ]),
   )[0];
   const collapsed = chatMarkdown(exchange, false, false);
-  assert.ok(collapsed.indexOf("_1 command_") < collapsed.indexOf("Halfway."));
+  assert.ok(collapsed.indexOf("▸ _1 command_") < collapsed.indexOf("Halfway."));
   assert.ok(collapsed.indexOf("Halfway.") < collapsed.indexOf("_1 file edited (+42 −7)_"));
   assert.ok(!collapsed.includes("activity item"));
   assert.ok(!collapsed.includes("npm run verify"), "call details stay hidden until Show Activity");
@@ -472,8 +474,8 @@ test("a call with its own card still shows a line in the collapsed chat", () => 
     ]),
   )[0];
   const collapsed = chatMarkdown(exchange, false, false);
-  assert.ok(collapsed.indexOf("_Shared a file_") < collapsed.indexOf("_Asked a question_"));
-  assert.ok(collapsed.indexOf("_Asked a question_") < collapsed.indexOf("Sent."));
+  assert.ok(collapsed.indexOf("▸ _Shared a file_") < collapsed.indexOf("▸ _Asked a question_"));
+  assert.ok(collapsed.indexOf("▸ _Asked a question_") < collapsed.indexOf("Sent."));
 });
 
 test("a failed or denied edit is not counted as an edited file", () => {
