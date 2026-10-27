@@ -138,7 +138,7 @@ export function runCallCount(run: ToolRun): number {
 export function toolMarkdown(row: TranscriptRow, limit?: number): string {
   const activity = toolActivity(row.sources ?? [], row.text);
   const facts = [
-    activity.target,
+    activity.files?.join(", ") ?? activity.target,
     activity.additions !== undefined ? `+${activity.additions} −${activity.deletions}` : "",
   ]
     .filter(Boolean)

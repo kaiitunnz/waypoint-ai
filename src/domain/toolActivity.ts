@@ -7,6 +7,8 @@ export interface ToolActivity {
   kind: ToolKind;
   label: string;
   target?: string;
+  // Every file an edit reports; one Codex file change can add, delete, and update several.
+  files?: string[];
   additions?: number;
   deletions?: number;
   error: boolean;
@@ -98,20 +100,23 @@ export function toolActivity(events: SessionEvent[], text: string): ToolActivity
     .map((event) => record(record(event.metadata.payload)?.input) ?? record(event.metadata.tool_input))
     .find(Boolean);
   const changes = item && Array.isArray(item.changes) ? item.changes : [];
-  const changePath = changes
-    .map(record)
-    .map((change) => (change ? string(change.path) : ""))
-    .find(Boolean);
+  const changePaths = changes.map((change) => string(record(change)?.path)).filter(Boolean);
   const fromItem =
     (item ? string(item.command) : "") ||
-    changePath ||
+    changePaths[0] ||
     (item ? [string(item.server), string(item.tool)].filter(Boolean).join(":") : "");
   const preview = events.map((event) => record(event.metadata.diff_preview)).find(Boolean);
   const filediff = events.map((event) => record(record(event.metadata.payload)?.filediff)).find(Boolean);
+  const previewPaths = (Array.isArray(preview?.files) ? preview.files : [])
+    .map((file) => string(record(file)?.path))
+    .filter(Boolean);
+  const target = (args && targetFrom(args)) || fromItem || targetFromText(text) || undefined;
+  const files = [...new Set([...previewPaths, ...changePaths, string(filediff?.path), target ?? ""])].filter(Boolean);
   return {
     kind,
     label: name || (kind === "other" ? "Tool" : kind),
-    target: (args && targetFrom(args)) || fromItem || targetFromText(text) || undefined,
+    target,
+    files: kind === "edit" && files.length ? files : undefined,
     additions: kind === "edit" ? (integer(preview?.totalAdditions) ?? integer(filediff?.additions)) : undefined,
     deletions: kind === "edit" ? (integer(preview?.totalDeletions) ?? integer(filediff?.deletions)) : undefined,
     error: events.some((event) => event.metadata.is_error === true),
@@ -131,14 +136,19 @@ const nouns: Record<ToolKind, [string, string]> = {
   other: ["tool call", "tool calls"],
 };
 
-// Counts distinct targets within a kind, so two edits to one file read as one file.
+// Reads and edits count distinct files, so two edits to one file read as one file; a call that names
+// no file still counts once. Other kinds count calls.
 function distinct(kind: ToolKind, activities: ToolActivity[]): number {
   const of = activities.filter((activity) => activity.kind === kind);
-  if (kind === "read" || kind === "edit") {
-    const targets = new Set(of.flatMap((activity) => (activity.target ? [activity.target] : [])));
-    if (targets.size) return targets.size;
+  if (kind !== "read" && kind !== "edit") return of.length;
+  const named = new Set<string>();
+  let unnamed = 0;
+  for (const activity of of) {
+    const files = activity.files ?? (activity.target ? [activity.target] : []);
+    if (files.length) files.forEach((file) => named.add(file));
+    else unnamed++;
   }
-  return of.length;
+  return named.size + unnamed;
 }
 
 export function summarizeRun(activities: ToolActivity[]): string {
@@ -156,8 +166,4 @@ export function summarizeRun(activities: ToolActivity[]): string {
     return [`${count} ${noun}${stat}`];
   });
   return clauses.join(" · ");
-}
-
-export function runTouchedAnError(activities: ToolActivity[]): boolean {
-  return activities.some((activity) => activity.error);
 }

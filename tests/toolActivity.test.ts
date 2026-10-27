@@ -97,6 +97,7 @@ test("each backend's call shape classifies with its own target and change counts
     kind: "read",
     label: "Read",
     target: "/a/one.ts",
+    files: undefined,
     additions: undefined,
     deletions: undefined,
     error: false,
@@ -271,4 +272,46 @@ test("a call with its own card does not fold into a run", () => {
       ["1 file read", "tool", "1 command"],
       tool,
     );
+});
+
+test("a Codex file change that touches several files counts each of them", () => {
+  // One recorded fileChange deleted eslint.config.js and added eslint.config.mjs in a single call.
+  const change = toolActivity(
+    [
+      parse("tool_call", "Preparing file changes: /a/eslint.config.js, /a/eslint.config.mjs", {
+        item_id: "fc1",
+        item_type: "fileChange",
+        method: "item/started",
+        tool_name: "Edit",
+        payload: {
+          item: {
+            type: "fileChange",
+            changes: [
+              { path: "/a/eslint.config.js", kind: { type: "delete" } },
+              { path: "/a/eslint.config.mjs", kind: { type: "add" } },
+            ],
+          },
+        },
+        diff_preview: {
+          phase: "proposed",
+          total_additions: 4,
+          total_deletions: 4,
+          files: [
+            { path: "/a/eslint.config.js", change_type: "delete", additions: 0, deletions: 4 },
+            { path: "/a/eslint.config.mjs", change_type: "add", additions: 4, deletions: 0 },
+          ],
+        },
+      }),
+    ],
+    "",
+  );
+  assert.deepEqual(change.files, ["/a/eslint.config.js", "/a/eslint.config.mjs"]);
+  assert.equal(summarizeRun([change]), "2 files edited (+4 −4)");
+  assert.equal(summarizeRun([change, toolActivity(claudeEdit(), "")]), "3 files edited (+46 −11)");
+});
+
+test("a call that names no file still counts alongside named ones", () => {
+  const named = toolActivity(claudeRead(), "");
+  const anonymous = toolActivity([parse("tool_call", "x", { tool_name: "Read" })], "x");
+  assert.equal(summarizeRun([named, anonymous]), "2 files read");
 });
