@@ -206,7 +206,7 @@ test("compose sends create the session, upload typed files, then send their IDs 
   await c.setComposeText("Review these");
   await c.stageContext("selection", "picked text");
   const added = await c.addFiles([await f.file("shot.png"), await f.file("notes.md")]);
-  assert.deepEqual([added.problems, added.staged.length, added.saved], [[], 2, true]);
+  assert.deepEqual([added.problems, added.staged.length], [[], 2]);
   assert.equal(await c.send(true), true);
   assert.deepEqual(f.server.uploads, [
     { session: "created-1", name: "shot.png", type: "image/png" },
@@ -570,7 +570,6 @@ test("files picked as a send starts are not saved over what it sent", async () =
   assert.deepEqual(await adding, {
     problems: ["A message is being sent. Add the files again when it finishes."],
     staged: [],
-    saved: false,
   });
   assert.equal(await sending, true);
   assert.equal((await f.store.read(connection.id)).compose?.quick, undefined);

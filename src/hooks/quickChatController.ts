@@ -80,11 +80,10 @@ export interface QuickChatSnapshot {
   sshTarget?: string;
 }
 type Retry = "send" | "compose" | "reattach";
-// `staged` paths entered the draft and were saved when `saved`; a path not staged never reached storage.
+// `staged` paths entered the draft and went to be saved; a path not staged never reached storage.
 export interface AddedFiles {
   problems: string[];
   staged: string[];
-  saved: boolean;
 }
 type FileStats = { size: number; modifiedMs: number };
 
@@ -601,7 +600,7 @@ export class QuickChatController {
     });
   }
   async addFiles(paths: string[]): Promise<AddedFiles> {
-    if (this.state.busy) return { problems: [], staged: [], saved: false };
+    if (this.state.busy) return { problems: [], staged: [] };
     const problems: string[] = [];
     const files: StagedFile[] = [];
     for (const path of paths) {
@@ -625,13 +624,12 @@ export class QuickChatController {
       return {
         problems: [...problems, "A message is being sent. Add the files again when it finishes."],
         staged: [],
-        saved: false,
       };
     // Added to the parts as they are now, so a file removed while these were checked stays removed.
     const added = files.filter((file) => !this.state.compose.files.some((current) => current.path === file.path));
-    if (!added.length) return { problems, staged: [], saved: false };
-    const saved = await this.persistCompose({ ...this.state.compose, files: [...this.state.compose.files, ...added] });
-    return { problems, staged: added.map((file) => file.path), saved };
+    if (!added.length) return { problems, staged: [] };
+    await this.persistCompose({ ...this.state.compose, files: [...this.state.compose.files, ...added] });
+    return { problems, staged: added.map((file) => file.path) };
   }
   // Resolves whether the files were removed.
   async removeFiles(ids: string[]): Promise<boolean> {

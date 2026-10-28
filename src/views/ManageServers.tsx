@@ -181,7 +181,6 @@ export function ManageServers() {
                                   "Its Quick Chat drafts couldn't be cleared yet; reopening Manage Servers retries.",
                               }),
                             );
-                            void clipboardFiles.sweep();
                           }
                         }}
                       />

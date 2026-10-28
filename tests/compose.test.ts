@@ -213,7 +213,15 @@ test("copied files beat image data, which beats text, and spilled text stays tex
   );
   assert.deepEqual(clipboardChoice({ ...reading, text: "  " }, all), { kind: "empty" });
   assert.deepEqual(clipboardChoice({ ...reading, failed: true }, all), { kind: "unreadable" });
-  assert.deepEqual(clipboardChoice({ ...reading, image: "present", failed: true }, all), { kind: "unreadable" });
+  assert.deepEqual(clipboardChoice({ ...reading, image: "present", text: "A1", failed: true }, all), {
+    kind: "text",
+    text: "A1",
+    skipped: "The image couldn't be saved.",
+  });
+  assert.deepEqual(clipboardChoice({ ...reading, image: "present", failed: true }, all), {
+    kind: "refused",
+    reason: "The image couldn't be saved.",
+  });
 });
 
 test("agents that can't take attachments refuse copied files, and copied images give way to their text", () => {

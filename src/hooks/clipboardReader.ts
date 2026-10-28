@@ -1,4 +1,5 @@
 import { open } from "node:fs/promises";
+import { basename } from "node:path";
 import { ClipboardReading, isSpilledText, maxContextBytes, spilledClipboardText } from "../domain/compose";
 
 export interface ClipboardReader {
@@ -73,7 +74,9 @@ export function clipboardReader(sources: ClipboardSources): ClipboardReader {
         .catch(() => undefined);
       if (native) {
         const spilled = native.files.find((file) => isSpilledText(file, sources.spillStore));
-        const text = !native.text && spilled ? await readSpilled(spilled) : native.text;
+        // A file copy's pasteboard text is the file's name, so spilled text may arrive as the spill file's name.
+        const text =
+          spilled && (!native.text || native.text === basename(spilled)) ? await readSpilled(spilled) : native.text;
         return { ...native, text, ...(spilled ? { spilled } : {}) };
       }
       const raycast = await sources.readRaycast();

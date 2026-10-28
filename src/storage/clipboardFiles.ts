@@ -13,7 +13,7 @@ const graceMs = 60 * 60 * 1000;
 const sweepEveryMs = 10 * 60 * 1000;
 
 // Images saved from the clipboard, one directory each so the uploaded name reads well. Only directories under the
-// root are ever deleted, and only once no server's saved state mentions them.
+// root are deleted: at once for an image that never entered a draft, otherwise once no server's saved state names it.
 export class ClipboardFiles {
   private readonly running = new Set<Promise<void>>();
   private readonly root: string;

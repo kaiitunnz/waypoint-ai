@@ -134,7 +134,7 @@ export function composePolicy(
 }
 
 // What the clipboard held: every copied file, whether an image was saved to the path asked for (or only seen), the
-// text, and Raycast's spilled-text file. `failed` means the native read didn't finish.
+// text, and Raycast's spilled-text file. `failed` means the native read didn't finish or the image couldn't be saved.
 export interface ClipboardReading {
   files: string[];
   image: "saved" | "present" | "none";
@@ -158,7 +158,8 @@ export function clipboardChoice(reading: ClipboardReading, policy: AttachmentPol
   if (files.length)
     return policy.images || policy.files ? { kind: "files", paths: files } : { kind: "refused", reason: refusal };
   if (reading.image === "saved") return { kind: "image" };
-  const skipped = reading.image === "present" && !policy.images ? refusal : undefined;
+  // An image is only seen, not saved, when the agent can't take it or the save failed.
+  const skipped = reading.image !== "present" ? undefined : policy.images ? "The image couldn't be saved." : refusal;
   if (reading.text.trim()) return { kind: "text", text: reading.text, ...(skipped ? { skipped } : {}) };
   if (skipped) return { kind: "refused", reason: skipped };
   return reading.failed ? { kind: "unreadable" } : { kind: "empty" };

@@ -68,6 +68,9 @@ test("Raycast's spilled text is read as text and never becomes a copied file", a
   const reading = await clipboardReader(sources(native, { text: "long.txt", file }, store)).read();
   assert.equal(reading.text.length, maxContextBytes + 1);
   assert.equal(reading.spilled, file);
+  const named = JSON.stringify({ files: [file], image: "none", text: "long.txt" });
+  const byName = await clipboardReader(sources(named, { text: "long.txt", file }, store)).read();
+  assert.equal(byName.text.length, maxContextBytes + 1, "the pasteboard names the file, as for any file copy");
   const fallback = await clipboardReader(sources(new Error("x"), { text: "long.txt", file }, store)).read();
   assert.deepEqual(fallback.files, []);
   assert.equal(fallback.spilled, file);
