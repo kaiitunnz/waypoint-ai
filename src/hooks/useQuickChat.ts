@@ -17,8 +17,8 @@ export function connectionCheck(connection: FeedConnection) {
   };
 }
 
-// Starts a Quick Chat session from chosen settings outside a Quick Chat view, such as from Edit Current Session in
-// Search Sessions. Quick Chat then opens it as its destination.
+// Starts a Quick Chat session from chosen settings outside a Quick Chat view. Quick Chat then opens it as its
+// destination.
 // Throws `LaunchFailure` when the session wasn't started.
 export async function startQuickChatSession(
   connection: FeedConnection,

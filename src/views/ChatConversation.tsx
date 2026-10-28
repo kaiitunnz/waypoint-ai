@@ -123,7 +123,7 @@ export function ChatConversation({
   settings?: { available: boolean; newChat?: NewChatOption };
 }) {
   const [active, setActive] = useState(true);
-  // Set while New Chat replaces the editor, so the editor's pop doesn't resume the hidden conversation.
+  // Set while the new session's view replaces the editor, so the editor's pop doesn't resume the hidden conversation.
   const handingOff = useRef(false);
   const { push } = useNavigation();
   const { state, feed } = useConversationFeed(connection, sessionId ?? "", active && !!sessionId);

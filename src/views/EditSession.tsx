@@ -152,7 +152,7 @@ export function EditSession({
         if (!newChat) return;
         const view = await newChat.start((current) => {
           const defaults = newChatDefaults(current, baseline!, draft, metadata!);
-          // Checked before saving so an unusable combination stays in the form.
+          // Checked before starting so an unusable combination stays in the form.
           createRequest(defaults, metadata!, "check", "check", {
             workspace: localWorkspace(connection.apiUrl)?.dir,
             source: "form",

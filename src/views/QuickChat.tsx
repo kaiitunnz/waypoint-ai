@@ -379,8 +379,9 @@ function QuickChatActions({
               if (
                 await confirmAlert({
                   title: "Allow another attempt?",
-                  message:
-                    "The previous operation may already have reached Waypoint. A new attempt can create another session or duplicate a message. Check the outcome first. Nothing is resent until you press Send.",
+                  message: state.pending?.origin
+                    ? "The new session may already have been created. Another attempt can create a second one. Check the outcome first, then start the session again from the form you used."
+                    : "The previous operation may already have reached Waypoint. A new attempt can create another session or duplicate a message. Check the outcome first. Nothing is resent until you press Send.",
                   primaryAction: { title: "Check and Allow Retry", style: Alert.ActionStyle.Destructive },
                 })
               )

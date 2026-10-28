@@ -17,8 +17,6 @@ function launchFields(values: ChatDefaults): ChatLaunchFields {
   return settings as ChatLaunchFields;
 }
 
-// Starts a session from settings chosen here, without a message. The form starts from Quick Chat Defaults and keeps
-// its values per server until a session starts or the draft is discarded.
 type FormProps = {
   connection: FeedConnection;
   metadata: ServerMetadata;
@@ -26,6 +24,8 @@ type FormProps = {
   controller: QuickChatController;
 };
 
+// Starts a session from settings chosen here, without a message. The form starts from Quick Chat Defaults and keeps
+// its values per server until a session starts or the draft is discarded.
 export function NewSessionSettings(props: FormProps) {
   const [initial, setInitial] = useState<ChatDefaults>();
   useEffect(() => {
