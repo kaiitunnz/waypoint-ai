@@ -13,7 +13,6 @@ import { ManageServers } from "./ManageServers";
 import { SignInForm } from "./ServerForm";
 import { ConversationScreen } from "./Conversation";
 import { QuickChat } from "./QuickChat";
-import { LaunchFailure } from "../hooks/sessionLauncher";
 import { startQuickChatSession } from "../hooks/useQuickChat";
 
 export function SearchSessions() {
@@ -256,13 +255,7 @@ function SessionsBrowser({
                               quickChat={() => <QuickChat connectionId={connection.id} resume />}
                               newChat={{
                                 start: async (build) => {
-                                  const saved = await quickChatStore.read(connection.id);
-                                  const result = await startQuickChatSession(
-                                    connection,
-                                    state.metadata!,
-                                    build(saved.defaults),
-                                  );
-                                  if (result.kind !== "created") throw new LaunchFailure(result);
+                                  await startQuickChatSession(connection, state.metadata!, build);
                                   return <QuickChat connectionId={connection.id} resume />;
                                 },
                               }}

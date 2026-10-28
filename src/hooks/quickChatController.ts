@@ -407,7 +407,8 @@ export class QuickChatController {
   connectTargetOnly(targetId: string, password: string) {
     return this.client.connectTarget(this.connection.token, targetId, password);
   }
-  // A session a New Chat send created for this draft but never delivered input to is continued, not replaced.
+  // A session created for this draft that never received input, by a New Chat send or from chosen settings, is
+  // continued, not replaced.
   private boundSession?: Promise<Session | undefined>;
   private emptyBoundSession(saved: QuickChatState, metadata: ServerMetadata) {
     const bound = saved.compose?.[this.draftKey]?.sessionId;

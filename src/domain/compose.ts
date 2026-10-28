@@ -23,9 +23,11 @@ export interface StagedFile {
 export interface ComposeParts {
   context: ContextItem[];
   files: StagedFile[];
-  // The session a send created or targeted for this draft before it was acknowledged.
+  // The session a send created or targeted for this draft before it was acknowledged, or one started from chosen
+  // settings that has had no message yet.
   sessionId?: string;
-  // Fingerprint of the launch settings that created that session.
+  // Fingerprint of the launch settings that created that session, or `customLaunch` for one started from chosen
+  // settings.
   launch?: string;
 }
 export interface ComposeDraft extends ComposeParts {

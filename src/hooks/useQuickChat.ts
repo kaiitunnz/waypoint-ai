@@ -3,7 +3,7 @@ import { WaypointClient } from "../api/client";
 import { ServerMetadata } from "../api/contracts";
 import { ChatDefaults } from "../domain/quickChat";
 import { QuickChatController, quickChatDraft } from "./quickChatController";
-import { launchSession } from "./sessionLauncher";
+import { LaunchFailure, launchSession } from "./sessionLauncher";
 import { FeedConnection } from "./sessionFeeds";
 import { quickChatStore, connectionStore } from "../storage/raycast";
 import { localWorkspace } from "../storage/workspace";
@@ -19,8 +19,14 @@ export function connectionCheck(connection: FeedConnection) {
 
 // Starts a Quick Chat session from chosen settings outside a Quick Chat view, such as from Edit Current Session in
 // Search Sessions. Quick Chat then opens it as its destination.
-export function startQuickChatSession(connection: FeedConnection, metadata: ServerMetadata, settings: ChatDefaults) {
-  return launchSession(
+// Throws `LaunchFailure` when the session wasn't started.
+export async function startQuickChatSession(
+  connection: FeedConnection,
+  metadata: ServerMetadata,
+  build: (defaults: ChatDefaults) => ChatDefaults,
+) {
+  const saved = await quickChatStore.read(connection.id);
+  const result = await launchSession(
     {
       connection,
       client: new WaypointClient(connection.apiUrl),
@@ -30,10 +36,11 @@ export function startQuickChatSession(connection: FeedConnection, metadata: Serv
     },
     quickChatStore,
     connectionCheck(connection),
-    settings,
+    build(saved.defaults),
     quickChatDraft,
     "edit",
   );
+  if (result.kind !== "created") throw new LaunchFailure(result);
 }
 
 export function useQuickChat(connection: FeedConnection, forceNew: boolean, resume = false) {

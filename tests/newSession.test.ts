@@ -11,7 +11,7 @@ import { launchSession } from "../src/hooks/sessionLauncher";
 import { SessionManager } from "../src/hooks/sessionManager";
 import { draftKeys } from "../src/storage/drafts";
 import { ServerMutex } from "../src/storage/mutex";
-import { QuickChatStore, decodeQuickChat, isChatLaunchFields } from "../src/storage/quickChat";
+import { QuickChatStore, decodeQuickChat, isChatLaunchFields, restoreLaunchDraft } from "../src/storage/quickChat";
 import { Workspace } from "../src/storage/workspace";
 import { metadataWire, sessionWire } from "./fixtures/conversation";
 
@@ -576,4 +576,21 @@ test("launch settings and create origins are validated when read back", () => {
     });
   assert.equal(decodeQuickChat(state("launch-form")).pending?.origin, "launch-form");
   assert.throws(() => decodeQuickChat(state("elsewhere")));
+});
+
+test("a restored form draft keeps overrides it removed off, and falls back to the defaults when unreadable", () => {
+  const defaults: ChatDefaults = { ...initialDefaults(), agent: "codex", args: ["--x"], config: ["a=1"] };
+  // Changing the agent clears the overrides; JSON then drops them from the saved draft.
+  const edited: Record<string, unknown> = { ...defaults, agent: "claude", args: undefined, config: undefined };
+  delete edited.mode;
+  delete edited.timeoutMinutes;
+  const restored = restoreLaunchDraft(defaults, JSON.stringify(edited));
+  assert.equal(restored.agent, "claude");
+  assert.equal(restored.args, undefined);
+  assert.equal(restored.config, undefined);
+  assert.equal(restored.mode, defaults.mode);
+  assert.deepEqual(restoreLaunchDraft(defaults, JSON.stringify({ ...edited, args: ["--y"] })).args, ["--y"]);
+  assert.equal(restoreLaunchDraft(defaults, ""), defaults);
+  assert.equal(restoreLaunchDraft(defaults, "{not json"), defaults);
+  assert.equal(restoreLaunchDraft(defaults, JSON.stringify({ model: 3 })), defaults);
 });

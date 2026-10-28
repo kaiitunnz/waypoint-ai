@@ -5,7 +5,7 @@ import { ChatDefaults, ChatLaunchFields, createRequest } from "../domain/quickCh
 import { QuickChatController } from "../hooks/quickChatController";
 import { FeedConnection } from "../hooks/sessionFeeds";
 import { draftKeys } from "../storage/drafts";
-import { isChatLaunchFields } from "../storage/quickChat";
+import { restoreLaunchDraft } from "../storage/quickChat";
 import { quickChatStore } from "../storage/raycast";
 import { ConnectTarget } from "./ConnectTarget";
 import { useLaunchFields } from "./LaunchFields";
@@ -15,16 +15,6 @@ function launchFields(values: ChatDefaults): ChatLaunchFields {
   delete settings.mode;
   delete settings.timeoutMinutes;
   return settings as ChatLaunchFields;
-}
-
-function readDraft(raw: string | undefined): ChatLaunchFields | undefined {
-  if (!raw) return undefined;
-  try {
-    const value: unknown = JSON.parse(raw);
-    return isChatLaunchFields(value) ? value : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 // Starts a session from settings chosen here, without a message. The form starts from Quick Chat Defaults and keeps
@@ -42,7 +32,7 @@ export function NewSessionSettings(props: FormProps) {
     let current = true;
     void quickChatStore.drafts.read(draftKeys.launch(props.connection.id)).then(
       (raw) => {
-        if (current) setInitial({ ...props.defaults, ...readDraft(raw) });
+        if (current) setInitial(restoreLaunchDraft(props.defaults, raw));
       },
       () => {
         if (current) setInitial(props.defaults);

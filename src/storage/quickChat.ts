@@ -66,6 +66,17 @@ export function isChatLaunchFields(value: unknown): value is ChatLaunchFields {
     )
   );
 }
+// Restores a saved New Session with Settings draft over the defaults. JSON drops unset overrides, so a draft's
+// missing arguments and configuration mean "not overridden" rather than "use the defaults' overrides".
+export function restoreLaunchDraft(defaults: ChatDefaults, raw: string | undefined): ChatDefaults {
+  if (!raw) return defaults;
+  try {
+    const draft: unknown = JSON.parse(raw);
+    return isChatLaunchFields(draft) ? { ...defaults, args: undefined, config: undefined, ...draft } : defaults;
+  } catch {
+    return defaults;
+  }
+}
 const isNumber = (value: unknown) => typeof value === "number" && Number.isFinite(value);
 function isComposeParts(value: unknown): boolean {
   return (
