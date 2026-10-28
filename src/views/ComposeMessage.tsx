@@ -34,8 +34,11 @@ const preview = (text: string) => {
 const reader = clipboardReader({
   runScript: (script, args) =>
     new Promise((resolve, reject) =>
-      execFile("osascript", ["-l", "JavaScript", "-e", script, "--", ...args], { timeout: 5000 }, (error, stdout) =>
-        error ? reject(error) : resolve(stdout),
+      execFile(
+        "osascript",
+        ["-l", "JavaScript", "-e", script, "--", ...args],
+        { timeout: 5000, maxBuffer: 8 * 1024 * 1024 },
+        (error, stdout) => (error ? reject(error) : resolve(stdout)),
       ),
     ),
   readRaycast: () => Clipboard.read(),

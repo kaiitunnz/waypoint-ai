@@ -8,28 +8,34 @@ import { maxContextBytes } from "../src/domain/compose";
 
 function sources(native: string | Error, raycast: { text: string; file?: string }, spillStore = "/nowhere") {
   const calls: { script: string; args: string[] }[] = [];
+  let raycastReads = 0;
   return {
     calls,
+    raycastReads: () => raycastReads,
     spillStore,
     runScript: async (script: string, args: string[]) => {
       calls.push({ script, args });
       if (native instanceof Error) throw native;
       return native;
     },
-    readRaycast: async () => raycast,
+    readRaycast: async () => {
+      raycastReads++;
+      return raycast;
+    },
   };
 }
+const limit = String(maxContextBytes + 1);
 
-test("the native read reports every copied file and passes the image path as an argument", async () => {
-  const fake = sources(JSON.stringify({ files: ["/a b/one.txt", "/two.png"], image: "none" }), {
-    text: "one.txt",
-    file: "/a b/one.txt",
+test("the native read reports every copied file and its own text, and passes the limit and image path as arguments", async () => {
+  const fake = sources(JSON.stringify({ files: ["/a b/one.txt", "/two.png"], image: "none", text: "one.txt" }), {
+    text: "an older copy",
   });
   const reading = await clipboardReader(fake).read("/root/id/Clipboard image.png");
   assert.deepEqual(reading, { files: ["/a b/one.txt", "/two.png"], image: "none", text: "one.txt" });
-  assert.deepEqual(fake.calls, [{ script: pasteboardScript, args: ["/root/id/Clipboard image.png"] }]);
+  assert.deepEqual(fake.calls, [{ script: pasteboardScript, args: [limit, "/root/id/Clipboard image.png"] }]);
+  assert.equal(fake.raycastReads(), 0, "Raycast's text can trail a fresh copy");
   await clipboardReader(fake).read();
-  assert.deepEqual(fake.calls[1].args, [], "no path, so the image is only reported");
+  assert.deepEqual(fake.calls[1].args, [limit], "no path, so the image is only reported");
 });
 
 test("a failed native read falls back to Raycast's file, then its text, and says it failed", async () => {
@@ -46,9 +52,9 @@ test("a failed native read falls back to Raycast's file, then its text, and says
     failed: true,
   });
   assert.deepEqual(
-    await clipboardReader(sources(JSON.stringify({ files: [], image: "present", failed: true }), { text: "" })).read(
-      "/p",
-    ),
+    await clipboardReader(
+      sources(JSON.stringify({ files: [], image: "present", text: "", failed: true }), { text: "" }),
+    ).read("/p"),
     { files: [], image: "present", text: "", failed: true },
     "an image the script couldn't save",
   );
@@ -58,11 +64,12 @@ test("Raycast's spilled text is read as text and never becomes a copied file", a
   const store = await mkdtemp(join(tmpdir(), "clipboard-store-"));
   const file = join(store, "long.txt");
   await writeFile(file, "x".repeat(maxContextBytes + 10));
-  const native = JSON.stringify({ files: [file], image: "none" });
+  const native = JSON.stringify({ files: [file], image: "none", text: "" });
   const reading = await clipboardReader(sources(native, { text: "long.txt", file }, store)).read();
   assert.equal(reading.text.length, maxContextBytes + 1);
   assert.equal(reading.spilled, file);
   const fallback = await clipboardReader(sources(new Error("x"), { text: "long.txt", file }, store)).read();
   assert.deepEqual(fallback.files, []);
+  assert.equal(fallback.spilled, file);
   await rm(store, { recursive: true, force: true });
 });

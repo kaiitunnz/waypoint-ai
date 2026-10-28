@@ -96,10 +96,11 @@ export function mimeType(path: string): string {
 export const isImage = (path: string) => mimeType(path).startsWith("image/");
 
 // Raycast's clipboard history keeps large copied text in a file and reports only that file's name as the text.
+export const isSpilledText = (file: string, store: string) =>
+  file.endsWith(".txt") && dirname(resolve(file)) === resolve(store);
 export function spilledClipboardText(content: { text: string; file?: string }, store: string): string | undefined {
   const file = content.file;
-  if (!file || !file.endsWith(".txt") || basename(file) !== content.text) return undefined;
-  return dirname(resolve(file)) === resolve(store) ? file : undefined;
+  return file && basename(file) === content.text && isSpilledText(file, store) ? file : undefined;
 }
 
 // Agents on SSH targets receive attachments as Waypoint host paths unless they inline them.
