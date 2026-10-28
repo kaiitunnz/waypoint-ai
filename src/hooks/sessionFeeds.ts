@@ -11,7 +11,6 @@ import {
   parseEvent,
   parseQuestions,
 } from "../api/sessions";
-import { chatExchanges } from "../domain/chatPresentation";
 import { mergeEvents, newerQuestions, transcript } from "../domain/transcript";
 
 export interface FeedConnection extends Connection {
@@ -23,9 +22,9 @@ type Options = { factory?: SocketFactory; scheduler?: Scheduler; watch?: Schedul
 export const presenceIntervalMs = 20000;
 // How many earlier pages a resumed conversation reads to reconnect to the history it already holds.
 export const bridgePages = 5;
-// How many earlier pages one Load Earlier Turns reads at most.
+// How many earlier pages one `loadOlderTurn` reads at most.
 export const turnPages = 3;
-// `stale`: a reload, a resume, or stopping replaced the history the page was read for.
+// `stale`: the history the page was read for was replaced or abandoned.
 export type OlderOutcome = "loaded" | "skipped" | "failed" | "stale";
 const safeError = (error: unknown) =>
   error instanceof ApiError
@@ -413,16 +412,14 @@ export class ConversationFeed extends Observable<ConversationSnapshot> {
       outcome = await this.olderPage(generation);
       if (outcome !== "loaded") break;
       loaded = true;
-      if (!this.state.hasMore || this.olderPrompts(anchor) > 0) break;
+      if (!this.state.hasMore || this.hasOlderPrompt(anchor)) break;
     }
     if (outcome !== "stale") this.publish({ loadingOlder: false });
     return outcome === "stale" ? outcome : loaded ? "loaded" : outcome;
   }
-  // Prompts before the walk's first event; live turns arriving meanwhile land after it and don't count.
-  private olderPrompts(anchor: number) {
-    return chatExchanges(transcript(this.state.events), this.state.gaps).filter(
-      (exchange) => exchange.prompt && exchange.prompt.sequence < anchor,
-    ).length;
+  // Live turns arriving during the walk land after its first event, so they don't count.
+  private hasOlderPrompt(anchor: number) {
+    return transcript(this.state.events).some((row) => row.kind === "user" && row.sequence < anchor);
   }
   private canLoadOlder() {
     return (

@@ -11,6 +11,7 @@ import {
   loadEarlierItem,
   previewMessageLimit,
   resolveTurnId,
+  selectLoadedTurn,
   turnItem,
   turnPreview,
   turnTitle,
@@ -245,4 +246,18 @@ test("rows that disappear fall back to a listed row", () => {
   assert.equal(chatSelectedId(interaction, items(turns)), turnItem(turns[1].id));
   // An unsupported session lists no turns, so the selection settles on the conversation.
   assert.equal(chatSelectedId({ following: false, selection: turnItem(turns[0].id) }, items([])), conversationItem);
+});
+
+test("loaded earlier turns take the selection only from the Load Earlier row", () => {
+  const turns = exchangesOf(event(1, "user_input", "One"), event(2, "user_input", "Two"));
+  assert.deepEqual(selectLoadedTurn({ following: false, selection: loadEarlierItem }, turns), {
+    following: false,
+    selection: turnItem(turns[0].id),
+  });
+  const [only] = exchangesOf(event(1, "agent_output", "Activity"));
+  assert.deepEqual(selectLoadedTurn({ following: false, selection: loadEarlierItem }, [only]), { following: true });
+  const moved = { following: false, selection: conversationItem };
+  assert.equal(selectLoadedTurn(moved, turns), moved);
+  const following = { following: true };
+  assert.equal(selectLoadedTurn(following, turns), following);
 });

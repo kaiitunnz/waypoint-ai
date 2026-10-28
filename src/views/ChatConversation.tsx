@@ -15,7 +15,7 @@ import {
   loadEarlierItem,
   previewMessageLimit,
   resolveTurnId,
-  selectChatItem,
+  selectLoadedTurn,
   turnItem,
   turnMarkdown,
   turnPreview,
@@ -52,7 +52,6 @@ export interface SessionActionContext {
   feed: ConversationFeed;
 }
 
-// Reads one turn when `turnId` is given, otherwise the whole conversation.
 function FullConversation({
   feed,
   turnId,
@@ -265,13 +264,7 @@ export function ChatConversation({
         if ((await feed.loadOlderTurn()) !== "loaded") return;
         const snapshot = feed.getSnapshot();
         const loaded = chatExchanges(transcript(snapshot.events), snapshot.gaps);
-        if (!loaded.length) return;
-        // A row chosen while the turns loaded keeps the selection.
-        setSelection((current) =>
-          current.following || current.selection !== loadEarlierItem
-            ? current
-            : selectChatItem(turnItem(loaded[0].id), loaded),
-        );
+        setSelection((current) => selectLoadedTurn(current, loaded));
       }}
     />
   );

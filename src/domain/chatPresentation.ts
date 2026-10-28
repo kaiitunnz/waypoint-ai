@@ -302,7 +302,7 @@ export function turnPreview(exchange: ChatExchange | undefined): string {
 // that prompt's exchange; a turn id that no longer names one moves to the exchange now holding its row.
 export function resolveTurnId(exchanges: ChatExchange[], id: string): string | undefined {
   if (exchanges.some((exchange) => exchange.id === id)) return id;
-  return exchanges.find((exchange) => exchange.prompt?.id === id || exchange.rows.some((row) => row.id === id))?.id;
+  return exchanges.find((exchange) => exchange.rows.some((row) => row.id === id))?.id;
 }
 
 export const conversationItem = "conversation";
@@ -349,6 +349,12 @@ export function chatSelectedId(current: ChatSelection, items: ChatItems): string
 export function selectChatItem(id: string, exchanges: ChatExchange[]): ChatSelection {
   const newest = exchanges.at(-1);
   return newest && id === turnItem(newest.id) ? { following: true } : { following: false, selection: id };
+}
+
+// After earlier turns load, the oldest turn is selected unless another row was chosen while they loaded.
+export function selectLoadedTurn(current: ChatSelection, exchanges: ChatExchange[]): ChatSelection {
+  if (current.selection !== loadEarlierItem || !exchanges.length) return current;
+  return selectChatItem(turnItem(exchanges[0].id), exchanges);
 }
 
 // Raycast reports the row it shows after every update, including the one the chat chose, so only a different known
