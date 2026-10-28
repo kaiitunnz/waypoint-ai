@@ -238,8 +238,9 @@ export class SessionManager {
     await this.forget(id).catch(() => undefined);
     return { kind: "done", deleted: id, ...(released?.pointer ? { releasedQuickChat: true } : {}) };
   }
-  // Drops what Raycast keeps for a session that no longer exists, including its own chat drafts.
-  async forget(id: string) {
+  // Drops what Raycast keeps for a session that no longer exists, including its own chat drafts. Resolves false when
+  // an unconfirmed operation still needs the session, so nothing was dropped.
+  async forget(id: string): Promise<boolean> {
     const draftKey = sessionChatDraft(id);
     const forgotten = await this.store.transaction(this.connection.id, async (saved, persist) => {
       if (saved.pending?.sessionId === id) return false;
@@ -258,6 +259,7 @@ export class SessionManager {
         this.store.drafts.remove(draftKeys.line(this.connection.id, draftKey)),
         this.store.drafts.remove(draftKeys.compose(this.connection.id, draftKey)),
       ]);
+    return forgotten;
   }
   // An explicit choice: the session stays Quick Chat's destination until another one replaces it.
   async useForQuickChat(id: string, metadata: ServerMetadata): Promise<ManageOutcome> {

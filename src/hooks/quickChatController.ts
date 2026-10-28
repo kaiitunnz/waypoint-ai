@@ -332,9 +332,11 @@ export class QuickChatController {
   private forgetGone() {
     if (!this.gone || this.forgotten) return;
     this.forgotten = true;
-    void new SessionManager(this.connection, this.store, this.client, this.now).forget(this.boundTo!).catch(() => {
-      this.forgotten = false;
-    });
+    // A checkpoint that still needs the session keeps its drafts; a later refresh tries again.
+    void new SessionManager(this.connection, this.store, this.client, this.now).forget(this.boundTo!).then(
+      (forgotten) => (this.forgotten = forgotten),
+      () => (this.forgotten = false),
+    );
   }
   // The open conversation reported its session missing.
   markMissing(sessionId: string) {
@@ -527,6 +529,8 @@ export class QuickChatController {
     const result = this.queue
       .then(() =>
         this.store.transaction(this.connection.id, async (saved, persist) => {
+          // A save queued before the session was found deleted would bring back the drafts forgetting removed.
+          if (this.gone) return;
           saved.compose = { ...saved.compose, [this.draftKey]: compose };
           await persist();
         }),
@@ -624,6 +628,7 @@ export class QuickChatController {
     try {
       await this.queue;
       const doomed = await this.store.transaction(this.connection.id, async (saved, persist) => {
+        if (this.gone) return [];
         const draft = storedParts(saved.compose?.[this.draftKey]) ?? this.state.compose;
         const removed = draft.files.filter((file) => ids.includes(file.id));
         const next = { ...draft, files: draft.files.filter((file) => !ids.includes(file.id)) };

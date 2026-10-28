@@ -174,8 +174,8 @@ export function CheckpointActions({ controller, sessionId }: { controller: Quick
   );
 }
 
-// Reattaches under the server lock with a checkpoint, so an unanswered request blocks a duplicate. Offered only while
-// nothing is unsettled, since the chat refuses otherwise.
+// Reattaches under the server lock with a checkpoint, so an unanswered request blocks a duplicate. The chat refuses
+// while a send or check is unsettled.
 export function SessionReattachAction({
   controller,
   metadata,

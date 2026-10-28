@@ -515,6 +515,34 @@ test("a chat that finds its session deleted elsewhere removes the session's draf
   await f.close();
 });
 
+test("a deleted session's drafts are kept while a checkpoint needs it, then removed on the next refresh", async () => {
+  const f = await fixture();
+  const line = draftKeys.line(connection.id, sessionChatDraft("other"));
+  const c = f.chat("other");
+  await c.start();
+  await c.changeDraft("typed before the delete");
+  await f.setPending({
+    kind: "input",
+    operationId: "op",
+    sessionId: "other",
+    text: "",
+    draftKey: "quick",
+    startedAt: 1,
+  });
+  f.server.sessions.splice(1, 1);
+  await c.refreshSession();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(f.values.get(line), "typed before the delete");
+  await f.store.transaction(connection.id, async (saved, persist) => {
+    saved.pending = undefined;
+    await persist();
+  });
+  await c.refreshSession();
+  for (let wait = 0; wait < 50 && f.values.has(line); wait++) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(f.values.has(line), false);
+  await f.close();
+});
+
 test("starting, ending, and new chats belong to Quick Chat", async () => {
   const f = await fixture();
   const c = f.chat("other");

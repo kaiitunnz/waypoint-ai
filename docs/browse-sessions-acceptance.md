@@ -27,7 +27,7 @@ Not exercised natively: an approval in a session chat, an unconfirmed operation 
 
 ## Automated coverage
 
-`npm run verify` checks formatting, ESLint, strict types, 302 behavior and integration tests, Raycast validation, and build.
+`npm run verify` checks formatting, ESLint, strict types, 303 behavior and integration tests, Raycast validation, and build.
 
 Tests cover:
 
