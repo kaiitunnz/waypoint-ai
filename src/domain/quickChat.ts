@@ -18,6 +18,7 @@ export interface ChatDefaults {
   args?: string[];
   config?: string[];
 }
+export type ChatLaunchFields = Omit<ChatDefaults, "mode" | "timeoutMinutes">;
 export const initialDefaults = (): ChatDefaults => ({
   mode: "timed",
   timeoutMinutes: 30,

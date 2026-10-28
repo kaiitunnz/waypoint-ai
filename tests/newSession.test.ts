@@ -5,13 +5,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WaypointClient } from "../src/api/client";
 import { parseMetadata } from "../src/api/contracts";
-import { ChatDefaults, createRequest, customLaunch, initialDefaults } from "../src/domain/quickChat";
+import { ChatDefaults, createRequest, customLaunch, initialDefaults, launchFingerprint } from "../src/domain/quickChat";
 import { QuickChatController } from "../src/hooks/quickChatController";
 import { launchSession } from "../src/hooks/sessionLauncher";
 import { SessionManager } from "../src/hooks/sessionManager";
 import { draftKeys } from "../src/storage/drafts";
 import { ServerMutex } from "../src/storage/mutex";
-import { QuickChatStore, decodeQuickChat, isLaunchSettings } from "../src/storage/quickChat";
+import { QuickChatStore, decodeQuickChat, isChatLaunchFields } from "../src/storage/quickChat";
 import { Workspace } from "../src/storage/workspace";
 import { metadataWire, sessionWire } from "./fixtures/conversation";
 
@@ -22,13 +22,17 @@ const minute = 60000;
 async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), "new-session-"));
   const values = new Map<string, string>();
-  const storage = { failAfterCreate: false };
+  const storage = { failAfterCreate: false, failLaunchDraft: false };
   const store = new QuickChatStore(
     {
       keys: async () => [...values.keys()],
       removeItem: async (key) => void values.delete(key),
       getItem: async (key) => values.get(key),
       setItem: async (key, value) => {
+        if (storage.failLaunchDraft && key === draftKeys.launch(connection.id)) {
+          storage.failLaunchDraft = false;
+          throw new Error("Storage unavailable");
+        }
         // Fails the write that records a confirmed create: the pointer moving while a create is cleared.
         if (storage.failAfterCreate && key.startsWith("waypoint.quick-chat.")) {
           const state = JSON.parse(value);
@@ -437,6 +441,36 @@ test("starting a session clears a send's stale SSH retry", async () => {
   await f.close();
 });
 
+test("a failed draft clear after a confirmed start still shows the session", async () => {
+  const f = await fixture();
+  const c = f.controller();
+  await c.start();
+  f.storage.failLaunchDraft = true;
+  const result = await c.createSession(await f.settings(), "launch-form");
+  assert.equal(result.kind, "created");
+  assert.equal(c.getSnapshot().session?.id, "created-1");
+  assert.equal(f.server.creates.length, 1);
+  await f.close();
+});
+
+test("Always New doesn't continue a session a send created and left unused", async () => {
+  const f = await fixture();
+  await f.setDefaults({ mode: "new" });
+  const c = f.controller();
+  await c.start();
+  await c.createSession(await f.settings(), "launch-form");
+  c.stop();
+  // As a compose send leaves it when the create succeeded but the message didn't go through.
+  await f.store.transaction(connection.id, async (saved, persist) => {
+    saved.compose!.quick!.launch = launchFingerprint(createRequest(saved.defaults, f.metadata, saved.installation, ""));
+    await persist();
+  });
+  const reopened = f.controller();
+  await reopened.start();
+  assert.equal(reopened.getSnapshot().session, undefined);
+  await f.close();
+});
+
 test("starting a session is refused while busy, loading, or unconfirmed, and allowed when the destination is gone", async () => {
   const f = await fixture();
   const loading = f.controller();
@@ -527,10 +561,10 @@ test("launch settings and create origins are validated when read back", () => {
   const launch: Record<string, unknown> = { ...initialDefaults() };
   delete launch.mode;
   delete launch.timeoutMinutes;
-  assert.equal(isLaunchSettings(launch), true);
-  assert.equal(isLaunchSettings({ ...launch, args: ["--x"] }), true);
-  assert.equal(isLaunchSettings({ ...launch, model: 3 }), false);
-  assert.equal(isLaunchSettings({ ...launch, config: [1] }), false);
+  assert.equal(isChatLaunchFields(launch), true);
+  assert.equal(isChatLaunchFields({ ...launch, args: ["--x"] }), true);
+  assert.equal(isChatLaunchFields({ ...launch, model: 3 }), false);
+  assert.equal(isChatLaunchFields({ ...launch, config: [1] }), false);
   const state = (origin: unknown) =>
     JSON.stringify({
       version: 1,

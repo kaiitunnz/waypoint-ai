@@ -1,4 +1,5 @@
 import { Color, Detail, Icon, List } from "@raycast/api";
+import { ServerMetadata } from "../api/contracts";
 import { Session } from "../api/sessions";
 
 export const statusIcon = (status: string) => ({
@@ -50,6 +51,19 @@ export function sessionSummary(session: Session): string {
     .join("\n\n");
 }
 
+// A session started without a message has nothing to show yet, so it says where it runs.
+export function sessionIntro(session: Session, metadata: ServerMetadata): string {
+  const agent = metadata.agents.find((entry) => entry.id === session.backend)?.label ?? session.backend;
+  const target = metadata.targets.find((entry) => entry.id === session.targetId)?.name ?? "Local server";
+  return [
+    `## ${markdownText(session.title || "New conversation")}`,
+    `**${[agent, session.model]
+      .filter((part): part is string => !!part)
+      .map(markdownText)
+      .join(" · ")}** · ${markdownText(target)}`,
+    markdownText(session.cwd),
+  ].join("\n\n");
+}
 export function SessionDetail({ session, structured }: { session: Session; structured: boolean }) {
   return (
     <List.Item.Detail

@@ -93,6 +93,9 @@ async function fileStats(file: StagedFile): Promise<FileStats> {
 // `partial` is a delete that ended the session but didn't remove it; `unconfirmed` may still have done either.
 export type TerminateResult =
   { ended: false; message: string } | { ended: true; outcome: "done" | "unconfirmed" | "partial"; message?: string };
+// Draft keys of Quick Chat and New Chat; each keeps its own draft and binding per server.
+export const quickChatDraft = "quick";
+export const newChatDraft = "new";
 export class QuickChatController {
   private state: QuickChatSnapshot = {
     loading: true,
@@ -134,7 +137,7 @@ export class QuickChatController {
     this.forceNew = options.forceNew ?? false;
     this.resume = !this.forceNew && (options.resume ?? false);
     this.workspace = options.workspace;
-    this.draftKey = this.forceNew ? "new" : "quick";
+    this.draftKey = this.forceNew ? newChatDraft : quickChatDraft;
     this.lineKey = draftKeys.line(connection.id, this.draftKey);
     this.composeKey = draftKeys.compose(connection.id, this.draftKey);
   }
@@ -209,7 +212,10 @@ export class QuickChatController {
         this.observedDefaults = JSON.stringify(saved.defaults);
         // Always New skips the saved destination, except an unused session started from chosen settings.
         const unused =
-          !this.resume && saved.defaults.mode === "new" && saved.compose?.[this.draftKey]?.sessionId === saved.pointer
+          !this.resume &&
+          saved.defaults.mode === "new" &&
+          saved.compose?.[this.draftKey]?.launch === customLaunch &&
+          saved.compose[this.draftKey].sessionId === saved.pointer
             ? await this.emptyBoundSession(saved, metadata)
             : undefined;
         if (unused) {
@@ -357,7 +363,7 @@ export class QuickChatController {
     const metadata = this.state.metadata;
     if (!metadata || this.state.loading) throw new Error("Quick Chat is still loading. Try again in a moment.");
     if (this.state.busy || this.state.pending)
-      throw new Error("A message is being sent or needs checking. Start the new chat when it finishes.");
+      throw new Error("A message is being sent or needs checking. Start the session when it finishes.");
     this.publish({ busy: true, error: undefined, notice: undefined });
     try {
       await this.queue;
@@ -893,7 +899,7 @@ export class QuickChatController {
             saved.pending = undefined;
             await persist();
             if (pending.origin === "launch-form")
-              await this.store.drafts.write(draftKeys.launch(this.connection.id), "");
+              await this.store.drafts.write(draftKeys.launch(this.connection.id), "").catch(() => undefined);
             if (bound && pending.draftKey === this.draftKey) this.show(session, bound, "Recovered the new session.");
             else
               this.publish({

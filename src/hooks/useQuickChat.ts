@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useSyncExternalStore } from "react";
-import { QuickChatController } from "./quickChatController";
+import { WaypointClient } from "../api/client";
+import { ServerMetadata } from "../api/contracts";
+import { ChatDefaults } from "../domain/quickChat";
+import { QuickChatController, quickChatDraft } from "./quickChatController";
+import { launchSession } from "./sessionLauncher";
 import { FeedConnection } from "./sessionFeeds";
 import { quickChatStore, connectionStore } from "../storage/raycast";
 import { localWorkspace } from "../storage/workspace";
@@ -11,6 +15,25 @@ export function connectionCheck(connection: FeedConnection) {
     if (!state.connections.some((item) => item.id === connection.id && item.apiUrl === connection.apiUrl))
       throw new Error("The server connection changed or was removed. Reopen Quick Chat; your draft is kept.");
   };
+}
+
+// Starts a Quick Chat session from chosen settings outside a Quick Chat view, such as from Edit Current Session in
+// Search Sessions. Quick Chat then opens it as its destination.
+export function startQuickChatSession(connection: FeedConnection, metadata: ServerMetadata, settings: ChatDefaults) {
+  return launchSession(
+    {
+      connection,
+      client: new WaypointClient(connection.apiUrl),
+      now: Date.now,
+      metadata,
+      workspace: localWorkspace(connection.apiUrl),
+    },
+    quickChatStore,
+    connectionCheck(connection),
+    settings,
+    quickChatDraft,
+    "edit",
+  );
 }
 
 export function useQuickChat(connection: FeedConnection, forceNew: boolean, resume = false) {

@@ -11,8 +11,6 @@ import { localWorkspace } from "../storage/workspace";
 
 type Setter = (update: (current: ChatDefaults) => ChatDefaults) => void;
 
-// The launch settings shared by Quick Chat Defaults and New Session with Settings: preset, target, folder, agent,
-// model, effort, and the advanced fields, with model discovery and the resets a changed agent or target needs.
 // `baselineModel` is the saved model, kept as a choice while discovery doesn't list it.
 export function useLaunchFields(
   connection: FeedConnection,

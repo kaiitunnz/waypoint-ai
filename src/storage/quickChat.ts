@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { ComposeParts } from "../domain/compose";
 import { InteractionAction, InteractionDraft, interactionActions } from "../domain/interactions";
-import { AttemptLaunch, ChatDefaults, initialDefaults } from "../domain/quickChat";
+import { AttemptLaunch, ChatDefaults, ChatLaunchFields, initialDefaults } from "../domain/quickChat";
 import { decodeState, isRecord } from "../domain/connections";
 import { KeyedStorage, connectionsKey } from "./connections";
 import { DraftStore } from "./drafts";
@@ -30,7 +30,7 @@ export interface QuickChatState {
   installation: string;
   defaults: ChatDefaults;
   pointer?: string;
-  // A session the user explicitly chose for Quick Chat. It exists only while it is the pointer.
+  // A session the user chose for Quick Chat, or started from chosen settings. It exists only while it is the pointer.
   chosen?: { sessionId: string; at: number };
   // When the newest failed start Quick Chat recognized was created; older failures never settle a later create.
   failedStartAt?: number;
@@ -56,10 +56,8 @@ export function isInteractionDraft(value: unknown): value is InteractionDraft {
     textRecord(value.notes, isText)
   );
 }
-// The launch fields of Quick Chat defaults, also used on their own by New Session with Settings.
-export type LaunchSettings = Omit<ChatDefaults, "mode" | "timeoutMinutes">;
 const launchTextFields = ["preset", "target", "cwd", "agent", "transport", "model", "effort", "permission", "profile"];
-export function isLaunchSettings(value: unknown): value is LaunchSettings {
+export function isChatLaunchFields(value: unknown): value is ChatLaunchFields {
   return (
     isRecord(value) &&
     launchTextFields.every((key) => isText(value[key])) &&
@@ -124,7 +122,7 @@ export function decodeQuickChat(raw?: string): QuickChatState {
       typeof defaults.timeoutMinutes !== "number" ||
       !Number.isFinite(defaults.timeoutMinutes) ||
       defaults.timeoutMinutes <= 0 ||
-      !isLaunchSettings(defaults)
+      !isChatLaunchFields(defaults)
     )
       throw new Error();
     if (
@@ -188,7 +186,8 @@ export function setPointer(state: QuickChatState, sessionId: string | undefined,
   if (sessionId && chosenAt !== undefined) state.chosen = { sessionId, at: chosenAt };
   else if (state.chosen?.sessionId !== sessionId) state.chosen = undefined;
 }
-// The last explicit user activity for a session: a successful send, or choosing it for Quick Chat.
+// The last explicit user activity for a session: a successful send, choosing it for Quick Chat, or starting it from
+// chosen settings.
 export function lastActivity(state: QuickChatState, sessionId: string): number | undefined {
   const chosen = state.chosen?.sessionId === sessionId ? state.chosen.at : undefined;
   const sent = state.sentAt[sessionId];

@@ -1,27 +1,27 @@
 import { Action, ActionPanel, Form, Icon, Keyboard, Toast, showToast, useNavigation } from "@raycast/api";
 import { useEffect, useRef, useState } from "react";
 import { ServerMetadata } from "../api/contracts";
-import { ChatDefaults, createRequest } from "../domain/quickChat";
+import { ChatDefaults, ChatLaunchFields, createRequest } from "../domain/quickChat";
 import { QuickChatController } from "../hooks/quickChatController";
 import { FeedConnection } from "../hooks/sessionFeeds";
 import { draftKeys } from "../storage/drafts";
-import { LaunchSettings, isLaunchSettings } from "../storage/quickChat";
+import { isChatLaunchFields } from "../storage/quickChat";
 import { quickChatStore } from "../storage/raycast";
 import { ConnectTarget } from "./ConnectTarget";
 import { useLaunchFields } from "./LaunchFields";
 
-function launchSettings(values: ChatDefaults): LaunchSettings {
+function launchFields(values: ChatDefaults): ChatLaunchFields {
   const settings: Partial<ChatDefaults> = { ...values };
   delete settings.mode;
   delete settings.timeoutMinutes;
-  return settings as LaunchSettings;
+  return settings as ChatLaunchFields;
 }
 
-function readDraft(raw: string | undefined): LaunchSettings | undefined {
+function readDraft(raw: string | undefined): ChatLaunchFields | undefined {
   if (!raw) return undefined;
   try {
     const value: unknown = JSON.parse(raw);
-    return isLaunchSettings(value) ? value : undefined;
+    return isChatLaunchFields(value) ? value : undefined;
   } catch {
     return undefined;
   }
@@ -78,7 +78,7 @@ function SettingsForm({ connection, metadata, defaults, controller, initial }: F
   }, []);
   useEffect(() => {
     if (edited.current)
-      void quickChatStore.drafts.write(key, JSON.stringify(launchSettings(values))).catch(() => undefined);
+      void quickChatStore.drafts.write(key, JSON.stringify(launchFields(values))).catch(() => undefined);
   }, [values]);
   const update = (change: (current: ChatDefaults) => ChatDefaults) => {
     setProblem(undefined);

@@ -187,7 +187,9 @@ export async function launchSession(
       });
       return { ...result, compose };
     });
-    if (origin === "launch-form") await store.drafts.write(draftKeys.launch(deps.connection.id), "");
+    // The session exists now, so a failed clear must not turn into a refusal that invites starting it again.
+    if (origin === "launch-form")
+      await store.drafts.write(draftKeys.launch(deps.connection.id), "").catch(() => undefined);
     return { kind: "created", session: created.session, compose: created.compose, problem: created.problem };
   } catch (error) {
     if (error instanceof TargetConnectionRequired) {

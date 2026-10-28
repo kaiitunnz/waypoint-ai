@@ -13,10 +13,8 @@ import { ManageServers } from "./ManageServers";
 import { SignInForm } from "./ServerForm";
 import { ConversationScreen } from "./Conversation";
 import { QuickChat } from "./QuickChat";
-import { WaypointClient } from "../api/client";
-import { LaunchFailure, launchSession } from "../hooks/sessionLauncher";
-import { connectionCheck } from "../hooks/useQuickChat";
-import { localWorkspace } from "../storage/workspace";
+import { LaunchFailure } from "../hooks/sessionLauncher";
+import { startQuickChatSession } from "../hooks/useQuickChat";
 
 export function SearchSessions() {
   const { state, error, refresh } = useConnections();
@@ -259,19 +257,10 @@ function SessionsBrowser({
                               newChat={{
                                 start: async (build) => {
                                   const saved = await quickChatStore.read(connection.id);
-                                  const result = await launchSession(
-                                    {
-                                      connection,
-                                      client: new WaypointClient(connection.apiUrl),
-                                      now: Date.now,
-                                      metadata: state.metadata!,
-                                      workspace: localWorkspace(connection.apiUrl),
-                                    },
-                                    quickChatStore,
-                                    connectionCheck(connection),
+                                  const result = await startQuickChatSession(
+                                    connection,
+                                    state.metadata!,
                                     build(saved.defaults),
-                                    "quick",
-                                    "edit",
                                   );
                                   if (result.kind !== "created") throw new LaunchFailure(result);
                                   return <QuickChat connectionId={connection.id} resume />;

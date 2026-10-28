@@ -39,6 +39,6 @@ export const draftKeys = {
   line: (connectionId: string, draftKey: string) => `waypoint.draft.${connectionId}.line.${draftKey}`,
   compose: (connectionId: string, draftKey: string) => `waypoint.draft.${connectionId}.compose.${draftKey}`,
   interactions: (connectionId: string, sessionId: string) => `waypoint.draft.${connectionId}.interactions.${sessionId}`,
-  // New Session with Settings keeps one form draft per server.
+  // One per server, not per conversation.
   launch: (connectionId: string) => `waypoint.draft.${connectionId}.launch`,
 };
