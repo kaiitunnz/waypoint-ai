@@ -135,6 +135,7 @@ export class QuickChatController {
   private readonly boundTo?: string;
   // The bound session was deleted; nothing is saved for it again, so its removed drafts stay removed.
   private gone = false;
+  private forgotten = false;
   private readonly workspace?: Workspace;
   private draftLoaded = false;
   private queue: Promise<unknown> = Promise.resolve();
@@ -295,6 +296,7 @@ export class QuickChatController {
               : "Ready for a new conversation. Waypoint creates it on your first send.",
       });
     } catch (error) {
+      this.forgetGone();
       if (this.active && generation === this.generation)
         this.publish({
           loading: false,
@@ -326,11 +328,20 @@ export class QuickChatController {
       throw error;
     }
   }
+  // Removes a deleted bound session's drafts. Runs outside any transaction, since forgetting takes the server lock.
+  private forgetGone() {
+    if (!this.gone || this.forgotten) return;
+    this.forgotten = true;
+    void new SessionManager(this.connection, this.store, this.client, this.now).forget(this.boundTo!).catch(() => {
+      this.forgotten = false;
+    });
+  }
   // The open conversation reported its session missing.
   markMissing(sessionId: string) {
     if (this.boundTo === sessionId) {
       this.gone = true;
       this.publish({});
+      this.forgetGone();
     } else if (this.state.session?.id === sessionId) this.deadPointer = sessionId;
   }
   // Rereads the shown session after it changed elsewhere; a send or check in progress publishes its own.
@@ -344,6 +355,7 @@ export class QuickChatController {
         this.publish({ session });
     } catch {
       if (this.gone) this.publish({});
+      this.forgetGone();
     }
   }
   private async savedConversation(id: string) {
@@ -908,6 +920,7 @@ export class QuickChatController {
     } catch (error) {
       if (error instanceof ApiError && error.kind === "not-found" && this.state.session)
         this.markMissing(this.state.session.id);
+      this.forgetGone();
       const saved = await this.store.read(this.connection.id).catch(() => undefined);
       this.publish({
         pending: saved?.pending,

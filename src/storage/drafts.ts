@@ -41,7 +41,7 @@ export class DraftStore {
   }
 }
 
-// The draft key of a chat bound to one session, opened from Browse Sessions.
+// The draft key of a chat bound to one session.
 export const sessionChatDraft = (sessionId: string) => `session:${sessionId}`;
 export const draftKeys = {
   line: (connectionId: string, draftKey: string) => `waypoint.draft.${connectionId}.line.${draftKey}`,

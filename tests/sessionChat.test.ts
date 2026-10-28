@@ -497,6 +497,24 @@ test("deleting a session forgets its chat drafts, and a chat left open doesn't s
   await f.close();
 });
 
+test("a chat that finds its session deleted elsewhere removes the session's drafts", async () => {
+  const f = await fixture();
+  const key = sessionChatDraft("other");
+  const line = draftKeys.line(connection.id, key);
+  const c = f.chat("other");
+  await c.start();
+  await c.changeDraft("typed before the delete");
+  assert.equal(await c.stageContext("clipboard", "context"), true);
+  f.server.sessions.splice(1, 1);
+  await c.refreshSession();
+  assert.equal(c.getSnapshot().blocked, "This session is no longer on this server.");
+  for (let wait = 0; wait < 50 && f.values.has(line); wait++) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(f.values.has(line), false);
+  assert.equal((await f.store.load(connection.id)).compose?.[key], undefined);
+  assert.equal((await f.store.load(connection.id)).pointer, "qc");
+  await f.close();
+});
+
 test("starting, ending, and new chats belong to Quick Chat", async () => {
   const f = await fixture();
   const c = f.chat("other");

@@ -27,11 +27,11 @@ Not exercised natively: an approval in a session chat, an unconfirmed operation 
 
 ## Automated coverage
 
-`npm run verify` checks formatting, ESLint, strict types, 301 behavior and integration tests, Raycast validation, and build.
+`npm run verify` checks formatting, ESLint, strict types, 302 behavior and integration tests, Raycast validation, and build.
 
 Tests cover:
 
 - **Sending:** a session chat sends to its session without creating one or changing Quick Chat's destination; an exited session is reattached first with the restart timeout; a session that ended without a way to resume, or uses a terminal interface, stays readable and sends nothing; that state follows the session as it changes.
-- **Drafts:** each session keeps its own message and compose drafts, apart from other sessions, other servers, and Quick Chat; deleting a session removes them, and a chat left open on it doesn't save them again.
+- **Drafts:** each session keeps its own message and compose drafts, apart from other sessions, other servers, and Quick Chat; deleting a session removes them, as does a chat finding its session deleted elsewhere, and a chat left open on it doesn't save them again.
 - **Unconfirmed operations:** a session chat's unconfirmed send is shown in Quick Chat without switching its conversation, and the reverse; checking names the other session; clearing another chat's operation keeps Quick Chat's destination; only the chat that started an operation can allow a retry; an interaction response belongs to no chat; uploads another chat dropped when clearing aren't written back.
 - **Scope:** starting, ending, and new chats stay with Quick Chat; a session chat whose session is gone never switches to a session Quick Chat recovers; the staged parts of several session chats stay one bounded saved value.

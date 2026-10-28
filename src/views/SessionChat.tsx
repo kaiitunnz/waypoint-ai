@@ -81,7 +81,7 @@ function SessionChat({
   refreshConnections: () => Promise<void>;
 }) {
   const { state, controller } = useQuickChat(connection, { kind: "session", sessionId });
-  const checkpoint = checkpointOffer(state.pending, state.pendingOwned, state.session?.id) !== "none";
+  const checkpoint = checkpointOffer(state.pending, state.pendingOwned, sessionId) !== "none";
   const status = [
     state.error,
     state.blocked !== state.error && state.blocked,
@@ -172,7 +172,7 @@ function SessionChatActions({
     <>
       <ComposeActions controller={controller} metadata={metadata} />
       <TargetActions controller={controller} metadata={metadata} />
-      <CheckpointActions controller={controller} sessionChat />
+      <CheckpointActions controller={controller} sessionId={sessionId} />
       {reattach && <SessionReattachAction controller={controller} metadata={metadata} />}
       <Action
         title="Reconnect Chat"

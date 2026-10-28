@@ -68,16 +68,12 @@ export function TargetActions({ controller, metadata }: { controller: QuickChatC
   );
 }
 
-// `sessionChat` is a chat bound to one session, which never starts a new chat.
-export function CheckpointActions({
-  controller,
-  sessionChat = false,
-}: {
-  controller: QuickChatController;
-  sessionChat?: boolean;
-}) {
+// `sessionId` is the session a chat is bound to, which never starts a new chat; its conversation is that session even
+// before it loads.
+export function CheckpointActions({ controller, sessionId }: { controller: QuickChatController; sessionId?: string }) {
   const state = useChat(controller);
-  const offer = checkpointOffer(state.pending, state.pendingOwned, state.session?.id);
+  const sessionChat = sessionId !== undefined;
+  const offer = checkpointOffer(state.pending, state.pendingOwned, sessionId ?? state.session?.id);
   if (offer === "none") return null;
   const check = (
     <Action

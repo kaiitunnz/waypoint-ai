@@ -5,7 +5,7 @@ import { useQuickChat } from "../hooks/useQuickChat";
 import { FeedConnection } from "../hooks/sessionFeeds";
 import { connectionStore } from "../storage/raycast";
 import { localWorkspace } from "../storage/workspace";
-import { canReattach, launchContext, resumeFor } from "../domain/quickChat";
+import { launchContext, resumeFor } from "../domain/quickChat";
 import { sessionUrl } from "../domain/sessions";
 import { checkpointOffer, deleteMessage, quickChatMovesOn, terminateMessage } from "../domain/sessionActions";
 import { ChatConversation } from "./ChatConversation";
@@ -13,7 +13,7 @@ import { QuickChatController } from "../hooks/quickChatController";
 import { LaunchFailure } from "../hooks/sessionLauncher";
 import { QuickChatDefaults } from "./QuickChatDefaults";
 import { NewSessionSettings } from "./NewSessionSettings";
-import { CheckpointActions, ComposeActions, TargetActions } from "./ChatActions";
+import { CheckpointActions, ComposeActions, SessionReattachAction, TargetActions } from "./ChatActions";
 import { SignInForm } from "./ServerForm";
 import { ManageServers } from "./ManageServers";
 import { LoadingView } from "../components/SessionPresentation";
@@ -336,17 +336,7 @@ function QuickChatActions({
           onAction={() => controller.action("interrupt")}
         />
       )}
-      {state.session &&
-        metadata &&
-        ["exited", "error"].includes(state.session.status) &&
-        canReattach(state.session, metadata) && (
-          <Action
-            title="Reattach Session"
-            icon={Icon.Link}
-            shortcut={{ modifiers: ["cmd", "shift"], key: "t" }}
-            onAction={() => controller.action("reattach")}
-          />
-        )}
+      {metadata && <SessionReattachAction controller={controller} metadata={metadata} />}
       {state.session && state.session.status !== "exited" && !state.busy && !state.pending && (
         <Action
           title="Terminate Session"
