@@ -1,13 +1,18 @@
 import { randomUUID } from "node:crypto";
 import { ComposeParts } from "../domain/compose";
 import { InteractionAction, InteractionDraft, interactionActions } from "../domain/interactions";
-import { AttemptLaunch, ChatDefaults, initialDefaults } from "../domain/quickChat";
+import { AttemptLaunch, ChatDefaults, ChatLaunchFields, initialDefaults } from "../domain/quickChat";
 import { decodeState, isRecord } from "../domain/connections";
 import { KeyedStorage, connectionsKey } from "./connections";
 import { DraftStore } from "./drafts";
 
+// Which form started a create from chosen settings: New Session with Settings or Edit Current Session.
+export type LaunchOrigin = "launch-form" | "edit";
+export const launchOrigins: LaunchOrigin[] = ["launch-form", "edit"];
 export interface PendingOperation {
   kind: "create" | "input" | "reattach" | "interrupt" | "interaction";
+  // Absent for a create started by a send.
+  origin?: LaunchOrigin;
   interactionKey?: string;
   interactionAction?: InteractionAction;
   operationId: string;
@@ -25,7 +30,7 @@ export interface QuickChatState {
   installation: string;
   defaults: ChatDefaults;
   pointer?: string;
-  // A session the user explicitly chose for Quick Chat. It exists only while it is the pointer.
+  // A session the user chose for Quick Chat, or started from chosen settings. It exists only while it is the pointer.
   chosen?: { sessionId: string; at: number };
   // When the newest failed start Quick Chat recognized was created; older failures never settle a later create.
   failedStartAt?: number;
@@ -50,6 +55,27 @@ export function isInteractionDraft(value: unknown): value is InteractionDraft {
     textRecord(value.selected, (entry) => Array.isArray(entry) && entry.every(isText)) &&
     textRecord(value.notes, isText)
   );
+}
+const launchTextFields = ["preset", "target", "cwd", "agent", "transport", "model", "effort", "permission", "profile"];
+export function isChatLaunchFields(value: unknown): value is ChatLaunchFields {
+  return (
+    isRecord(value) &&
+    launchTextFields.every((key) => isText(value[key])) &&
+    ["args", "config"].every(
+      (key) => value[key] === undefined || (Array.isArray(value[key]) && value[key].every(isText)),
+    )
+  );
+}
+// Restores a saved New Session with Settings draft over the defaults. JSON drops unset overrides, so a draft's
+// missing arguments and configuration mean "not overridden" rather than "use the defaults' overrides".
+export function restoreLaunchDraft(defaults: ChatDefaults, raw: string | undefined): ChatDefaults {
+  if (!raw) return defaults;
+  try {
+    const draft: unknown = JSON.parse(raw);
+    return isChatLaunchFields(draft) ? { ...defaults, args: undefined, config: undefined, ...draft } : defaults;
+  } catch {
+    return defaults;
+  }
 }
 const isNumber = (value: unknown) => typeof value === "number" && Number.isFinite(value);
 function isComposeParts(value: unknown): boolean {
@@ -106,17 +132,10 @@ export function decodeQuickChat(raw?: string): QuickChatState {
       !["timed", "continue", "new"].includes(String(defaults.mode)) ||
       typeof defaults.timeoutMinutes !== "number" ||
       !Number.isFinite(defaults.timeoutMinutes) ||
-      defaults.timeoutMinutes <= 0
+      defaults.timeoutMinutes <= 0 ||
+      !isChatLaunchFields(defaults)
     )
       throw new Error();
-    for (const key of ["preset", "target", "cwd", "agent", "transport", "model", "effort", "permission", "profile"])
-      if (typeof defaults[key] !== "string") throw new Error();
-    for (const key of ["args", "config"])
-      if (
-        defaults[key] !== undefined &&
-        (!Array.isArray(defaults[key]) || !defaults[key].every((value: unknown) => typeof value === "string"))
-      )
-        throw new Error();
     if (
       !Object.values(data.drafts).every((value) => typeof value === "string") ||
       !Object.values(data.sentAt).every((value) => typeof value === "number" && Number.isFinite(value))
@@ -130,6 +149,7 @@ export function decodeQuickChat(raw?: string): QuickChatState {
         typeof data.pending.text !== "string" ||
         typeof data.pending.draftKey !== "string" ||
         typeof data.pending.startedAt !== "number" ||
+        (data.pending.origin !== undefined && !launchOrigins.includes(data.pending.origin as LaunchOrigin)) ||
         (data.pending.sessionId !== undefined && typeof data.pending.sessionId !== "string"))
     )
       throw new Error();
@@ -177,7 +197,8 @@ export function setPointer(state: QuickChatState, sessionId: string | undefined,
   if (sessionId && chosenAt !== undefined) state.chosen = { sessionId, at: chosenAt };
   else if (state.chosen?.sessionId !== sessionId) state.chosen = undefined;
 }
-// The last explicit user activity for a session: a successful send, or choosing it for Quick Chat.
+// The last explicit user activity for a session: a successful send, choosing it for Quick Chat, or starting it from
+// chosen settings.
 export function lastActivity(state: QuickChatState, sessionId: string): number | undefined {
   const chosen = state.chosen?.sessionId === sessionId ? state.chosen.at : undefined;
   const sent = state.sentAt[sessionId];

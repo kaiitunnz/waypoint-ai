@@ -98,6 +98,10 @@ Type in the top message field and press Enter to send. Follow-ups continue the s
 
 Quick Chat continues its own conversation for each saved server. The default timeout is 30 minutes after the last successful user send, or after you chose the session with **Use for Quick Chat**, whichever is later. Running work and unresolved approvals, questions, or plans keep their conversation. **Quick Chat Defaults** offers Always Continue, Always New, and a configurable timeout. **New Chat** and **Start New Chat** prepare a fresh conversation; creation happens on first send, and existing sessions keep running. With Always New, **Open in Quick Chat** in Search Sessions returns to the chosen session.
 
+**New Session with Settings** (⌘⇧N) starts a session from settings you choose, leaving Quick Chat Defaults as they are. The form starts from the defaults and keeps your changes if Raycast closes; **Discard Draft** resets it. **Start Session** creates the session right away, without a message, and Quick Chat shows it ready for your first one. Until you send it, reopening the command you started it from returns to that session in every reuse mode, and **Start New Chat** moves on. Timed reuse counts from when it started.
+
+![New Session with Settings](docs/screenshots/new-session-settings.jpg)
+
 Each new session is titled with the time it was created, such as `Quick Chat 2026-10-27 14:05`, in this Mac's local time.
 
 When the server runs on this Mac and no working directory is set, sessions on the Local target start in `~/.waypoint-ai/workspace`. Raycast creates the folder on first use with an `AGENTS.md` describing it as a scratch workspace and a `CLAUDE.md` that imports it; edits to either file are kept. Other servers and SSH targets use the target's or server's default directory.
@@ -138,7 +142,7 @@ The top of the form previews what applying does. Inline changes apply at once. C
 
 Environment values are never shown or stored. Each existing variable can be kept, replaced, or removed, and variables Waypoint manages are hidden. Model, effort, and permission changes need a running session: exited sessions offer **Reattach Session**, and starting sessions ask you to wait.
 
-Agent, execution target, and working directory can't change on an existing conversation. Changing them in the form turns the action into **Start New Chat with These Settings**, which saves them as that server's Quick Chat defaults and prepares a new chat; the current conversation keeps its settings. Environment variables for the new chat come from the Quick Chat preset.
+Agent, execution target, and working directory can't change on an existing conversation. Changing them in the form turns the action into **Start New Session with These Settings**, which starts a session with them right away and shows it in Quick Chat. Quick Chat Defaults and the current conversation keep their settings. Environment variables for the new session come from the Quick Chat preset.
 
 ## Agents and interfaces
 
@@ -180,4 +184,4 @@ The gate checks formatting, ESLint, strict TypeScript, behavior and HTTP integra
 
 Source is organized into thin command entries, `api/`, `domain/`, `storage/`, `hooks/`, `views/`, and `components/`. Tests compile into an ignored temporary build directory using the installed TypeScript compiler and Node's test runner.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contributor guidance and [connection acceptance](docs/server-connections-acceptance.md), [conversation acceptance](docs/session-conversations-acceptance.md), [Quick Chat acceptance](docs/quick-chat-acceptance.md), [session interactions acceptance](docs/session-interactions-acceptance.md), [desktop inputs acceptance](docs/desktop-inputs-acceptance.md), [session settings acceptance](docs/session-settings-acceptance.md), [session management acceptance](docs/session-management-acceptance.md), [long session acceptance](docs/long-session-acceptance.md), [tool activity acceptance](docs/tool-activity-acceptance.md), and [Quick Chat cleanup acceptance](docs/quick-chat-cleanup-acceptance.md) for runtime coverage.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contributor guidance and [connection acceptance](docs/server-connections-acceptance.md), [conversation acceptance](docs/session-conversations-acceptance.md), [Quick Chat acceptance](docs/quick-chat-acceptance.md), [session interactions acceptance](docs/session-interactions-acceptance.md), [desktop inputs acceptance](docs/desktop-inputs-acceptance.md), [session settings acceptance](docs/session-settings-acceptance.md), [session management acceptance](docs/session-management-acceptance.md), [long session acceptance](docs/long-session-acceptance.md), [tool activity acceptance](docs/tool-activity-acceptance.md), [Quick Chat cleanup acceptance](docs/quick-chat-cleanup-acceptance.md), and [New Session with Settings acceptance](docs/new-session-settings-acceptance.md) for runtime coverage.

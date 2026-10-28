@@ -21,7 +21,9 @@ import { sessionUrl } from "../domain/sessions";
 import { deleteMessage, quickChatMovesOn, terminateMessage } from "../domain/sessionActions";
 import { ChatConversation } from "./ChatConversation";
 import { QuickChatController } from "../hooks/quickChatController";
+import { LaunchFailure } from "../hooks/sessionLauncher";
 import { QuickChatDefaults } from "./QuickChatDefaults";
+import { NewSessionSettings } from "./NewSessionSettings";
 import { ComposeMessage, includeContext } from "./ComposeMessage";
 import { ConnectTarget } from "./ConnectTarget";
 import { ContextKind } from "../domain/compose";
@@ -174,7 +176,12 @@ function QuickChatView({
         settings={{
           available: !state.busy && !state.pending,
           newChat: state.defaults
-            ? { start: (build) => controller.startNewChatWith(build(state.defaults!)) }
+            ? {
+                start: async (build) => {
+                  const result = await controller.createSession(build(state.defaults!), "edit");
+                  if (result.kind !== "created") throw new LaunchFailure(result);
+                },
+              }
             : undefined,
         }}
       />
@@ -372,8 +379,9 @@ function QuickChatActions({
               if (
                 await confirmAlert({
                   title: "Allow another attempt?",
-                  message:
-                    "The previous operation may already have reached Waypoint. A new attempt can create another session or duplicate a message. Check the outcome first. Nothing is resent until you press Send.",
+                  message: state.pending?.origin
+                    ? "The new session may already have been created. Another attempt can create a second one. Check the outcome first, then start the session again from the form you used."
+                    : "The previous operation may already have reached Waypoint. A new attempt can create another session or duplicate a message. Check the outcome first. Nothing is resent until you press Send.",
                   primaryAction: { title: "Check and Allow Retry", style: Alert.ActionStyle.Destructive },
                 })
               )
@@ -397,6 +405,23 @@ function QuickChatActions({
             }}
           />
         </>
+      )}
+      {metadata && state.defaults && !state.busy && !state.pending && (
+        <Action.Push
+          title="New Session with Settings"
+          icon={Icon.PlusCircle}
+          shortcut={{ modifiers: ["cmd", "shift"], key: "n" }}
+          onPush={() => setActive(false)}
+          onPop={() => setActive(true)}
+          target={
+            <NewSessionSettings
+              connection={connection}
+              metadata={metadata}
+              defaults={state.defaults}
+              controller={controller}
+            />
+          }
+        />
       )}
       {metadata && state.defaults && (
         <Action.Push

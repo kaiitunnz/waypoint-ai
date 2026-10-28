@@ -37,8 +37,11 @@ import { structuredTransport } from "../domain/sessions";
 import { FeedConnection } from "../hooks/sessionFeeds";
 import { SessionSettingsController } from "../hooks/sessionSettingsController";
 import { ConnectTarget } from "./ConnectTarget";
+import { LaunchFailure } from "../hooks/sessionLauncher";
+import { localWorkspace } from "../storage/workspace";
 
-// Saves Quick Chat defaults built from the current ones; returns a view to open when the chat isn't already on screen.
+// Starts a session from settings built on the current defaults, which stay unchanged. Throws `LaunchFailure` when
+// the session wasn't started; returns a view to open when the new session isn't already on screen.
 export interface NewChatOption {
   start: (build: (current: ChatDefaults) => ChatDefaults) => Promise<React.ReactElement | void>;
   // Opens the returned view in place of the editor, letting the conversation underneath pause.
@@ -69,6 +72,8 @@ export function EditSession({
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const [draft, setDraft] = useState<SettingsDraft>();
   const [problem, setProblem] = useState<string>();
+  // A password-auth SSH target the new session's start asked to connect.
+  const [launchTarget, setLaunchTarget] = useState<string>();
   const [effortReset, setEffortReset] = useState(false);
   const [busy, setBusy] = useState(false);
   const { pop, push } = useNavigation();
@@ -119,7 +124,8 @@ export function EditSession({
   const plan = controller.plan(draft);
   const efforts = effortChoices(state.catalog, baseline, draft);
   const working = busy || state.applying;
-  const target = metadata.targets.find((entry) => entry.id === state.connectTarget);
+  const connectTarget = state.connectTarget ?? launchTarget;
+  const target = metadata.targets.find((entry) => entry.id === connectTarget);
   const reattachable =
     state.reattach ||
     (["exited", "error"].includes(baseline.status) &&
@@ -146,15 +152,14 @@ export function EditSession({
         if (!newChat) return;
         const view = await newChat.start((current) => {
           const defaults = newChatDefaults(current, baseline!, draft, metadata!);
-          // Checked before saving so an unusable combination stays in the form.
-          createRequest(defaults, metadata!, "check", "check");
+          // Checked before starting so an unusable combination stays in the form.
+          createRequest(defaults, metadata!, "check", "check", {
+            workspace: localWorkspace(connection.apiUrl)?.dir,
+            source: "form",
+          });
           return defaults;
         });
-        await showToast({
-          style: Toast.Style.Success,
-          title: "New chat ready",
-          message: "Quick Chat defaults updated",
-        });
+        await showToast({ style: Toast.Style.Success, title: "Session started" });
         if (!mounted.current) return;
         pop();
         if (view) (newChat.open ?? push)(view);
@@ -201,6 +206,13 @@ export function EditSession({
       });
       if (mounted.current) pop();
     } catch (error) {
+      if (error instanceof LaunchFailure && error.result.kind === "uncertain") {
+        await showToast({ style: Toast.Style.Failure, title: "New session unconfirmed", message: error.message });
+        if (mounted.current) pop();
+        return;
+      }
+      if (error instanceof LaunchFailure && error.result.kind === "ssh" && mounted.current)
+        setLaunchTarget(error.result.targetId);
       const message = error instanceof Error ? error.message : "Could not apply the changes.";
       if (mounted.current) setProblem(message);
       else await showToast({ style: Toast.Style.Failure, title: "Changes not applied", message });
@@ -220,7 +232,7 @@ export function EditSession({
 
   const submitTitle =
     plan?.kind === "new-chat"
-      ? "Start New Chat with These Settings"
+      ? "Start New Session with These Settings"
       : plan?.kind === "restart-resume"
         ? "Apply and Restart"
         : "Apply Changes";
@@ -239,14 +251,21 @@ export function EditSession({
           {(plan?.kind !== "new-chat" || newChat) && (
             <Action.SubmitForm title={submitTitle} icon={Icon.Checkmark} onSubmit={submit} />
           )}
-          {state.connectTarget && (
+          {connectTarget && (
             <Action.Push
               title="Connect SSH Target"
               icon={Icon.Lock}
               target={
                 <ConnectTarget
                   target={target}
-                  connect={(password) => controller.connectTarget(state.connectTarget!, password)}
+                  connect={async (password) => {
+                    const result = await controller.connectTarget(connectTarget, password);
+                    if (result.connected && mounted.current) {
+                      setLaunchTarget(undefined);
+                      setProblem(undefined);
+                    }
+                    return result;
+                  }}
                 />
               }
             />
@@ -474,7 +493,7 @@ export function EditSession({
             id="agent"
             title="Agent"
             value={draft.agent}
-            info="Changing the agent, target, or folder starts a new chat. This conversation keeps its settings."
+            info="Changing the agent, target, or folder starts a new session. This conversation keeps its settings."
             onChange={(agent) => update({ agent })}
           >
             {!agents.some((agent) => agent.id === baseline.backend) && (

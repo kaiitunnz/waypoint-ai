@@ -7,7 +7,7 @@ import { transcript } from "../domain/transcript";
 import { isStructured } from "../domain/sessions";
 import { useConversationFeed } from "../hooks/useSessionFeeds";
 import { ConversationFeed, FeedConnection } from "../hooks/sessionFeeds";
-import { gapNotice, markdownText, sessionSummary } from "../components/SessionPresentation";
+import { gapNotice, markdownText, sessionIntro, sessionSummary } from "../components/SessionPresentation";
 import { useSessionInteractions } from "../hooks/useSessionInteractions";
 import {
   InteractionSection,
@@ -123,7 +123,7 @@ export function ChatConversation({
   settings?: { available: boolean; newChat?: NewChatOption };
 }) {
   const [active, setActive] = useState(true);
-  // Set while New Chat replaces the editor, so the editor's pop doesn't resume the hidden conversation.
+  // Set while the new session's view replaces the editor, so the editor's pop doesn't resume the hidden conversation.
   const handingOff = useRef(false);
   const { push } = useNavigation();
   const { state, feed } = useConversationFeed(connection, sessionId ?? "", active && !!sessionId);
@@ -209,11 +209,11 @@ export function ChatConversation({
       attention.length ? `> **Needs attention**\n>\n${attention.map((line) => `> ${line}`).join("\n")}\n\n---` : "",
       unsupported
         ? `## This conversation needs Waypoint\n\nIts interface changed. ${interactionUrl ? "Open it in Waypoint to continue." : "Add a frontend URL in Manage Servers to open it in Waypoint."}`
-        : exchanges.length
-          ? readingMode === "conversation"
-            ? conversationMarkdown(exchanges, showActivity, waiting, limit)
-            : chatMarkdown(latest, showActivity, waiting, limit)
-          : emptyMarkdown || "",
+        : (exchanges.length
+            ? readingMode === "conversation"
+              ? conversationMarkdown(exchanges, showActivity, waiting, limit)
+              : chatMarkdown(latest, showActivity, waiting, limit)
+            : "") || (session && !turns ? sessionIntro(session, metadata) : emptyMarkdown || ""),
       waiting ? "_Working…_" : "",
       // Quick Chat shows the status beside its conversation row; the reader has only the transcript.
       !composer && session ? endedNote(session.status) : "",
