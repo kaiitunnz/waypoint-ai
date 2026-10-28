@@ -11,7 +11,8 @@ import {
   parseEvent,
   parseQuestions,
 } from "../api/sessions";
-import { mergeEvents, newerQuestions } from "../domain/transcript";
+import { chatExchanges } from "../domain/chatPresentation";
+import { mergeEvents, newerQuestions, transcript } from "../domain/transcript";
 
 export interface FeedConnection extends Connection {
   token: string;
@@ -22,6 +23,10 @@ type Options = { factory?: SocketFactory; scheduler?: Scheduler; watch?: Schedul
 export const presenceIntervalMs = 20000;
 // How many earlier pages a resumed conversation reads to reconnect to the history it already holds.
 export const bridgePages = 5;
+// How many earlier pages one Load Earlier Turns reads at most.
+export const turnPages = 3;
+// `stale`: a reload, a resume, or stopping replaced the history the page was read for.
+export type OlderOutcome = "loaded" | "skipped" | "failed" | "stale";
 const safeError = (error: unknown) =>
   error instanceof ApiError
     ? error
@@ -184,6 +189,7 @@ export class ConversationFeed extends Observable<ConversationSnapshot> {
   private buffer: SessionEvent[] = [];
   private controller?: AbortController;
   private olderController?: AbortController;
+  private olderTurn?: Promise<OlderOutcome>;
   private fallbackRunning = false;
   private hydrated = false;
   private readonly watch: Scheduler;
@@ -263,8 +269,9 @@ export class ConversationFeed extends Observable<ConversationSnapshot> {
       if (error instanceof ApiError && error.kind === "not-found" && this.active && generation === this.generation) {
         this.generation++;
         this.controller?.abort();
+        this.olderController?.abort();
         this.socket.stop();
-        this.publish({ loading: false, error: error });
+        this.publish({ loading: false, loadingOlder: false, error: error });
         return;
       }
     }
@@ -378,28 +385,74 @@ export class ConversationFeed extends Observable<ConversationSnapshot> {
       this.hydrating = false;
     }
   }
-  async loadOlder() {
-    const before = this.state.events[0]?.sequence;
-    if (!this.active || this.state.loading || this.state.loadingOlder || !this.state.hasMore || before === undefined)
-      return;
-    const controller = new AbortController();
-    this.olderController = controller;
+  async loadOlder(): Promise<OlderOutcome> {
+    if (!this.canLoadOlder()) return "skipped";
     const generation = this.generation;
     this.publish({ loadingOlder: true });
+    const outcome = await this.olderPage(generation);
+    if (outcome !== "stale") this.publish({ loadingOlder: false });
+    return outcome;
+  }
+  // Reads earlier pages until one more prompt has loaded, up to `turnPages`: a page counts messages and tool calls,
+  // so one turn can span several, and the cap keeps a very long turn from walking the whole history at once.
+  loadOlderTurn(): Promise<OlderOutcome> {
+    if (!this.olderTurn)
+      this.olderTurn = this.walkOlderTurn().finally(() => {
+        this.olderTurn = undefined;
+      });
+    return this.olderTurn;
+  }
+  private async walkOlderTurn(): Promise<OlderOutcome> {
+    if (!this.canLoadOlder()) return "skipped";
+    const generation = this.generation;
+    const anchor = this.state.events[0].sequence;
+    this.publish({ loadingOlder: true });
+    let loaded = false;
+    let outcome: OlderOutcome = "skipped";
+    for (let pages = 0; pages < turnPages; pages++) {
+      outcome = await this.olderPage(generation);
+      if (outcome !== "loaded") break;
+      loaded = true;
+      if (!this.state.hasMore || this.olderPrompts(anchor) > 0) break;
+    }
+    if (outcome !== "stale") this.publish({ loadingOlder: false });
+    return outcome === "stale" ? outcome : loaded ? "loaded" : outcome;
+  }
+  // Prompts before the walk's first event; live turns arriving meanwhile land after it and don't count.
+  private olderPrompts(anchor: number) {
+    return chatExchanges(transcript(this.state.events), this.state.gaps).filter(
+      (exchange) => exchange.prompt && exchange.prompt.sequence < anchor,
+    ).length;
+  }
+  private canLoadOlder() {
+    return (
+      this.active &&
+      !this.state.loading &&
+      !this.state.loadingOlder &&
+      this.state.hasMore &&
+      this.state.events.length > 0
+    );
+  }
+  private async olderPage(generation: number): Promise<OlderOutcome> {
+    const before = this.state.events[0].sequence;
+    const controller = new AbortController();
+    this.olderController = controller;
+    const current = () => this.active && !controller.signal.aborted && generation === this.generation;
     try {
       const page = await this.client.events(this.connection.token, this.sessionId, { before }, controller.signal);
-      if (!this.active || controller.signal.aborted || generation !== this.generation) return;
+      if (!current()) return "stale";
       if (page.events.some((event) => event.sequence >= before) || (page.hasMore && !page.events.length))
         throw new Error("History cursor did not advance");
       this.publish({
         events: mergeEvents(this.state.events, page.events, this.sessionId),
         hasMore: page.hasMore,
-        loadingOlder: false,
         error: undefined,
       });
+      return "loaded";
     } catch (error) {
-      if (this.active && !controller.signal.aborted && generation === this.generation)
-        this.publish({ loadingOlder: false, error: safeError(error) });
+      if (!current()) return "stale";
+      this.publish({ error: safeError(error) });
+      return "failed";
     }
   }
 }
