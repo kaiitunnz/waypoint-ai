@@ -8,6 +8,7 @@ test("draft writes coalesce to the latest value with one write in flight", async
   let gate: Promise<void> | undefined = new Promise<void>((resolve) => (release = resolve));
   const drafts = new DraftStore({
     keys: async () => ["k"],
+    entries: async () => [],
     removeItem: async () => undefined,
     getItem: async () => stored.at(-1),
     setItem: async (_key, value) => {
@@ -29,6 +30,7 @@ test("a failed draft write rejects its callers and the next write retries with t
   let fail = true;
   const drafts = new DraftStore({
     keys: async () => [...stored.keys()],
+    entries: async () => [...stored],
     removeItem: async (key) => void stored.delete(key),
     getItem: async (key) => stored.get(key),
     setItem: async (key, value) => {
@@ -49,6 +51,7 @@ test("removing a draft drops a queued value and waits for the write in flight", 
   const gate = new Promise<void>((resolve) => (release = resolve));
   const drafts = new DraftStore({
     keys: async () => [...stored.keys()],
+    entries: async () => [...stored],
     removeItem: async (key) => void stored.delete(key),
     getItem: async (key) => stored.get(key),
     setItem: async (key, value) => {

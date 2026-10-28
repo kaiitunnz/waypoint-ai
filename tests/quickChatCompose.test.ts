@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WaypointClient } from "../src/api/client";
 import { QuickChatController } from "../src/hooks/quickChatController";
+import { ClipboardReader } from "../src/hooks/clipboardReader";
+import { stageClipboard } from "../src/hooks/clipboardStaging";
+import { ClipboardReading } from "../src/domain/compose";
+import { ClipboardFiles } from "../src/storage/clipboardFiles";
 import { ServerMutex } from "../src/storage/mutex";
 import { draftKeys } from "../src/storage/drafts";
 import { QuickChatStore } from "../src/storage/quickChat";
@@ -28,6 +32,7 @@ async function fixture(options: { attachments?: boolean; target?: "password" | "
   const store = new QuickChatStore(
     {
       keys: async () => [...values.keys()],
+      entries: async () => [...values],
       removeItem: async (key) => void values.delete(key),
       getItem: async (key) => {
         const value = values.get(key);
@@ -162,12 +167,14 @@ async function fixture(options: { attachments?: boolean; target?: "password" | "
     await writeFile(path, content);
     return path;
   };
+  const clipboardRoot = join(directory, "clipboard-attachments");
+  const clipboard = new ClipboardFiles(clipboardRoot, store);
   const controller = (forceNew = false) =>
     new QuickChatController(
       connection,
       store,
       async () => undefined,
-      { destination: { kind: forceNew ? "new" : "quick" } },
+      { destination: { kind: forceNew ? "new" : "quick" }, clipboardFiles: clipboard },
       client,
       () => 1_000_000,
     );
@@ -186,6 +193,8 @@ async function fixture(options: { attachments?: boolean; target?: "password" | "
     controller,
     file,
     setDefaults,
+    clipboard,
+    clipboardRoot,
     close: () => rm(directory, { recursive: true, force: true }),
   };
 }
@@ -196,7 +205,8 @@ test("compose sends create the session, upload typed files, then send their IDs 
   await c.start();
   await c.setComposeText("Review these");
   await c.stageContext("selection", "picked text");
-  assert.deepEqual(await c.addFiles([await f.file("shot.png"), await f.file("notes.md")]), []);
+  const added = await c.addFiles([await f.file("shot.png"), await f.file("notes.md")]);
+  assert.deepEqual([added.problems, added.staged.length, added.saved], [[], 2, true]);
   assert.equal(await c.send(true), true);
   assert.deepEqual(f.server.uploads, [
     { session: "created-1", name: "shot.png", type: "image/png" },
@@ -250,8 +260,9 @@ test("local checks and agent capability fail before anything is created", async 
   const f = await fixture({ attachments: false });
   const c = f.controller();
   await c.start();
-  const problems = await c.addFiles([join(tmpdir(), "missing-file-for-tests.txt")]);
+  const { problems, staged } = await c.addFiles([join(tmpdir(), "missing-file-for-tests.txt")]);
   assert.match(problems[0], /no longer available/);
+  assert.deepEqual(staged, []);
   await c.addFiles([await f.file("a.txt")]);
   assert.equal(await c.send(true), false);
   assert.match(c.getSnapshot().error!, /doesn't accept attachments/);
@@ -556,7 +567,11 @@ test("files picked as a send starts are not saved over what it sent", async () =
   await c.stageContext("clipboard", "sent once");
   const adding = c.addFiles([await f.file("late.txt")]);
   const sending = c.send(true);
-  assert.deepEqual(await adding, ["A message is being sent. Add the files again when it finishes."]);
+  assert.deepEqual(await adding, {
+    problems: ["A message is being sent. Add the files again when it finishes."],
+    staged: [],
+    saved: false,
+  });
   assert.equal(await sending, true);
   assert.equal((await f.store.read(connection.id)).compose?.quick, undefined);
   assert.deepEqual(f.server.uploads, []);
@@ -591,5 +606,176 @@ test("starting a session with changed settings creates it at once and leaves the
     f.server.inputs.map((input) => input.session),
     ["created-1", "created-1", "created-2"],
   );
+  await f.close();
+});
+
+// Writes image data when asked for a path, like the pasteboard script; otherwise reports what the copy held.
+function fakeClipboard(
+  copy: Partial<ClipboardReading> & { png?: boolean },
+): ClipboardReader & { paths: (string | undefined)[] } {
+  const paths: (string | undefined)[] = [];
+  return {
+    paths,
+    async read(imagePath) {
+      paths.push(imagePath);
+      const files = copy.files ?? [];
+      const saved = copy.png && !files.length && imagePath;
+      if (saved) await writeFile(imagePath, "png bytes");
+      return { files, text: copy.text ?? "", image: saved ? "saved" : copy.png ? "present" : "none" };
+    },
+  };
+}
+const exists = (path: string) =>
+  stat(path).then(
+    () => true,
+    () => false,
+  );
+const ownedDirectories = (root: string) => readdir(root).catch(() => [] as string[]);
+
+test("a copied image is saved, attached and sent, then deleted; a picked file is kept", async () => {
+  const f = await fixture();
+  const c = f.controller();
+  await c.start();
+  await c.setComposeText("Look");
+  const result = await stageClipboard(c, fakeClipboard({ png: true, text: "" }), f.clipboard);
+  assert.deepEqual(result, { staged: true, notice: { failed: false, title: "Attached clipboard image" } });
+  const [image] = c.getSnapshot().compose.files;
+  assert.match(image.name, /^Clipboard image \d{4}-\d{2}-\d{2} at \d{2}\.\d{2}\.\d{2}\.png$/);
+  assert.equal(f.clipboard.ownedId(image.path) !== undefined, true);
+  const picked = await f.file("picked.txt");
+  await c.addFiles([picked]);
+  assert.equal(await c.send(true), true);
+  assert.deepEqual(
+    f.server.uploads.map((upload) => upload.type),
+    ["image/png", "application/octet-stream"],
+  );
+  await f.clipboard.settled();
+  assert.deepEqual(await ownedDirectories(f.clipboardRoot), []);
+  assert.equal(await exists(picked), true);
+  await f.close();
+});
+
+test("copied files are attached together and their names are never staged as text", async () => {
+  const f = await fixture();
+  const c = f.controller();
+  await c.start();
+  const paths = [await f.file("one.txt"), await f.file("two.txt")];
+  const reader = fakeClipboard({ files: paths, text: "one.txt" });
+  assert.deepEqual(await stageClipboard(c, reader, f.clipboard), {
+    staged: true,
+    notice: { failed: false, title: "Attached 2 files" },
+  });
+  assert.deepEqual(
+    c.getSnapshot().compose.files.map((file) => file.path),
+    paths,
+  );
+  assert.deepEqual(c.getSnapshot().compose.context, []);
+  assert.deepEqual(await ownedDirectories(f.clipboardRoot), [], "the unused image directory is removed");
+  await f.close();
+});
+
+test("an agent without attachments refuses copied files and images before anything is written", async () => {
+  const f = await fixture({ attachments: false });
+  const c = f.controller();
+  await c.start();
+  const finder = fakeClipboard({ files: [await f.file("report.pdf")], text: "report.pdf" });
+  assert.deepEqual(await stageClipboard(c, finder, f.clipboard), {
+    staged: false,
+    notice: { failed: true, title: "Can't attach the clipboard", message: "This agent doesn't accept attachments." },
+  });
+  const image = fakeClipboard({ png: true });
+  assert.equal((await stageClipboard(c, image, f.clipboard)).staged, false);
+  assert.deepEqual(image.paths, [undefined], "no image path is offered");
+  const sheet = fakeClipboard({ png: true, text: "a\tb" });
+  assert.deepEqual(await stageClipboard(c, sheet, f.clipboard), {
+    staged: true,
+    notice: {
+      failed: false,
+      title: "Included clipboard text",
+      message: "Image not attached: This agent doesn't accept attachments.",
+    },
+  });
+  assert.deepEqual(
+    c.getSnapshot().compose.context.map((item) => item.text),
+    ["a\tb"],
+  );
+  assert.deepEqual(c.getSnapshot().compose.files, []);
+  assert.deepEqual(await ownedDirectories(f.clipboardRoot), []);
+  await f.close();
+});
+
+test("an image that never entered the draft is deleted at once; one whose save failed is left for collection", async () => {
+  const f = await fixture();
+  const c = f.controller();
+  await c.start();
+  const empty = fakeClipboard({ png: true });
+  const original = empty.read;
+  empty.read = async (path) => {
+    const reading = await original(path);
+    await writeFile(path!, "");
+    return reading;
+  };
+  const refused = await stageClipboard(c, empty, f.clipboard);
+  assert.equal(refused.staged, false);
+  assert.match(refused.notice!.message!, /Empty files cannot be attached/);
+  assert.deepEqual(await ownedDirectories(f.clipboardRoot), []);
+  f.storage.failState = true;
+  assert.equal((await stageClipboard(c, fakeClipboard({ png: true }), f.clipboard)).staged, true);
+  assert.equal((await ownedDirectories(f.clipboardRoot)).length, 1, "a queued save may still name it");
+  await f.close();
+});
+
+test("removing or discarding a copied image deletes it", async () => {
+  const f = await fixture();
+  const c = f.controller();
+  await c.start();
+  await stageClipboard(c, fakeClipboard({ png: true }), f.clipboard);
+  assert.equal(await c.removeFiles(c.getSnapshot().compose.files.map((file) => file.id)), true);
+  await f.clipboard.settled();
+  assert.deepEqual(await ownedDirectories(f.clipboardRoot), []);
+  await stageClipboard(c, fakeClipboard({ png: true }), f.clipboard);
+  assert.equal(await c.discardCompose(), true);
+  await f.clipboard.settled();
+  assert.deepEqual(await ownedDirectories(f.clipboardRoot), []);
+  await f.close();
+});
+
+test("a send whose final save fails, or whose outcome is unconfirmed, keeps its copied image", async () => {
+  const f = await fixture();
+  const c = f.controller();
+  await c.start();
+  await c.setComposeText("Look");
+  await stageClipboard(c, fakeClipboard({ png: true }), f.clipboard);
+  f.server.beforeInput = () => void (f.storage.failState = true);
+  assert.equal(await c.send(true), false);
+  await f.clipboard.settled();
+  assert.equal((await ownedDirectories(f.clipboardRoot)).length, 1);
+  await f.close();
+
+  const g = await fixture();
+  const d = g.controller();
+  await d.start();
+  await d.setComposeText("Look");
+  await stageClipboard(d, fakeClipboard({ png: true }), g.clipboard);
+  g.server.beforeInput = () => {
+    throw new Error("connection dropped");
+  };
+  assert.equal(await d.send(true), false);
+  assert.equal(d.getSnapshot().pending?.kind, "input");
+  await g.clipboard.settled();
+  assert.equal((await ownedDirectories(g.clipboardRoot)).length, 1);
+  await g.close();
+});
+
+test("a copied image another server's draft still names is kept when this draft drops it", async () => {
+  const f = await fixture();
+  const c = f.controller();
+  await c.start();
+  await stageClipboard(c, fakeClipboard({ png: true }), f.clipboard);
+  const [image] = c.getSnapshot().compose.files;
+  f.values.set("waypoint.quick-chat.server-b", JSON.stringify({ damaged: image.path }));
+  assert.equal(await c.discardCompose(), true);
+  await f.clipboard.settled();
+  assert.equal(await exists(image.path), true);
   await f.close();
 });

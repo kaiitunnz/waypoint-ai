@@ -257,6 +257,14 @@ export class QuickChatStore {
       });
     }
   }
+  // Which of these ids any server's saved Quick Chat state or drafts mention. Raw values are searched without
+  // decoding, so damaged data still protects what it mentions. Throws when storage can't be read.
+  async referencedClipboardIds(ids: string[]): Promise<Set<string>> {
+    const found = new Set<string>();
+    for (const [key, value] of await this.storage.entries())
+      if (serverOf(key)) for (const id of ids) if (value.includes(id)) found.add(id);
+    return found;
+  }
   private async removed(id: string) {
     const raw = await this.storage.getItem(connectionsKey);
     return raw !== undefined && !decodeState(raw).connections.some((connection) => connection.id === id);

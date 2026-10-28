@@ -1,4 +1,7 @@
 import { basename, dirname, resolve } from "node:path";
+import { ServerMetadata } from "../api/contracts";
+import { Session } from "../api/sessions";
+import { ChatDefaults, launchContext } from "./quickChat";
 
 export type ContextKind = "selection" | "clipboard";
 export interface ContextItem {
@@ -110,6 +113,62 @@ export function attachmentPolicy(agentId: string, supported: boolean, remote: bo
   if (delivery === "images")
     return { images: true, files: false, reason: "Only images reach this agent on a remote target." };
   return { images: false, files: false, reason: "Attachments don't reach this agent on a remote target." };
+}
+
+// The shown session's agent and target decide, else the defaults a send would start a session with.
+export function composePolicy(
+  shown: { session?: Session; defaults?: ChatDefaults },
+  metadata: ServerMetadata | undefined,
+): AttachmentPolicy {
+  if (!metadata) return { images: false, files: false, reason: "Attachments are not available yet." };
+  const { session, defaults } = shown;
+  const agentId = session?.backend ?? (defaults ? launchContext(defaults, metadata).backend : "");
+  const agent = metadata.agents.find((entry) => entry.id === agentId);
+  const targetId = session ? session.targetId : defaults?.target || undefined;
+  return attachmentPolicy(
+    agentId,
+    agent?.attachments === true,
+    !!targetId && metadata.targets.some((target) => target.id === targetId),
+  );
+}
+
+// What the clipboard held: every copied file, whether an image was saved to the path asked for (or only seen), the
+// text, and Raycast's spilled-text file. `failed` means the native read didn't finish.
+export interface ClipboardReading {
+  files: string[];
+  image: "saved" | "present" | "none";
+  text: string;
+  spilled?: string;
+  failed?: boolean;
+}
+export type ClipboardChoice =
+  | { kind: "files"; paths: string[] }
+  | { kind: "image" }
+  | { kind: "text"; text: string; skipped?: string }
+  | { kind: "refused"; reason: string }
+  | { kind: "unreadable" }
+  | { kind: "empty" };
+
+// Copied files win over image data, which wins over text, as in the Waypoint web app. A file copy's text is only its
+// name, so it is never staged in place of the files.
+export function clipboardChoice(reading: ClipboardReading, policy: AttachmentPolicy): ClipboardChoice {
+  const refusal = policy.reason ?? "This agent doesn't accept attachments.";
+  const files = reading.files.filter((file) => file !== reading.spilled);
+  if (files.length)
+    return policy.images || policy.files ? { kind: "files", paths: files } : { kind: "refused", reason: refusal };
+  if (reading.image === "saved") return { kind: "image" };
+  const skipped = reading.image === "present" && !policy.images ? refusal : undefined;
+  if (reading.text.trim()) return { kind: "text", text: reading.text, ...(skipped ? { skipped } : {}) };
+  if (skipped) return { kind: "refused", reason: skipped };
+  return reading.failed ? { kind: "unreadable" } : { kind: "empty" };
+}
+
+const pad = (value: number) => String(value).padStart(2, "0");
+// Named like a macOS screenshot, with dots in the time since some file systems refuse colons.
+export function clipboardImageName(date: Date): string {
+  const day = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  const time = `${pad(date.getHours())}.${pad(date.getMinutes())}.${pad(date.getSeconds())}`;
+  return `Clipboard image ${day} at ${time}.png`;
 }
 
 export function reusableUpload(file: StagedFile, sessionId: string, now: number): UploadReference | undefined {

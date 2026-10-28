@@ -58,6 +58,7 @@ async function fixture() {
   let reads = 0;
   const storage = {
     keys: async () => [...values.keys()],
+    entries: async () => [...values],
     removeItem: async (key: string) => void values.delete(key),
     getItem: async (key: string) => {
       reads++;

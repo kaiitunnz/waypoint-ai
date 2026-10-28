@@ -21,6 +21,7 @@ async function fixture(values: Map<string, string>, getItem?: (key: string) => s
       getItem: async (key) => (getItem ? getItem(key) : values.get(key)),
       setItem: async (key, value) => void values.set(key, value),
       keys: async () => [...values.keys()],
+      entries: async () => [...values],
       removeItem: async (key) => void values.delete(key),
     },
     new ServerMutex(directory),
@@ -91,6 +92,7 @@ test("forgetting drafts drops queued writes and waits for one in flight", async 
   const gate = new Promise<void>((resolve) => (release = resolve));
   const drafts = new DraftStore({
     keys: async () => [...values.keys()],
+    entries: async () => [...values],
     removeItem: async (key) => void values.delete(key),
     getItem: async (key) => values.get(key),
     setItem: async (key, value) => {

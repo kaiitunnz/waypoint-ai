@@ -5,7 +5,7 @@ import { ChatDefaults } from "../domain/quickChat";
 import { ChatDestination, QuickChatController, quickChatDraft } from "./quickChatController";
 import { LaunchFailure, launchSession } from "./sessionLauncher";
 import { FeedConnection } from "./sessionFeeds";
-import { quickChatStore, connectionStore } from "../storage/raycast";
+import { clipboardFiles, quickChatStore, connectionStore } from "../storage/raycast";
 import { localWorkspace } from "../storage/workspace";
 
 // Checks that the connection still matches the saved one, so a removed or re-pointed server gets no writes.
@@ -51,6 +51,7 @@ export function useQuickChat(connection: FeedConnection, destination: ChatDestin
       new QuickChatController(connection, quickChatStore, connectionCheck(connection), {
         destination,
         workspace: localWorkspace(connection.apiUrl),
+        clipboardFiles,
       }),
     // A destination written inline is a new object each render; its fields identify it.
     [connection.id, connection.apiUrl, connection.token, destination.kind, sessionId, resume],
