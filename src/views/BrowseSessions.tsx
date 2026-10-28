@@ -11,11 +11,11 @@ import { SessionActions } from "./SessionActions";
 import { SessionManager } from "../hooks/sessionManager";
 import { ManageServers } from "./ManageServers";
 import { SignInForm } from "./ServerForm";
-import { ConversationScreen } from "./Conversation";
+import { ConversationScreen } from "./SessionChat";
 import { QuickChat } from "./QuickChat";
 import { startQuickChatSession } from "../hooks/useQuickChat";
 
-export function SearchSessions() {
+export function BrowseSessions() {
   const { state, error, refresh } = useConnections();
   const [serverId, setServerId] = useState<string>();
   const [query, setQuery] = useState("");
@@ -162,6 +162,14 @@ function SessionsBrowser({
           }}
         />
       )}
+      <Action.Push
+        title="New Chat"
+        icon={Icon.Plus}
+        shortcut={Keyboard.Shortcut.Common.New}
+        target={<QuickChat forceNew connectionId={connection.id} />}
+        onPush={pause}
+        onPop={resume}
+      />
       <Action
         title="Refresh Sessions"
         icon={Icon.ArrowClockwise}

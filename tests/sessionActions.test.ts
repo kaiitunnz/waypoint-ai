@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parseMetadata } from "../src/api/contracts";
 import { parseSession } from "../src/api/sessions";
-import { SessionActionSet, deleteMessage, sessionActions, titleProblem } from "../src/domain/sessionActions";
+import {
+  SessionActionSet,
+  checkpointOffer,
+  deleteMessage,
+  reattachSource,
+  sessionActions,
+  titleProblem,
+} from "../src/domain/sessionActions";
 import { metadataWire, sessionWire } from "./fixtures/conversation";
 
 const metadata = (reattach: boolean) =>
@@ -85,4 +92,21 @@ test("titles and delete confirmations", () => {
   const worktree = deleteMessage(session({ worktree_path: "/repo/.worktrees/s" }));
   assert.match(worktree, /worktree at \/repo\/\.worktrees\/s/);
   assert.match(worktree, /uncommitted changes/);
+});
+
+test("a chat offers checkpoint actions by who started the operation", () => {
+  assert.equal(checkpointOffer(undefined, false, "a"), "none");
+  assert.equal(checkpointOffer({ kind: "interaction", sessionId: "a" }, false, "a"), "none");
+  assert.equal(checkpointOffer({ kind: "interaction", sessionId: "b" }, false, "a"), "response");
+  assert.equal(checkpointOffer({ kind: "input", sessionId: "a" }, true, "a"), "own");
+  assert.equal(checkpointOffer({ kind: "input", sessionId: "a" }, false, "a"), "elsewhere");
+  assert.equal(checkpointOffer({ kind: "create" }, false, undefined), "elsewhere");
+});
+
+test("a session chat reattaches through itself only while nothing is unsettled", () => {
+  assert.equal(reattachSource(false, undefined, "a"), "chat");
+  assert.equal(reattachSource(true, undefined, "a"), "none");
+  assert.equal(reattachSource(false, { sessionId: "a" }, "a"), "none");
+  assert.equal(reattachSource(false, { sessionId: "b" }, "a"), "direct");
+  assert.equal(reattachSource(false, {}, "a"), "direct");
 });

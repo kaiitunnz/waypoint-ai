@@ -1,11 +1,11 @@
-import { StorageAdapter } from "./connections";
+import { KeyedStorage } from "./connections";
 
 // Draft text is owned by one command at a time, so it is stored per key without the server lock.
 // Writes are coalesced: one write per key is in flight and a newer value replaces any queued one.
 export class DraftStore {
   private readonly queued = new Map<string, string>();
   private readonly flushing = new Map<string, Promise<void>>();
-  constructor(private readonly storage: StorageAdapter) {}
+  constructor(private readonly storage: KeyedStorage) {}
   read(key: string) {
     return this.queued.has(key) ? Promise.resolve(this.queued.get(key)) : this.storage.getItem(key);
   }
@@ -13,6 +13,12 @@ export class DraftStore {
   async forget(prefix: string) {
     for (const key of this.queued.keys()) if (key.startsWith(prefix)) this.queued.delete(key);
     await Promise.all([...this.flushing].filter(([key]) => key.startsWith(prefix)).map(([, flush]) => flush));
+  }
+  // Drops a queued value and waits for a write in flight, so the removed draft isn't written back.
+  async remove(key: string) {
+    this.queued.delete(key);
+    await this.flushing.get(key);
+    await this.storage.removeItem(key);
   }
   // Resolves once this value or a newer one is stored.
   write(key: string, value: string): Promise<void> {
@@ -35,6 +41,8 @@ export class DraftStore {
   }
 }
 
+// The draft key of a chat bound to one session.
+export const sessionChatDraft = (sessionId: string) => `session:${sessionId}`;
 export const draftKeys = {
   line: (connectionId: string, draftKey: string) => `waypoint.draft.${connectionId}.line.${draftKey}`,
   compose: (connectionId: string, draftKey: string) => `waypoint.draft.${connectionId}.compose.${draftKey}`,

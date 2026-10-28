@@ -238,7 +238,7 @@ export function SessionInteraction({
     state.pending && !unconfirmed
       ? state.pending.kind === "interaction"
         ? "A response in another conversation is unconfirmed. Check it there first."
-        : "A Quick Chat operation is unconfirmed. Check it in Quick Chat first."
+        : "An unconfirmed operation needs checking first. Use Check Previous Outcome."
       : undefined;
   const mounted = useRef(true);
   const { pop } = useNavigation();

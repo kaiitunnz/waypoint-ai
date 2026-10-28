@@ -167,7 +167,7 @@ async function fixture(options: { attachments?: boolean; target?: "password" | "
       connection,
       store,
       async () => undefined,
-      { forceNew },
+      { destination: { kind: forceNew ? "new" : "quick" } },
       client,
       () => 1_000_000,
     );

@@ -133,7 +133,7 @@ async function fixture() {
       connection,
       store,
       async () => undefined,
-      { forceNew, resume, workspace },
+      { destination: forceNew ? { kind: "new" } : { kind: "quick", resume }, workspace },
       client,
       () => now,
     );

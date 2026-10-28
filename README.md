@@ -6,7 +6,7 @@ Connect Raycast to your [Waypoint](https://github.com/kaiitunnz/waypoint) server
 | --------------- | ------------------------------------------------------------------------------------------------ |
 | Quick Chat      | Continues your Quick Chat conversation on the active server, or prepares a new one on first send |
 | New Chat        | Prepares a fresh conversation; earlier sessions keep running                                     |
-| Search Sessions | Finds sessions, reads live conversations, and manages them                                       |
+| Browse Sessions | Finds sessions, chats with them, and manages them                                                |
 | Manage Servers  | Adds, signs in to, and switches between Waypoint servers                                         |
 
 ![Manage Servers](docs/screenshots/manage-servers.png)
@@ -32,13 +32,13 @@ Reauthentication preserves the connection's identity and setup. Changing its API
 
 Bearer tokens are kept in [Raycast's encrypted local storage](https://developers.raycast.com/api-reference/storage). Passwords are used only during sign-in. Connection failures preserve the saved configuration; use Retry Connection or Sign in Again to recover. Unknown or damaged saved-data formats are reported without overwriting the original data.
 
-## Search Sessions
+## Browse Sessions
 
 Find sessions by title, working directory, repository, branch, agent, or status. The server dropdown switches API connections and keeps the current search. Pinned sessions appear first. Show Exited Sessions includes finished sessions; Show Only Exited Sessions narrows the list to them. Protected assistant and telemetry sessions are excluded.
 
-Open structured sessions in the native conversation reader. Terminal and unknown interfaces offer Open in Waypoint using the configured frontend URL.
+**Open Conversation** opens a chat with a structured session. Terminal and unknown interfaces offer Open in Waypoint using the configured frontend URL. **New Chat** (⌘N) opens New Chat on the server being browsed.
 
-![Search Sessions](docs/screenshots/search-sessions.png)
+![Browse Sessions](docs/screenshots/browse-sessions.jpg)
 
 The conversation displays loaded user and assistant turns together in chronological order, with formatted responses at full width. Show Latest Response focuses the newest turn when needed. Copy Latest Response copies the current answer. Conversation Details shows server-reported context and token usage.
 
@@ -46,15 +46,17 @@ Consecutive tool calls collapse into one line marked ▸ where they happened, su
 
 **Conversation History** opens the detailed event inspector with paired tool activity, filtering, older history, and follow-latest controls. It collapses the same runs into one row, which expands to the individual calls; searching still matches a command or path inside a collapsed run.
 
-Conversations opened from search are read-only. To continue one, use **Use for Quick Chat** (see [Managing sessions](#managing-sessions)).
+Type in the message field and press Enter to send to that session. **Compose Message**, **Include Selected Text**, **Include Clipboard**, attachments, approvals and questions, **Connect SSH Target**, and **Edit Current Session** work as in Quick Chat. An exited session reattaches before the send when its interface can resume it. A session that can't take messages, because it ended and its interface can't resume it or it uses a terminal interface, stays readable and says why. Each session keeps its own message and compose drafts on each server. They are removed when the session is deleted in Raycast, or when its chat finds it deleted elsewhere.
+
+Chatting with a session never changes Quick Chat's destination; **Use for Quick Chat** does (see [Managing sessions](#managing-sessions)). Session chats and Quick Chat share each server's unconfirmed-operation check, so a send waits until it is resolved. Any of them can check or clear it; only the chat that started an operation can allow a retry, and checking never switches another chat's conversation.
 
 Reconnects catch up on missed events and preserve loaded history. After a long absence, the conversation shows its latest activity with a notice that some is missing; **Reload Conversation** starts it again from the latest activity. Expired sign-in offers reauthentication. The conversation content remains in memory and is not saved to extension storage.
 
-![Conversation reader](docs/screenshots/session-conversation.png)
+![Session chat](docs/screenshots/session-chat.jpg)
 
 ## Managing sessions
 
-Session actions appear in the Actions panel of each Search Sessions row and of conversations opened from search. Each action checks the session's current state with Waypoint first, so an action on an outdated row does nothing and says so.
+Session actions appear in the Actions panel of each Browse Sessions row and of session chats. Each action checks the session's current state with Waypoint first, so an action on an outdated row does nothing and says so.
 
 | Action             | Available when                                                   | Shortcut |
 | ------------------ | ---------------------------------------------------------------- | -------- |
@@ -72,7 +74,7 @@ Session actions appear in the Actions panel of each Search Sessions row and of c
 
 **Reattach** restarts the agent and resumes its conversation. If the session runs on an SSH target that uses a password and isn't connected, Raycast asks for the password once, connects, and reattaches.
 
-**Use for Quick Chat** makes the session Quick Chat's destination on that server and opens Quick Chat on it. Opening a conversation from search never changes the destination. The current destination shows a **Quick Chat** tag in the list, and its action becomes **Open in Quick Chat**. If the session is later deleted, Quick Chat explains it and **Start New Chat** clears the destination.
+**Use for Quick Chat** makes the session Quick Chat's destination on that server and opens Quick Chat on it. Opening or chatting with a session from Browse Sessions never changes the destination. The current destination shows a **Quick Chat** tag in the list, and its action becomes **Open in Quick Chat**. If the session is later deleted, Quick Chat explains it and **Start New Chat** clears the destination.
 
 The personal assistant and telemetry sessions are not listed. An open conversation notices within 20 seconds when its session is deleted elsewhere.
 
@@ -80,7 +82,7 @@ The personal assistant and telemetry sessions are not listed. An open conversati
 
 ## Approvals and questions
 
-Pending approvals, plan approvals, and agent questions appear under **Needs Attention** above the conversation in Quick Chat, the conversation reader, and Conversation History. Review a request to see its context and respond: approvals offer the decisions the agent supports and an optional note where supported; plans accept a note; questions take single or multiple choices, notes, and free-text answers. Answers in progress are saved, so closing the form keeps them. **Cancel Question** tells the agent to continue without an answer; closing the form does not.
+Pending approvals, plan approvals, and agent questions appear under **Needs Attention** above the conversation in Quick Chat, session chats, and Conversation History. Review a request to see its context and respond: approvals offer the decisions the agent supports and an optional note where supported; plans accept a note; questions take single or multiple choices, notes, and free-text answers. Answers in progress are saved, so closing the form keeps them. **Cancel Question** tells the agent to continue without an answer; closing the form does not.
 
 As in Waypoint's web app, approvals and plans are found in the conversation history that has been loaded. A request older than that appears after loading earlier messages, or in Waypoint. When earlier activity is missing after a long absence, reload the conversation first.
 
@@ -92,11 +94,11 @@ If Waypoint does not confirm a response, nothing is retried. **Check Previous Ou
 
 ## Quick Chat
 
-Type in the top message field and press Enter to send. Follow-ups continue the same Waypoint session. The transcript keeps loaded turns together in chronological order, alongside the draft. Consecutive tool calls collapse into one line, as in the conversation reader; **Show Activity** expands them. The conversation row shows its turn count; Latest Response is an optional focused view. Sending returns to the continuous conversation. Activity details, copying or pasting the latest response, full-width reading, and session information are available in Actions. The side panel shows the first 4,000 characters of a very long message; full-width reading shows all of it.
+Type in the top message field and press Enter to send. Follow-ups continue the same Waypoint session. The transcript keeps loaded turns together in chronological order, alongside the draft. Consecutive tool calls collapse into one line, as in session chats; **Show Activity** expands them. The conversation row shows its turn count; Latest Response is an optional focused view. Sending returns to the continuous conversation. Activity details, copying or pasting the latest response, full-width reading, and session information are available in Actions. The side panel shows the first 4,000 characters of a very long message; full-width reading shows all of it.
 
 ![Quick Chat](docs/screenshots/quick-chat.jpg)
 
-Quick Chat continues its own conversation for each saved server. The default timeout is 30 minutes after the last successful user send, or after you chose the session with **Use for Quick Chat**, whichever is later. Running work and unresolved approvals, questions, or plans keep their conversation. **Quick Chat Defaults** offers Always Continue, Always New, and a configurable timeout. **New Chat** and **Start New Chat** prepare a fresh conversation; creation happens on first send, and existing sessions keep running. With Always New, **Open in Quick Chat** in Search Sessions returns to the chosen session.
+Quick Chat continues its own conversation for each saved server. The default timeout is 30 minutes after the last successful user send, or after you chose the session with **Use for Quick Chat**, whichever is later. Running work and unresolved approvals, questions, or plans keep their conversation. **Quick Chat Defaults** offers Always Continue, Always New, and a configurable timeout. **New Chat** and **Start New Chat** prepare a fresh conversation; creation happens on first send, and existing sessions keep running. With Always New, **Open in Quick Chat** in Browse Sessions returns to the chosen session.
 
 **New Session with Settings** (⌘⇧N) starts a session from settings you choose, leaving Quick Chat Defaults as they are. The form starts from the defaults and keeps your changes if Raycast closes; **Discard Draft** resets it. **Start Session** creates the session right away, without a message, and Quick Chat shows it ready for your first one. Until you send it, reopening the command you started it from returns to that session in every reuse mode, and **Start New Chat** moves on. Timed reuse counts from when it started.
 
@@ -106,7 +108,7 @@ Each new session is titled with the time it was created, such as `Quick Chat 202
 
 When the server runs on this Mac and no working directory is set, sessions on the Local target start in `~/.waypoint-ai/workspace`. Raycast creates the folder on first use with an `AGENTS.md` describing it as a scratch workspace and a `CLAUDE.md` that imports it; edits to either file are kept. Other servers and SSH targets use the target's or server's default directory.
 
-**Terminate Session** (⌃⇧X) ends the current session after confirmation and moves Quick Chat to a new conversation, keeping the draft. The terminated session stays in Search Sessions, where **Reattach Session** or **Use for Quick Chat** brings it back.
+**Terminate Session** (⌃⇧X) ends the current session after confirmation and moves Quick Chat to a new conversation, keeping the draft. The terminated session stays in Browse Sessions, where **Reattach Session** or **Use for Quick Chat** brings it back.
 
 **Terminate and Delete Session** (⌃X) ends the session and deletes it in one step, then moves to a new conversation, keeping the draft. For a session that has already exited, the action is **Delete Session**.
 
@@ -120,7 +122,7 @@ An unconfirmed operation blocks further sends. **Check Previous Outcome** inspec
 
 ## Composing messages
 
-**Compose Message** opens a multiline form for the current Quick Chat or New Chat destination, which it names at the top. Text already typed in the message field moves into an empty draft. Each saved server keeps one compose draft for Quick Chat and one for New Chat; closing the form keeps it, and **Discard Draft** removes it.
+**Compose Message** opens a multiline form for the current destination, which it names at the top. Text already typed in the message field moves into an empty draft. Each saved server keeps one compose draft for Quick Chat, one for New Chat, and one for each session chat; closing the form keeps it, and **Discard Draft** removes it.
 
 **Include Selected Text** and **Include Clipboard** read the selection or clipboard once and stage it in the form, where it can be reviewed or removed before sending. Each item is sent verbatim in a fenced block after the message. An item can be up to 256 KB, and a draft can hold up to 1 MB.
 
@@ -132,7 +134,7 @@ When a send needs a password-auth SSH target that is not connected, **Connect SS
 
 ## Editing a session
 
-**Edit Current Session** (⌘⇧,) changes the open conversation's own settings, separate from Quick Chat Defaults, which shape future chats. It opens from Quick Chat, New Chat, and conversations opened in Search Sessions, and loads the session's current settings and capabilities from Waypoint each time.
+**Edit Current Session** (⌘⇧,) changes the open conversation's own settings, separate from Quick Chat Defaults, which shape future chats. It opens from Quick Chat, New Chat, and session chats, and loads the session's current settings and capabilities from Waypoint each time.
 
 The form shows only what the session's agent and interface support: title, model, effort, permission mode, account profile, interface, custom arguments, configuration overrides, environment variables, and usage source. Terminal interfaces stay in Waypoint, since Raycast shows structured conversations only.
 
@@ -161,8 +163,8 @@ On a remote execution target, Raycast sends only the attachments Waypoint can de
 ## Known limitations
 
 - Waypoint has no idempotency key for creating sessions or sending messages. When an operation's outcome is unconfirmed, Raycast keeps a checkpoint for that server and resends nothing until you check the outcome or explicitly allow another attempt. The checkpoint coordinates the extension's commands on this computer, not other devices.
-- When a new session fails to start on its execution target, for example because its working directory doesn't exist there, Waypoint leaves a failed **Quick Chat** session without the tags Raycast uses to find its own sessions. **Check Previous Outcome** recognizes it when the server's clock is within five minutes of this Mac's; otherwise, abandon the attempt. Delete the failed session from Search Sessions afterwards.
-- Pressing Escape in Quick Chat clears the message field, as in any Raycast search bar. Use **Compose Message** for drafts you want to keep while navigating.
+- When a new session fails to start on its execution target, for example because its working directory doesn't exist there, Waypoint leaves a failed **Quick Chat** session without the tags Raycast uses to find its own sessions. **Check Previous Outcome** recognizes it when the server's clock is within five minutes of this Mac's; otherwise, abandon the attempt. Delete the failed session from Browse Sessions afterwards.
+- Pressing Escape in Quick Chat or a session chat clears the message field, as in any Raycast search bar. Use **Compose Message** for drafts you want to keep while navigating.
 - A server reached through a local port, such as an SSH tunnel or a container, counts as running on this Mac but can't see `~/.waypoint-ai/workspace`. Quick Chat then asks for a working directory; set one in **Quick Chat Defaults**.
 
 ## Development
@@ -184,4 +186,4 @@ The gate checks formatting, ESLint, strict TypeScript, behavior and HTTP integra
 
 Source is organized into thin command entries, `api/`, `domain/`, `storage/`, `hooks/`, `views/`, and `components/`. Tests compile into an ignored temporary build directory using the installed TypeScript compiler and Node's test runner.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contributor guidance and [connection acceptance](docs/server-connections-acceptance.md), [conversation acceptance](docs/session-conversations-acceptance.md), [Quick Chat acceptance](docs/quick-chat-acceptance.md), [session interactions acceptance](docs/session-interactions-acceptance.md), [desktop inputs acceptance](docs/desktop-inputs-acceptance.md), [session settings acceptance](docs/session-settings-acceptance.md), [session management acceptance](docs/session-management-acceptance.md), [long session acceptance](docs/long-session-acceptance.md), [tool activity acceptance](docs/tool-activity-acceptance.md), [Quick Chat cleanup acceptance](docs/quick-chat-cleanup-acceptance.md), and [New Session with Settings acceptance](docs/new-session-settings-acceptance.md) for runtime coverage.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contributor guidance and [connection acceptance](docs/server-connections-acceptance.md), [conversation acceptance](docs/session-conversations-acceptance.md), [Quick Chat acceptance](docs/quick-chat-acceptance.md), [session interactions acceptance](docs/session-interactions-acceptance.md), [desktop inputs acceptance](docs/desktop-inputs-acceptance.md), [session settings acceptance](docs/session-settings-acceptance.md), [session management acceptance](docs/session-management-acceptance.md), [long session acceptance](docs/long-session-acceptance.md), [tool activity acceptance](docs/tool-activity-acceptance.md), [Quick Chat cleanup acceptance](docs/quick-chat-cleanup-acceptance.md), [New Session with Settings acceptance](docs/new-session-settings-acceptance.md), and [Browse Sessions acceptance](docs/browse-sessions-acceptance.md) for runtime coverage.

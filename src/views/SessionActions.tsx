@@ -60,12 +60,15 @@ export function SessionActions({
   quickChat,
   manager,
   handlers,
+  omitReattach = false,
 }: {
   session: Session;
   metadata?: ServerMetadata;
   quickChat: { pointer?: string; pending: boolean };
   manager: SessionManager;
   handlers: SessionActionHandlers;
+  // A chat that reattaches through itself, or can't reattach now, leaves Reattach out.
+  omitReattach?: boolean;
 }) {
   const { push } = useNavigation();
   const allowed = sessionActions(session, metadata, quickChat);
@@ -164,7 +167,7 @@ export function SessionActions({
           }
         />
       )}
-      {allowed.reattach && metadata && (
+      {allowed.reattach && metadata && !omitReattach && (
         <Action
           title="Reattach Session"
           icon={Icon.Link}

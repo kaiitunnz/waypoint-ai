@@ -90,6 +90,8 @@ test("forgetting drafts drops queued writes and waits for one in flight", async 
   let release!: () => void;
   const gate = new Promise<void>((resolve) => (release = resolve));
   const drafts = new DraftStore({
+    keys: async () => [...values.keys()],
+    removeItem: async (key) => void values.delete(key),
     getItem: async (key) => values.get(key),
     setItem: async (key, value) => {
       await gate;

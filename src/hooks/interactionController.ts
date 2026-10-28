@@ -280,7 +280,7 @@ export class InteractionController {
           throw new Error(
             saved.pending.kind === "interaction"
               ? "An earlier response is unconfirmed. Check its outcome first."
-              : "A Quick Chat operation is unconfirmed. Check it in Quick Chat first.",
+              : "An unconfirmed operation needs checking first. Use Check Previous Outcome.",
           );
         const fresh = await this.snapshot();
         this.questionChanges++;

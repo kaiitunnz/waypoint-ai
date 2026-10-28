@@ -23,14 +23,6 @@ import { ConversationContent } from "./Conversation";
 import { EditSession, NewChatOption } from "./EditSession";
 
 type ReadingMode = "conversation" | "latest";
-const endedNote = (status: string) =>
-  status === "exited"
-    ? "_This session has exited._"
-    : status === "error"
-      ? "_This session stopped with an error. Show Activity for details._"
-      : status === "interrupted"
-        ? "_Interrupted._"
-        : "";
 export interface ConversationActionContext {
   setActive: (active: boolean) => void;
   // False on interaction rows, which bring their own Open in Waypoint.
@@ -96,12 +88,14 @@ export function ChatConversation({
   refreshConnections,
   emptyMarkdown,
   onMissing,
+  onSession,
+  onReturn,
   settings,
 }: {
   connection: FeedConnection;
   sessionId?: string;
   metadata: ServerMetadata;
-  composer?: {
+  composer: {
     text: string;
     onChange: (text: string) => void;
     onSend: () => void;
@@ -119,7 +113,11 @@ export function ChatConversation({
   refreshConnections: () => Promise<void>;
   emptyMarkdown?: string;
   onMissing?: (sessionId: string) => void;
-  // Quick Chat hides editing while a send is unsettled and offers starting a new chat with changed settings.
+  // The session's status or interface changed in the live feed.
+  onSession?: (session: Session) => void;
+  // A view pushed from the conversation closed, after which its checkpoint or session may have changed.
+  onReturn?: () => void;
+  // Editing is hidden while a send is unsettled; `newChat` starts a new chat with changed settings.
   settings?: { available: boolean; newChat?: NewChatOption };
 }) {
   const [active, setActive] = useState(true);
@@ -141,6 +139,10 @@ export function ChatConversation({
   useEffect(() => {
     if (missing && sessionId) onMissing?.(sessionId);
   }, [missing, sessionId]);
+  // A change skipped while a send was in progress is reported again once it settles.
+  useEffect(() => {
+    if (state.session) onSession?.(state.session);
+  }, [state.session?.status, state.session?.transport, busy]);
   const interactionUrl = sessionId ? sessionUrl(connection.frontendUrl, sessionId) : undefined;
   const [mode, setMode] = useState<ReadingMode>("conversation");
   const [interactionSelection, setInteractionSelection] = useState<string>();
@@ -196,8 +198,6 @@ export function ChatConversation({
     if (interactionSelection && !interactionItemIds(interactionState, sessionId).includes(interactionSelection))
       setInteractionSelection(undefined);
   }, [interactionState, interactionSelection, sessionId]);
-  // Only the side panel clips long messages; the full-width reader shows them whole.
-  const limit = composer ? previewMessageLimit : undefined;
   const renderMarkdown = (readingMode: ReadingMode) =>
     [
       problem
@@ -211,12 +211,10 @@ export function ChatConversation({
         ? `## This conversation needs Waypoint\n\nIts interface changed. ${interactionUrl ? "Open it in Waypoint to continue." : "Add a frontend URL in Manage Servers to open it in Waypoint."}`
         : (exchanges.length
             ? readingMode === "conversation"
-              ? conversationMarkdown(exchanges, showActivity, waiting, limit)
-              : chatMarkdown(latest, showActivity, waiting, limit)
+              ? conversationMarkdown(exchanges, showActivity, waiting, previewMessageLimit)
+              : chatMarkdown(latest, showActivity, waiting, previewMessageLimit)
             : "") || (session && !turns ? sessionIntro(session, metadata) : emptyMarkdown || ""),
       waiting ? "_Working…_" : "",
-      // Quick Chat shows the status beside its conversation row; the reader has only the transcript.
-      !composer && session ? endedNote(session.status) : "",
     ]
       .filter(Boolean)
       .join("\n\n");
@@ -235,13 +233,13 @@ export function ChatConversation({
       {unconfirmed && <UnconfirmedActions controller={interactionController} url={interactionUrl} />}
     </ActionPanel.Section>
   );
-  const sendAction = composer?.text.trim() && composer.canSend && !missing && (
+  const sendAction = composer.text.trim() && composer.canSend && !missing && (
     <Action title="Send Message" icon={Icon.ArrowUp} onAction={composer.onSend} />
   );
   // Interaction rows bring their own review actions, so they omit the Needs Attention section.
   const otherActions = (withAttention: boolean) => (
     <>
-      {!composer?.text.trim() && !status && response && (
+      {!composer.text.trim() && !status && response && (
         <Action.CopyToClipboard title="Copy Latest Response" content={response} />
       )}
       {response && (
@@ -252,7 +250,7 @@ export function ChatConversation({
         />
       )}
       {actions?.({ setActive, browser: withAttention })}
-      {withAttention && composer && attention.length > 0 && attentionActions}
+      {withAttention && attention.length > 0 && attentionActions}
       <ActionPanel.Section title="Conversation">
         {turns > 1 && (
           <Action
@@ -267,12 +265,13 @@ export function ChatConversation({
           icon={Icon.Hammer}
           onAction={() => setShowActivity((value) => !value)}
         />
-        {composer && exchanges.length > 0 && (
+        {exchanges.length > 0 && (
           <Action.Push
             title="Read Conversation at Full Width"
             icon={Icon.Maximize}
             shortcut={Keyboard.Shortcut.Common.Open}
             target={<FullConversation feed={feed} mode={mode} showActivity={showActivity} />}
+            onPop={onReturn}
           />
         )}
         {sessionId && (
@@ -290,7 +289,10 @@ export function ChatConversation({
               />
             }
             onPush={() => setActive(false)}
-            onPop={() => setActive(true)}
+            onPop={() => {
+              setActive(true);
+              onReturn?.();
+            }}
           />
         )}
         {state.hasMore && <Action title="Load Earlier Messages" icon={Icon.Clock} onAction={() => feed.loadOlder()} />}
@@ -333,12 +335,16 @@ export function ChatConversation({
                     },
                   }
                 }
-                onApplied={() => feed.retry()}
+                onApplied={() => {
+                  feed.retry();
+                  onReturn?.();
+                }}
               />
             }
             onPush={() => setActive(false)}
             onPop={() => {
               if (!handingOff.current) setActive(true);
+              onReturn?.();
             }}
           />
         )}
@@ -348,7 +354,10 @@ export function ChatConversation({
             icon={Icon.Info}
             target={<Detail markdown={sessionSummary(session)} />}
             onPush={() => setActive(false)}
-            onPop={() => setActive(true)}
+            onPop={() => {
+              setActive(true);
+              onReturn?.();
+            }}
           />
         )}
       </ActionPanel.Section>
@@ -357,21 +366,11 @@ export function ChatConversation({
   );
   const actionPanel = (
     <ActionPanel>
-      {!composer && attention.length > 0 && attentionActions}
       {sendAction}
       {otherActions(true)}
     </ActionPanel>
   );
 
-  if (!composer)
-    return (
-      <Detail
-        navigationTitle={`Chat · ${context}`}
-        markdown={renderMarkdown(mode)}
-        isLoading={busy || (!!sessionId && state.loading)}
-        actions={actionPanel}
-      />
-    );
   return (
     <List
       navigationTitle={`Chat · ${context}`}

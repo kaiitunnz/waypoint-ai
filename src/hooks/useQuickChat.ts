@@ -2,7 +2,7 @@ import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { WaypointClient } from "../api/client";
 import { ServerMetadata } from "../api/contracts";
 import { ChatDefaults } from "../domain/quickChat";
-import { QuickChatController, quickChatDraft } from "./quickChatController";
+import { ChatDestination, QuickChatController, quickChatDraft } from "./quickChatController";
 import { LaunchFailure, launchSession } from "./sessionLauncher";
 import { FeedConnection } from "./sessionFeeds";
 import { quickChatStore, connectionStore } from "../storage/raycast";
@@ -43,15 +43,17 @@ export async function startQuickChatSession(
   if (result.kind !== "created") throw new LaunchFailure(result);
 }
 
-export function useQuickChat(connection: FeedConnection, forceNew: boolean, resume = false) {
+export function useQuickChat(connection: FeedConnection, destination: ChatDestination) {
+  const sessionId = destination.kind === "session" ? destination.sessionId : undefined;
+  const resume = destination.kind === "quick" && !!destination.resume;
   const controller = useMemo(
     () =>
       new QuickChatController(connection, quickChatStore, connectionCheck(connection), {
-        forceNew,
-        resume,
+        destination,
         workspace: localWorkspace(connection.apiUrl),
       }),
-    [connection.id, connection.apiUrl, connection.token, forceNew, resume],
+    // A destination written inline is a new object each render; its fields identify it.
+    [connection.id, connection.apiUrl, connection.token, destination.kind, sessionId, resume],
   );
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   useEffect(() => {

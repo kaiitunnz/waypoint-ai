@@ -101,7 +101,7 @@ export function ComposeMessage({
     !!targetId && metadata.targets.some((target) => target.id === targetId),
   );
   const canAttach = policy.images || policy.files;
-  const ready = !state.busy && !state.loading && !state.pending;
+  const ready = !state.busy && !state.loading && !state.pending && !state.blocked;
   const send = async () => {
     if ((await controller.send(true)) && mounted.current) pop();
   };
@@ -187,10 +187,11 @@ export function ComposeMessage({
       <Form.Description title="To" text={destination} />
       {state.upload && <Form.Description title="Sending" text={state.upload} />}
       {state.error && <Form.Description title="Needs attention" text={state.error} />}
+      {state.blocked && state.blocked !== state.error && <Form.Description title="Can't send" text={state.blocked} />}
       {state.pending && (
         <Form.Description
           title="Unconfirmed"
-          text="An earlier operation is unconfirmed. Check it in Quick Chat first."
+          text="An unconfirmed operation needs checking first. Use Check Previous Outcome."
         />
       )}
       <Form.TextArea

@@ -653,7 +653,7 @@ test("interaction checkpoints coordinate with Quick Chat without rebinding it", 
   });
   await c.refresh();
   assert.equal(await c.submit(c.getSnapshot().interactions[0], { selected: { "0": ["Red"] } }), false);
-  assert.match(c.getSnapshot().error!, /Quick Chat/);
+  assert.match(c.getSnapshot().error!, /Check Previous Outcome/);
   assert.equal(f.server.posts.length, 1);
   await f.close();
 });

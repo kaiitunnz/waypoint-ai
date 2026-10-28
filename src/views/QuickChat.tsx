@@ -1,32 +1,19 @@
-import {
-  Action,
-  ActionPanel,
-  Alert,
-  Icon,
-  Keyboard,
-  List,
-  Toast,
-  confirmAlert,
-  showToast,
-  useNavigation,
-} from "@raycast/api";
+import { Action, ActionPanel, Alert, Icon, Keyboard, List, Toast, confirmAlert, showToast } from "@raycast/api";
 import { useState, useSyncExternalStore } from "react";
 import { useConnections } from "../hooks/useConnections";
 import { useQuickChat } from "../hooks/useQuickChat";
 import { FeedConnection } from "../hooks/sessionFeeds";
 import { connectionStore } from "../storage/raycast";
 import { localWorkspace } from "../storage/workspace";
-import { canReattach, launchContext, resumeFor } from "../domain/quickChat";
+import { launchContext, resumeFor } from "../domain/quickChat";
 import { sessionUrl } from "../domain/sessions";
-import { deleteMessage, quickChatMovesOn, terminateMessage } from "../domain/sessionActions";
+import { checkpointOffer, deleteMessage, quickChatMovesOn, terminateMessage } from "../domain/sessionActions";
 import { ChatConversation } from "./ChatConversation";
 import { QuickChatController } from "../hooks/quickChatController";
 import { LaunchFailure } from "../hooks/sessionLauncher";
 import { QuickChatDefaults } from "./QuickChatDefaults";
 import { NewSessionSettings } from "./NewSessionSettings";
-import { ComposeMessage, includeContext } from "./ComposeMessage";
-import { ConnectTarget } from "./ConnectTarget";
-import { ContextKind } from "../domain/compose";
+import { CheckpointActions, ComposeActions, SessionReattachAction, TargetActions } from "./ChatActions";
 import { SignInForm } from "./ServerForm";
 import { ManageServers } from "./ManageServers";
 import { LoadingView } from "../components/SessionPresentation";
@@ -125,7 +112,7 @@ function QuickChatView({
   refreshConnections: () => Promise<void>;
   accessory?: React.ComponentProps<typeof List>["searchBarAccessory"];
 }) {
-  const { state, controller } = useQuickChat(connection, forceNew, resume);
+  const { state, controller } = useQuickChat(connection, { kind: forceNew ? "new" : "quick", resume });
   const metadata = state.metadata;
   const context =
     metadata && state.defaults
@@ -141,10 +128,8 @@ function QuickChatView({
     />
   );
   if (state.loading && !state.session) return <LoadingView title="Preparing your chat…" />;
-  // The conversation's own Needs Attention section covers a checkpoint for one of its requests.
-  const ownInteraction = state.pending?.kind === "interaction" && state.pending.sessionId === state.session?.id;
-  const status =
-    state.error || (state.pending && !ownInteraction ? state.notice || "Previous attempt unconfirmed." : undefined);
+  const checkpoint = checkpointOffer(state.pending, state.pendingOwned, state.session?.id) !== "none";
+  const status = state.error || (checkpoint ? state.notice || "Previous attempt unconfirmed." : undefined);
   if (metadata)
     return (
       <ChatConversation
@@ -171,6 +156,7 @@ function QuickChatView({
         busy={state.busy}
         revision={state.revision}
         onPendingChange={() => void controller.syncPending()}
+        onReturn={() => void controller.syncPending()}
         onMissing={(id) => controller.markMissing(id)}
         hasDraft={state.hasDraft}
         settings={{
@@ -248,12 +234,6 @@ function QuickChatActions({
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const metadata = state.metadata;
   const url = state.session ? sessionUrl(connection.frontendUrl, state.session.id) : connection.frontendUrl;
-  const interaction = state.pending?.kind === "interaction";
-  const { push } = useNavigation();
-  const compose = metadata && <ComposeMessage controller={controller} metadata={metadata} />;
-  const include = async (kind: ContextKind) => {
-    if (compose && (await includeContext(controller, kind))) push(compose);
-  };
   const end = async (kind: "terminate" | "delete") => {
     const session = state.session;
     if (!session) return;
@@ -290,7 +270,7 @@ function QuickChatActions({
           ? {
               style: Toast.Style.Failure,
               title: "Session terminated but not deleted",
-              message: "Delete it from Search Sessions.",
+              message: "Delete it from Browse Sessions.",
             }
           : result.outcome === "unconfirmed"
             ? { style: Toast.Style.Failure, title: "Quick Chat moved to a new chat", message: result.message }
@@ -299,113 +279,9 @@ function QuickChatActions({
   };
   return (
     <>
-      {compose && (
-        <ActionPanel.Section>
-          <Action.Push
-            title="Compose Message"
-            icon={Icon.Pencil}
-            shortcut={{ modifiers: ["cmd", "shift"], key: "m" }}
-            target={compose}
-          />
-          {!state.busy && (
-            <>
-              <Action
-                title="Include Selected Text"
-                icon={Icon.Text}
-                shortcut={{ modifiers: ["cmd", "shift"], key: "e" }}
-                onAction={() => include("selection")}
-              />
-              <Action
-                title="Include Clipboard"
-                icon={Icon.Clipboard}
-                shortcut={{ modifiers: ["cmd", "shift"], key: "v" }}
-                onAction={() => include("clipboard")}
-              />
-            </>
-          )}
-        </ActionPanel.Section>
-      )}
-      {state.sshTarget && metadata && (
-        <Action.Push
-          title="Connect SSH Target"
-          icon={Icon.Lock}
-          target={
-            <ConnectTarget
-              target={metadata.targets.find((entry) => entry.id === state.sshTarget)}
-              connect={(password) => controller.connectTarget(password)}
-              submitTitle="Connect and Retry"
-            />
-          }
-        />
-      )}
-      {interaction && state.pending?.sessionId !== state.session?.id && (
-        <>
-          <Action
-            title="Check Previous Outcome"
-            icon={Icon.MagnifyingGlass}
-            shortcut={Keyboard.Shortcut.Common.OpenWith}
-            onAction={() => controller.reconcile()}
-          />
-          <Action
-            title="Clear Unconfirmed Response"
-            icon={Icon.ArrowClockwise}
-            onAction={async () => {
-              if (
-                await confirmAlert({
-                  title: "Clear the unconfirmed response?",
-                  message:
-                    "It may already have reached the agent. Responding again can repeat its effect. Nothing is resent automatically.",
-                  primaryAction: { title: "Clear", style: Alert.ActionStyle.Destructive },
-                })
-              )
-                await controller.abandonPending();
-            }}
-          />
-        </>
-      )}
-      {state.pending && !interaction && (
-        <>
-          <Action
-            title="Check Previous Outcome"
-            icon={Icon.MagnifyingGlass}
-            shortcut={Keyboard.Shortcut.Common.OpenWith}
-            onAction={() => controller.reconcile()}
-          />
-          <Action
-            title="Allow Explicit Retry"
-            shortcut={{ modifiers: ["cmd", "shift"], key: "y" }}
-            icon={Icon.ArrowClockwise}
-            onAction={async () => {
-              if (
-                await confirmAlert({
-                  title: "Allow another attempt?",
-                  message: state.pending?.origin
-                    ? "The new session may already have been created. Another attempt can create a second one. Check the outcome first, then start the session again from the form you used."
-                    : "The previous operation may already have reached Waypoint. A new attempt can create another session or duplicate a message. Check the outcome first. Nothing is resent until you press Send.",
-                  primaryAction: { title: "Check and Allow Retry", style: Alert.ActionStyle.Destructive },
-                })
-              )
-                await controller.allowRetry();
-            }}
-          />
-          <Action
-            title="Abandon Attempt and Start New Chat"
-            icon={Icon.Trash}
-            style={Action.Style.Destructive}
-            onAction={async () => {
-              if (
-                await confirmAlert({
-                  title: "Abandon this attempt?",
-                  message:
-                    "It may already have reached Waypoint. A new chat can duplicate work. Existing sessions keep running.",
-                  primaryAction: { title: "Abandon and Start New", style: Alert.ActionStyle.Destructive },
-                })
-              )
-                await controller.abandonPending();
-            }}
-          />
-        </>
-      )}
+      {metadata && <ComposeActions controller={controller} metadata={metadata} />}
+      {metadata && <TargetActions controller={controller} metadata={metadata} />}
+      <CheckpointActions controller={controller} />
       {metadata && state.defaults && !state.busy && !state.pending && (
         <Action.Push
           title="New Session with Settings"
@@ -460,17 +336,7 @@ function QuickChatActions({
           onAction={() => controller.action("interrupt")}
         />
       )}
-      {state.session &&
-        metadata &&
-        ["exited", "error"].includes(state.session.status) &&
-        canReattach(state.session, metadata) && (
-          <Action
-            title="Reattach Session"
-            icon={Icon.Link}
-            shortcut={{ modifiers: ["cmd", "shift"], key: "t" }}
-            onAction={() => controller.action("reattach")}
-          />
-        )}
+      {metadata && <SessionReattachAction controller={controller} metadata={metadata} />}
       {state.session && state.session.status !== "exited" && !state.busy && !state.pending && (
         <Action
           title="Terminate Session"
@@ -497,6 +363,7 @@ function QuickChatActions({
         onPop={() => {
           setActive(true);
           void refreshConnections();
+          void controller.syncPending();
         }}
       />
       {browser && url && <Action.OpenInBrowser title="Open in Waypoint" url={url} />}
@@ -508,6 +375,7 @@ function QuickChatActions({
         onPop={() => {
           setActive(true);
           void refreshConnections();
+          void controller.syncPending();
         }}
       />
     </>

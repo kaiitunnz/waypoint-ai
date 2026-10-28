@@ -40,9 +40,9 @@
     },
     {
       "name": "search-sessions",
-      "title": "Search Sessions",
+      "title": "Browse Sessions",
       "subtitle": "Waypoint AI",
-      "description": "Find Waypoint sessions, read live conversations, and rename, pin, reattach, interrupt, terminate, or delete them.",
+      "description": "Find, chat with, and manage Waypoint sessions.",
       "mode": "view"
     },
     {
