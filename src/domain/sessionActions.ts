@@ -61,6 +61,31 @@ export function sessionProblem(session: Session, metadata: ServerMetadata): stri
   return undefined;
 }
 
+// Which checkpoint actions a chat offers. A response to the shown session's own request is covered by its Needs
+// Attention section; an operation this chat started can be retried; one started elsewhere can only be checked or
+// cleared.
+export type CheckpointOffer = "none" | "response" | "own" | "elsewhere";
+export function checkpointOffer(
+  pending: { kind: string; sessionId?: string } | undefined,
+  owned: boolean,
+  shownSessionId: string | undefined,
+): CheckpointOffer {
+  if (!pending) return "none";
+  if (pending.kind === "interaction") return pending.sessionId === shownSessionId ? "none" : "response";
+  return owned ? "own" : "elsewhere";
+}
+
+// How a session chat reattaches its session: through the chat, under the server lock and checkpointed; directly,
+// while another session's operation holds the checkpoint; or not at all while its own send or check is unsettled.
+export function reattachSource(
+  busy: boolean,
+  pending: { sessionId?: string } | undefined,
+  sessionId: string,
+): "chat" | "direct" | "none" {
+  if (pending) return pending.sessionId === sessionId ? "none" : "direct";
+  return busy ? "none" : "chat";
+}
+
 export function titleProblem(title: string): string | undefined {
   const value = title.trim();
   if (!value) return "Enter a title.";

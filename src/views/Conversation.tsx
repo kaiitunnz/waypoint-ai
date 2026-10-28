@@ -1,5 +1,5 @@
-import { Action, ActionPanel, Detail, Icon, Keyboard, List, useNavigation } from "@raycast/api";
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { Action, ActionPanel, Detail, Icon, Keyboard, List } from "@raycast/api";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { ServerMetadata } from "../api/contracts";
 import { TranscriptRow, transcript, selectedRow } from "../domain/transcript";
 import {
@@ -13,147 +13,13 @@ import {
   toolMarkdown,
 } from "../domain/chatPresentation";
 import { isStructured, sessionUrl } from "../domain/sessions";
-import { useConnections } from "../hooks/useConnections";
 import { useConversationFeed } from "../hooks/useSessionFeeds";
 import { ConversationFeed, FeedConnection } from "../hooks/sessionFeeds";
 import { LoadingView, gapNotice, markdownText, sessionSummary, statusIcon } from "../components/SessionPresentation";
-import { ChatConversation, SessionActionContext } from "./ChatConversation";
-import { SessionActions } from "./SessionActions";
-import { SessionManager } from "../hooks/sessionManager";
-import { quickChatStore } from "../storage/raycast";
-import { NewChatOption } from "./EditSession";
 import { InteractionController } from "../hooks/interactionController";
 import { InteractionSection, interactionItemIds } from "./SessionInteraction";
 import { ManageServers } from "./ManageServers";
 import { SignInForm } from "./ServerForm";
-
-export function ConversationScreen({
-  connectionId,
-  sessionId,
-  metadata,
-  newChat,
-  quickChat,
-}: {
-  connectionId: string;
-  sessionId: string;
-  metadata: ServerMetadata;
-  newChat?: NewChatOption;
-  // Quick Chat opened on this server's chosen session.
-  quickChat?: () => React.ReactElement;
-}) {
-  const { state, error, refresh } = useConnections();
-  if (!state && !error) return <LoadingView title="Loading connection…" />;
-  const connection = state?.connections.find((item) => item.id === connectionId);
-  if (!connection?.token)
-    return (
-      <Detail
-        markdown={`## ${error ? "Saved connection unavailable" : "Sign in to view this conversation"}\n\n${error ?? "The connection was changed or removed. Open Manage Servers to reconnect."}`}
-        actions={
-          <ActionPanel>
-            {connection && (
-              <Action.Push
-                title="Sign in"
-                icon={Icon.Lock}
-                target={<SignInForm connection={connection} onSaved={refresh} />}
-              />
-            )}
-            <Action.Push title="Manage Servers" icon={Icon.Network} target={<ManageServers />} onPop={refresh} />
-          </ActionPanel>
-        }
-      />
-    );
-  return (
-    <ChatConversation
-      connection={{ ...connection, token: connection.token }}
-      sessionId={sessionId}
-      metadata={metadata}
-      refreshConnections={refresh}
-      settings={{ available: true, newChat }}
-      sessionActions={(context) => (
-        <ConversationSessionActions
-          {...context}
-          connection={{ ...connection, token: connection.token! }}
-          metadata={metadata}
-          quickChat={quickChat}
-        />
-      )}
-      actions={({ setActive, browser }) => (
-        <>
-          {browser && connection.frontendUrl && (
-            <Action.OpenInBrowser title="Open in Waypoint" url={sessionUrl(connection.frontendUrl, sessionId)!} />
-          )}
-          <Action.Push
-            title="Sign in Again"
-            icon={Icon.Lock}
-            target={<SignInForm connection={connection} onSaved={refresh} />}
-            onPush={() => setActive(false)}
-            onPop={() => {
-              setActive(true);
-              void refresh();
-            }}
-          />
-          <Action.Push
-            title="Manage Servers"
-            icon={Icon.Network}
-            target={<ManageServers />}
-            onPush={() => setActive(false)}
-            onPop={() => {
-              setActive(true);
-              void refresh();
-            }}
-          />
-        </>
-      )}
-    />
-  );
-}
-
-function ConversationSessionActions({
-  connection,
-  metadata,
-  session,
-  feed,
-  setActive,
-  quickChat,
-}: SessionActionContext & {
-  connection: FeedConnection;
-  metadata: ServerMetadata;
-  quickChat?: () => React.ReactElement;
-}) {
-  const { push, pop } = useNavigation();
-  const manager = useMemo(
-    () => new SessionManager(connection, quickChatStore),
-    [connection.id, connection.apiUrl, connection.token],
-  );
-  const [state, setState] = useState<{ pointer?: string; pending: boolean }>({ pending: false });
-  const read = useCallback(() => {
-    manager.quickChat().then(setState, () => setState({ pending: false }));
-  }, [manager]);
-  useEffect(read, [read]);
-  return (
-    <SessionActions
-      session={session}
-      metadata={metadata}
-      quickChat={state}
-      manager={manager}
-      handlers={{
-        onChanged: () => {
-          feed.retry();
-          read();
-        },
-        onDeleted: () => pop(),
-        openQuickChat: () => {
-          if (!quickChat) return;
-          setActive(false);
-          push(quickChat(), () => {
-            setActive(true);
-            read();
-          });
-        },
-      }}
-    />
-  );
-}
 
 function rowMarkdown(row: TranscriptRow): string {
   if (row.kind === "tool") return toolMarkdown(row);

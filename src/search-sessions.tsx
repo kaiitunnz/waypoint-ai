@@ -1,3 +1,3 @@
-import { SearchSessions } from "./views/SearchSessions";
+import { BrowseSessions } from "./views/BrowseSessions";
 
-export default SearchSessions;
+export default BrowseSessions;

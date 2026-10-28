@@ -1,6 +1,6 @@
 # Repository guidance
 
-This is a TypeScript Raycast extension that integrates with Waypoint through HTTP and WebSockets. Manage Servers, Search Sessions, Quick Chat, and New Chat are implemented.
+This is a TypeScript Raycast extension that integrates with Waypoint through HTTP and WebSockets. Manage Servers, Browse Sessions, Quick Chat, and New Chat are implemented.
 
 - Before implementing a phase, read the local development plan under `tmp/plans/` when available. That directory is intentionally ignored; use the task or PR description for scope when the plan is absent.
 - Keep command entry points thin. Put network contracts in `src/api/`, pure behavior in `src/domain/`, persistence in `src/storage/`, orchestration in `src/hooks/`, and native Raycast presentation in `src/views/` and `src/components/`.
