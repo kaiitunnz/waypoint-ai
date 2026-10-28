@@ -253,7 +253,7 @@ test("agent, target, or folder changes become a new chat", () => {
   const result = plan({ cwd: "/work/other", title: "Ignored" });
   assert.equal(result.kind, "new-chat");
   assert.deepEqual(result.steps, []);
-  assert.deepEqual(plan({ cwd: " " }).errors, ["Enter a working directory for the new chat."]);
+  assert.deepEqual(plan({ cwd: " " }).errors, ["Enter a working directory for the new session."]);
 });
 
 test("new chat defaults keep agent-default meanings and only supported lists", () => {

@@ -23,6 +23,7 @@ import { ChatConversation } from "./ChatConversation";
 import { QuickChatController } from "../hooks/quickChatController";
 import { LaunchFailure } from "../hooks/sessionLauncher";
 import { QuickChatDefaults } from "./QuickChatDefaults";
+import { NewSessionSettings } from "./NewSessionSettings";
 import { ComposeMessage, includeContext } from "./ComposeMessage";
 import { ConnectTarget } from "./ConnectTarget";
 import { ContextKind } from "../domain/compose";
@@ -403,6 +404,23 @@ function QuickChatActions({
             }}
           />
         </>
+      )}
+      {metadata && state.defaults && !state.busy && !state.pending && (
+        <Action.Push
+          title="New Session with Settings"
+          icon={Icon.PlusCircle}
+          shortcut={{ modifiers: ["cmd", "shift"], key: "n" }}
+          onPush={() => setActive(false)}
+          onPop={() => setActive(true)}
+          target={
+            <NewSessionSettings
+              connection={connection}
+              metadata={metadata}
+              defaults={state.defaults}
+              controller={controller}
+            />
+          }
+        />
       )}
       {metadata && state.defaults && (
         <Action.Push

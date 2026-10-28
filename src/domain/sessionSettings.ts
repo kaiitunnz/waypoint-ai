@@ -258,7 +258,7 @@ export function planSettings(
 ): SettingsPlan {
   const errors: string[] = [];
   if (newChatChanged(baseline, draft)) {
-    if (!draft.cwd.trim()) errors.push("Enter a working directory for the new chat.");
+    if (!draft.cwd.trim()) errors.push("Enter a working directory for the new session.");
     return {
       kind: "new-chat",
       steps: [],
@@ -267,7 +267,7 @@ export function planSettings(
       transportChanged: false,
       profileChanged: false,
       warnings: [
-        "These settings can't change on this conversation. Starting a new chat saves them as your Quick Chat defaults; this conversation keeps its own settings.",
+        "These settings can't change on this conversation. A new session starts with them; this conversation and your Quick Chat defaults keep their own settings.",
         "Environment variables come from your Quick Chat preset.",
       ],
       errors,
@@ -542,7 +542,7 @@ export function rebaseDraft(
   };
 }
 
-// Quick Chat defaults that start a new chat with the edited agent, target, and folder.
+// Launch settings, built on the current defaults, that start a new session with the edited agent, target, and folder.
 export function newChatDefaults(
   current: ChatDefaults,
   baseline: SettingsBaseline,
