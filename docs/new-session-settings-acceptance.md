@@ -28,7 +28,7 @@ Not exercised natively: an unconfirmed create and its recovery, a password SSH t
 
 ## Automated coverage
 
-`npm run verify` checks formatting, ESLint, strict types, 279 behavior and integration tests, Raycast validation, and build.
+`npm run verify` checks formatting, ESLint, strict types, 282 behavior and integration tests, Raycast validation, and build.
 
 Tests cover:
 
