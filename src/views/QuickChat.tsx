@@ -125,7 +125,7 @@ function QuickChatView({
   refreshConnections: () => Promise<void>;
   accessory?: React.ComponentProps<typeof List>["searchBarAccessory"];
 }) {
-  const { state, controller } = useQuickChat(connection, forceNew, resume);
+  const { state, controller } = useQuickChat(connection, { kind: forceNew ? "new" : "quick", resume });
   const metadata = state.metadata;
   const context =
     metadata && state.defaults

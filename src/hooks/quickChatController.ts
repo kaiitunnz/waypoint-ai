@@ -31,7 +31,8 @@ import {
   maxDraftContextBytes,
   reusableUpload,
 } from "../domain/compose";
-import { draftKeys } from "../storage/drafts";
+import { sessionProblem } from "../domain/sessionActions";
+import { draftKeys, sessionChatDraft } from "../storage/drafts";
 import {
   LaunchOrigin,
   PendingOperation,
@@ -42,6 +43,7 @@ import {
 } from "../storage/quickChat";
 import { Workspace } from "../storage/workspace";
 import { ManageOutcome, Released, SessionManager, refused, release } from "./sessionManager";
+import { restartTimeoutMs } from "./sessionSettingsController";
 import {
   LaunchDeps,
   LaunchResult,
@@ -62,6 +64,10 @@ export interface QuickChatSnapshot {
   error?: string;
   notice?: string;
   pending?: PendingOperation;
+  // Whether this view started the pending operation and may act on its session.
+  pendingOwned: boolean;
+  // Why a chat bound to one session can't send to it; the conversation stays readable.
+  blocked?: string;
   revision: number;
   // Staged context and files. The message text is form-local; read it with composeText().
   compose: ComposeParts;
@@ -96,11 +102,18 @@ export type TerminateResult =
 // Draft keys of Quick Chat and New Chat; each keeps its own draft and binding per server.
 export const quickChatDraft = "quick";
 export const newChatDraft = "new";
+const quickChatFamily = (draftKey: string) => draftKey === quickChatDraft || draftKey === newChatDraft;
+// Quick Chat follows its saved destination, `resume` regardless of the reuse mode and timeout; New Chat starts a new
+// conversation; a session chat sends only to its session and never changes Quick Chat's destination.
+export type ChatDestination =
+  { kind: "quick"; resume?: boolean } | { kind: "new" } | { kind: "session"; sessionId: string };
+const goneMessage = "This session is no longer on this server.";
 export class QuickChatController {
   private state: QuickChatSnapshot = {
     loading: true,
     busy: false,
     draft: "",
+    pendingOwned: false,
     revision: 0,
     compose: emptyParts(),
     composeEpoch: 0,
@@ -119,6 +132,9 @@ export class QuickChatController {
   private deadPointer?: string;
   private readonly forceNew: boolean;
   private readonly resume: boolean;
+  private readonly boundTo?: string;
+  // The bound session was deleted; nothing is saved for it again, so its removed drafts stay removed.
+  private gone = false;
   private readonly workspace?: Workspace;
   private draftLoaded = false;
   private queue: Promise<unknown> = Promise.resolve();
@@ -129,19 +145,21 @@ export class QuickChatController {
     private readonly connection: FeedConnection,
     private readonly store: QuickChatStore,
     private readonly verifyConnection: () => Promise<void>,
-    // `resume` opens the saved destination regardless of the reuse mode and timeout.
-    options: { forceNew?: boolean; resume?: boolean; workspace?: Workspace } = {},
+    options: { destination?: ChatDestination; workspace?: Workspace } = {},
     private readonly client = new WaypointClient(connection.apiUrl),
     private readonly now = Date.now,
   ) {
-    this.forceNew = options.forceNew ?? false;
-    this.resume = !this.forceNew && (options.resume ?? false);
+    const destination = options.destination ?? { kind: "quick" };
+    this.forceNew = destination.kind === "new";
+    this.resume = destination.kind === "quick" && !!destination.resume;
+    this.boundTo = destination.kind === "session" ? destination.sessionId : undefined;
     this.workspace = options.workspace;
-    this.draftKey = this.forceNew ? newChatDraft : quickChatDraft;
+    this.draftKey = this.boundTo ? sessionChatDraft(this.boundTo) : this.forceNew ? newChatDraft : quickChatDraft;
     this.lineKey = draftKeys.line(connection.id, this.draftKey);
     this.composeKey = draftKeys.compose(connection.id, this.draftKey);
   }
-  canSend = () => this.prepared && !this.state.loading && !this.state.busy && !this.state.pending;
+  canSend = () =>
+    this.prepared && !this.state.loading && !this.state.busy && !this.state.pending && !this.state.blocked;
   getSnapshot = () => this.state;
   composeText = () => this.composeValue;
   subscribe = (listener: () => void) => {
@@ -154,12 +172,25 @@ export class QuickChatController {
     if (!this.active) return;
     const next = { ...this.state, ...patch };
     next.hasDraft = hasCompose({ ...next.compose, text: this.composeValue });
+    next.pendingOwned = this.ownsPending(next.pending);
+    if (this.boundTo)
+      next.blocked = this.gone
+        ? goneMessage
+        : next.session && next.metadata
+          ? sessionProblem(next.session, next.metadata)
+          : undefined;
     this.state = next;
     this.listeners.forEach((listener) => listener());
   }
   stop() {
     this.active = false;
     this.generation++;
+  }
+  // Quick Chat and New Chat share their operations; a session chat owns only its own. Interaction responses belong
+  // to the conversation that answered them.
+  private ownsPending(pending?: PendingOperation): boolean {
+    if (!pending || pending.kind === "interaction") return false;
+    return this.boundTo ? pending.draftKey === this.draftKey : quickChatFamily(pending.draftKey);
   }
   async start() {
     this.active = true;
@@ -181,9 +212,11 @@ export class QuickChatController {
         if (text === undefined && legacyText) void this.saveDraft(this.composeKey, legacyText);
         this.composeValue = text ?? legacyText ?? "";
       }
+      // Another view that cleared or replaced the checkpoint may have dropped uploads from these parts.
+      const reload = !this.draftLoaded || saved.pending?.operationId !== this.state.pending?.operationId;
       this.publish({
         draft: this.draftLoaded ? this.state.draft : (line ?? saved.drafts[this.draftKey] ?? ""),
-        compose: this.draftLoaded ? this.state.compose : (storedParts(saved.compose?.[this.draftKey]) ?? emptyParts()),
+        compose: reload ? (storedParts(saved.compose?.[this.draftKey]) ?? emptyParts()) : this.state.compose,
         composeEpoch: this.draftLoaded ? this.state.composeEpoch : this.state.composeEpoch + 1,
         defaults: saved.defaults,
         pending: saved.pending,
@@ -193,12 +226,17 @@ export class QuickChatController {
       const metadata = await this.client.me(this.connection.token);
       if (!this.active || generation !== this.generation) return;
       this.publish({ metadata });
-      if (this.state.session) {
+      const owned = this.ownsPending(saved.pending);
+      if (this.boundTo) {
+        const session = await this.readSession(this.boundTo);
+        if (this.active && generation === this.generation) this.publish({ session });
+        this.prepared = true;
+      } else if (this.state.session) {
         const session = await this.client.session(this.connection.token, this.state.session.id);
         if (this.active && generation === this.generation) this.publish({ session });
-      } else if (saved.pending?.kind === "create") {
+      } else if (owned && saved.pending?.kind === "create") {
         this.prepared = true;
-      } else if (saved.pending?.sessionId && saved.pending.kind !== "interaction") {
+      } else if (owned && saved.pending?.sessionId) {
         const session = await this.client.session(this.connection.token, saved.pending.sessionId);
         this.checkOwned(session, saved, metadata);
         if (this.active && generation === this.generation) this.publish({ session });
@@ -250,9 +288,11 @@ export class QuickChatController {
           ? saved.pending.kind === "interaction"
             ? "A response to a session request is unconfirmed. Check it before sending; nothing was resent."
             : "An earlier operation has an unconfirmed outcome. Check it before sending again; no message was resent."
-          : this.state.session
-            ? "Continue this conversation. Quick Chat defaults apply to future sessions."
-            : "Ready for a new conversation. Waypoint creates it on your first send.",
+          : this.boundTo
+            ? undefined
+            : this.state.session
+              ? "Continue this conversation. Quick Chat defaults apply to future sessions."
+              : "Ready for a new conversation. Waypoint creates it on your first send.",
       });
     } catch (error) {
       if (this.active && generation === this.generation)
@@ -274,9 +314,37 @@ export class QuickChatController {
       throw error;
     }
   }
+  // A missing bound session marks the chat gone.
+  private async readSession(id: string) {
+    try {
+      return await this.client.session(this.connection.token, id);
+    } catch (error) {
+      if (error instanceof ApiError && error.kind === "not-found" && id === this.boundTo) {
+        this.gone = true;
+        throw new Error(goneMessage);
+      }
+      throw error;
+    }
+  }
   // The open conversation reported its session missing.
   markMissing(sessionId: string) {
-    if (this.state.session?.id === sessionId) this.deadPointer = sessionId;
+    if (this.boundTo === sessionId) {
+      this.gone = true;
+      this.publish({});
+    } else if (this.state.session?.id === sessionId) this.deadPointer = sessionId;
+  }
+  // Rereads the shown session after it changed elsewhere; a send or check in progress publishes its own.
+  async refreshSession() {
+    const id = this.boundTo ?? this.state.session?.id;
+    if (!id || this.state.busy) return;
+    const generation = this.generation;
+    try {
+      const session = await this.readSession(id);
+      if (!this.state.busy && generation === this.generation && (this.boundTo || this.state.session?.id === id))
+        this.publish({ session });
+    } catch {
+      if (this.gone) this.publish({});
+    }
   }
   private async savedConversation(id: string) {
     try {
@@ -297,6 +365,7 @@ export class QuickChatController {
     return { connection: this.connection, client: this.client, now: this.now, metadata, workspace: this.workspace };
   }
   private saveDraft(key: string, text: string) {
+    if (this.gone) return Promise.resolve();
     return this.store.drafts
       .write(key, text)
       .catch(() => this.publish({ error: "Could not save draft. Keep this view open and retry." }));
@@ -317,7 +386,7 @@ export class QuickChatController {
     return this.saveDraft(this.composeKey, text);
   }
   async newChat() {
-    if (this.state.busy || this.state.pending) return;
+    if (this.boundTo || this.state.busy || this.state.pending) return;
     const dead = this.deadPointer;
     this.deadPointer = undefined;
     if (dead)
@@ -361,6 +430,7 @@ export class QuickChatController {
   // anything is sent are thrown; a failed attempt is returned and shown.
   async createSession(settings: ChatDefaults, origin: LaunchOrigin): Promise<LaunchResult> {
     const metadata = this.state.metadata;
+    if (this.boundTo) throw new Error("Start new sessions from Quick Chat or New Chat.");
     if (!metadata || this.state.loading) throw new Error("Quick Chat is still loading. Try again in a moment.");
     if (this.state.busy || this.state.pending)
       throw new Error("A message is being sent or needs checking. Start the session when it finishes.");
@@ -441,6 +511,7 @@ export class QuickChatController {
   private persistCompose(compose: ComposeParts): Promise<boolean> {
     const save = ++this.composeSaves;
     this.publish({ compose });
+    if (this.gone) return Promise.resolve(false);
     const result = this.queue
       .then(() =>
         this.store.transaction(this.connection.id, async (saved, persist) => {
@@ -531,6 +602,12 @@ export class QuickChatController {
   // Resolves whether the files were removed.
   async removeFiles(ids: string[]): Promise<boolean> {
     if (this.state.busy) return false;
+    if (this.gone) {
+      this.publish({
+        compose: { ...this.state.compose, files: this.state.compose.files.filter((file) => !ids.includes(file.id)) },
+      });
+      return true;
+    }
     this.publish({ busy: true, error: undefined });
     try {
       await this.queue;
@@ -652,6 +729,10 @@ export class QuickChatController {
       !this.state.metadata
     )
       return false;
+    if (this.state.blocked) {
+      this.publish({ error: this.state.blocked });
+      return false;
+    }
     const metadata = this.state.metadata;
     let sent = false;
     this.publish({ busy: true, error: undefined, notice: undefined, sshTarget: undefined });
@@ -673,6 +754,7 @@ export class QuickChatController {
         if (draft && compose) text = composeMessage(compose.text, draft.context);
         if (draft && !text && !draft.files.length) throw new Error("This draft has nothing to send.");
         let session = this.state.session;
+        if (this.boundTo && !session) throw new Error("This session isn't loaded. Reconnect and try again.");
         if (
           !session &&
           !this.forceNew &&
@@ -722,6 +804,10 @@ export class QuickChatController {
             this.publish({ compose: { ...this.state.compose, sessionId: undefined, launch: undefined } });
           session = created.session;
           if (created.problem) throw new Error(created.problem);
+        } else if (this.boundTo) {
+          session = await this.readSession(this.boundTo);
+          const problem = sessionProblem(session, metadata);
+          if (problem) throw new Error(problem);
         } else {
           session = await this.client.session(this.connection.token, session.id);
           this.checkOwned(session, saved, metadata);
@@ -737,7 +823,7 @@ export class QuickChatController {
           };
           await persist();
           try {
-            session = await this.client.action(this.connection.token, session.id, "reattach");
+            session = await this.client.action(this.connection.token, session.id, "reattach", restartTimeoutMs);
           } catch (error) {
             if (error instanceof ApiError && error.kind !== "uncertain") {
               saved.pending = undefined;
@@ -751,9 +837,12 @@ export class QuickChatController {
         }
         if (draft) {
           this.checkPolicy(draft.files, session.backend, session.targetId);
-          // The custom mark belongs to the session the form started, not to another destination.
-          if (draft.launch === customLaunch && draft.sessionId !== session.id) draft.launch = undefined;
-          draft.sessionId = session.id;
+          // A session chat's draft never binds Quick Chat to its session.
+          if (!this.boundTo) {
+            // The custom mark belongs to the session the form started, not to another destination.
+            if (draft.launch === customLaunch && draft.sessionId !== session.id) draft.launch = undefined;
+            draft.sessionId = session.id;
+          }
         }
         let attachments = draft ? await this.upload(session, stats, saved, persist, fence) : [];
         const before = await this.client.events(this.connection.token, session.id);
@@ -851,6 +940,8 @@ export class QuickChatController {
       if (saved.pending?.operationId === this.state.pending?.operationId) return;
       this.publish({
         pending: saved.pending,
+        // Clearing a checkpoint drops its uploads from the draft that sent them, which may be this one.
+        compose: storedParts(saved.compose?.[this.draftKey]) ?? emptyParts(),
         error: undefined,
         notice:
           saved.pending?.kind === "interaction"
@@ -904,7 +995,7 @@ export class QuickChatController {
             if (bound && pending.draftKey === this.draftKey) this.show(session, bound, "Recovered the new session.");
             else
               this.publish({
-                session: this.state.session ?? session,
+                session: this.boundTo ? this.state.session : (this.state.session ?? session),
                 pending: undefined,
                 notice: pending.origin
                   ? "Recovered the new session."
@@ -941,15 +1032,20 @@ export class QuickChatController {
         } else {
           const session = await this.client.session(this.connection.token, pending.sessionId!);
           const recorded = pending.kind === "input" && (await this.inputRecorded(session.id, pending));
+          // Only the view that started the operation switches to its session; a session chat shows only its own.
+          const adopt = this.boundTo ? session.id === this.boundTo : this.ownsPending(pending) && !this.state.session;
+          const shown = this.state.session?.id === session.id || adopt ? session : this.state.session;
+          const name = shown?.id === session.id ? undefined : `“${session.title || "another session"}”`;
+          const where = name ? ` in ${name}` : "";
           this.publish({
-            session: this.state.session && this.state.session.id !== session.id ? this.state.session : session,
+            session: shown,
             pending,
             notice:
               pending.kind === "input"
                 ? recorded
-                  ? "Waypoint recorded matching input. Agent delivery is still unconfirmed; retrying can duplicate the message."
-                  : "No matching input is visible yet. Delivery is unconfirmed; retrying can duplicate the message."
-                : `The session is ${session.status}. The ${pending.kind} outcome is not confirmed; no input was resent.`,
+                  ? `Waypoint recorded matching input${where}. Agent delivery is still unconfirmed; retrying can duplicate the message.`
+                  : `No matching input is visible${where} yet. Delivery is unconfirmed; retrying can duplicate the message.`
+                : `${name ?? "The session"} is ${session.status}. The ${pending.kind} outcome is not confirmed; no input was resent.`,
           });
         }
       });
@@ -994,10 +1090,11 @@ export class QuickChatController {
   // Uploads in an unconfirmed send may have been delivered, so they are dropped from the draft, never deleted.
   private forgetUploads(saved: QuickChatState) {
     const ids = new Set(saved.pending?.attachments ?? []);
-    const draft = saved.compose?.[this.draftKey];
+    const key = saved.pending?.draftKey;
+    const draft = key === undefined ? undefined : saved.compose?.[key];
     if (!ids.size || !draft) return;
     for (const file of draft.files) if (file.upload && ids.has(file.upload.attachmentId)) file.upload = undefined;
-    this.publish({ compose: composeParts(structuredClone(draft)) });
+    if (key === this.draftKey) this.publish({ compose: composeParts(structuredClone(draft)) });
   }
   async allowRetry() {
     await this.reconcile();
@@ -1025,19 +1122,20 @@ export class QuickChatController {
     const pending = this.state.pending;
     if (this.state.busy || !pending) return;
     const operationId = pending.operationId;
+    const owned = this.ownsPending(pending);
     this.publish({ busy: true });
     try {
       await this.queue;
       await this.store.transaction(this.connection.id, async (saved, persist) => {
         if (saved.pending?.operationId !== operationId)
           throw new Error("The pending attempt changed. Check its outcome again.");
-        if (saved.pending.kind !== "interaction" && saved.pointer === saved.pending.sessionId)
-          setPointer(saved, undefined);
+        // Quick Chat moves on from a session whose operation it abandons; another view's checkpoint leaves it alone.
+        if (owned && !this.boundTo && saved.pointer === saved.pending.sessionId) setPointer(saved, undefined);
         this.forgetUploads(saved);
         saved.pending = undefined;
         await persist();
       });
-      if (pending.kind === "interaction") {
+      if (!owned || this.boundTo) {
         this.publish({ pending: undefined, error: undefined, notice: undefined });
         return;
       }
@@ -1063,7 +1161,7 @@ export class QuickChatController {
   private async end(kind: "terminate" | "delete"): Promise<TerminateResult | undefined> {
     const session = this.state.session;
     const metadata = this.state.metadata;
-    if (this.state.busy || this.state.pending || !session || !metadata) return;
+    if (this.boundTo || this.state.busy || this.state.pending || !session || !metadata) return;
     const id = session.id;
     const manager = new SessionManager(this.connection, this.store, this.client, this.now);
     this.publish({ busy: true, error: undefined, notice: undefined });
@@ -1137,6 +1235,10 @@ export class QuickChatController {
   async action(action: "interrupt" | "reattach") {
     if (this.state.busy || this.state.pending || !this.state.session || !this.state.metadata) return;
     if (action === "reattach" && !canReattach(this.state.session, this.state.metadata)) return;
+    if (this.state.blocked) {
+      this.publish({ error: this.state.blocked });
+      return;
+    }
     const id = this.state.session.id;
     this.publish({ busy: true, error: undefined, notice: undefined });
     try {
@@ -1160,7 +1262,12 @@ export class QuickChatController {
         await persist();
         let session: Session;
         try {
-          session = await this.client.action(this.connection.token, id, action);
+          session = await this.client.action(
+            this.connection.token,
+            id,
+            action,
+            action === "reattach" ? restartTimeoutMs : undefined,
+          );
         } catch (error) {
           if (error instanceof ApiError && error.kind !== "uncertain") {
             saved.pending = undefined;

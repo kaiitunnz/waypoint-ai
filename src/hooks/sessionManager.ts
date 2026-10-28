@@ -3,6 +3,7 @@ import { ServerMetadata } from "../api/contracts";
 import { Session } from "../api/sessions";
 import { SessionActionSet, sessionActions, titleProblem } from "../domain/sessionActions";
 import { createTag, failedStart } from "../domain/quickChat";
+import { draftKeys, sessionChatDraft } from "../storage/drafts";
 import { QuickChatState, QuickChatStore, setPointer } from "../storage/quickChat";
 import { restartTimeoutMs } from "./sessionSettingsController";
 import { FeedConnection } from "./sessionFeeds";
@@ -196,7 +197,7 @@ export class SessionManager {
         if (checkpointFor(saved, current))
           return {
             session: current,
-            refusal: "Quick Chat has an unconfirmed operation for this session. Check it in Quick Chat first.",
+            refusal: "An unconfirmed operation needs this session. Check it first.",
           };
         const allowed = sessionActions(current, metadata, quickChatOf(saved));
         if (!allowed.delete && !(live && allowed.terminate))
@@ -237,17 +238,26 @@ export class SessionManager {
     await this.forget(id).catch(() => undefined);
     return { kind: "done", deleted: id, ...(released?.pointer ? { releasedQuickChat: true } : {}) };
   }
+  // The session's own chat drafts go with it.
   private async forget(id: string) {
-    await this.store.transaction(this.connection.id, async (saved, persist) => {
-      if (saved.pending?.sessionId === id) return;
+    const draftKey = sessionChatDraft(id);
+    const forgotten = await this.store.transaction(this.connection.id, async (saved, persist) => {
+      if (saved.pending?.sessionId === id) return false;
       if (saved.pointer === id) setPointer(saved, undefined);
       delete saved.sentAt[id];
+      delete saved.compose?.[draftKey];
       for (const draft of Object.values(saved.compose ?? {})) {
         if (draft.sessionId === id) draft.sessionId = draft.launch = undefined;
         for (const file of draft.files) if (file.upload?.sessionId === id) file.upload = undefined;
       }
       await persist();
+      return true;
     });
+    if (forgotten)
+      await Promise.all([
+        this.store.drafts.remove(draftKeys.line(this.connection.id, draftKey)),
+        this.store.drafts.remove(draftKeys.compose(this.connection.id, draftKey)),
+      ]);
   }
   // An explicit choice: the session stays Quick Chat's destination until another one replaces it.
   async useForQuickChat(id: string, metadata: ServerMetadata): Promise<ManageOutcome> {
@@ -256,7 +266,7 @@ export class SessionManager {
         if (saved.pending)
           return {
             kind: "failed",
-            message: "Quick Chat has an unconfirmed operation. Check it in Quick Chat first.",
+            message: "An unconfirmed operation needs checking first. Use Check Previous Outcome.",
           };
         const session = await this.client.session(this.connection.token, id);
         if (!sessionActions(session, metadata, quickChatOf(saved)).useForQuickChat)

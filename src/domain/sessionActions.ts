@@ -53,6 +53,14 @@ export function sessionActions(
   };
 }
 
+// Why a chat bound to this session can't send to it.
+export function sessionProblem(session: Session, metadata: ServerMetadata): string | undefined {
+  if (!isStructured(session, metadata)) return "This session's interface needs Waypoint. Open it in Waypoint.";
+  if (finished(session) && !canReattach(session, metadata))
+    return "This session ended and its interface can't resume it, so it can't take messages.";
+  return undefined;
+}
+
 export function titleProblem(title: string): string | undefined {
   const value = title.trim();
   if (!value) return "Enter a title.";

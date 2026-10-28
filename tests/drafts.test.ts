@@ -7,6 +7,8 @@ test("draft writes coalesce to the latest value with one write in flight", async
   let release!: () => void;
   let gate: Promise<void> | undefined = new Promise<void>((resolve) => (release = resolve));
   const drafts = new DraftStore({
+    keys: async () => ["k"],
+    removeItem: async () => undefined,
     getItem: async () => stored.at(-1),
     setItem: async (_key, value) => {
       await gate;
@@ -26,6 +28,8 @@ test("a failed draft write rejects its callers and the next write retries with t
   const stored = new Map<string, string>();
   let fail = true;
   const drafts = new DraftStore({
+    keys: async () => [...stored.keys()],
+    removeItem: async (key) => void stored.delete(key),
     getItem: async (key) => stored.get(key),
     setItem: async (key, value) => {
       if (fail) throw new Error("Storage unavailable");
@@ -37,4 +41,26 @@ test("a failed draft write rejects its callers and the next write retries with t
   fail = false;
   await drafts.write("k", "kept!");
   assert.equal(stored.get("k"), "kept!");
+});
+
+test("removing a draft drops a queued value and waits for the write in flight", async () => {
+  const stored = new Map<string, string>();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const drafts = new DraftStore({
+    keys: async () => [...stored.keys()],
+    removeItem: async (key) => void stored.delete(key),
+    getItem: async (key) => stored.get(key),
+    setItem: async (key, value) => {
+      await gate;
+      stored.set(key, value);
+    },
+  });
+  void drafts.write("k", "first");
+  void drafts.write("k", "second");
+  const removed = drafts.remove("k");
+  release();
+  await removed;
+  assert.equal(stored.has("k"), false);
+  assert.equal(await drafts.read("k"), undefined);
 });
