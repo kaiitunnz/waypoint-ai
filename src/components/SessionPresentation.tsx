@@ -67,7 +67,7 @@ export function sessionIntro(session: Session, metadata: ServerMetadata): string
 export function SessionDetail({ session, structured }: { session: Session; structured: boolean }) {
   return (
     <List.Item.Detail
-      markdown={`${sessionSummary(session)}\n\n${structured ? "Open Conversation to review messages and follow live output." : "This session uses a terminal or an unknown interface. Open it in Waypoint."}`}
+      markdown={`${sessionSummary(session)}\n\n${structured ? "Open Conversation to chat with this session and follow live output." : "This session uses a terminal or an unknown interface. Open it in Waypoint."}`}
       metadata={
         <List.Item.Detail.Metadata>
           <List.Item.Detail.Metadata.Label
