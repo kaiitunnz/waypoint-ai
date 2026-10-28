@@ -186,6 +186,19 @@ export function ChatConversation({
     .map((row) => row.text)
     .join("\n\n");
   const turns = exchanges.filter((exchange) => exchange.prompt).length;
+  // A session started without a message has nothing to show yet, so it says where it runs.
+  const sessionIntro = session
+    ? [
+        `## ${markdownText(session.title || "New conversation")}`,
+        `**${[metadata.agents.find((agent) => agent.id === session.backend)?.label ?? session.backend, session.model]
+          .filter(Boolean)
+          .map((part) => markdownText(part!))
+          .join(
+            " · ",
+          )}** · ${markdownText(metadata.targets.find((target) => target.id === session.targetId)?.name ?? "Local server")}`,
+        markdownText(session.cwd),
+      ].join("\n\n")
+    : "";
 
   useEffect(() => {
     setMode("conversation");
@@ -209,11 +222,11 @@ export function ChatConversation({
       attention.length ? `> **Needs attention**\n>\n${attention.map((line) => `> ${line}`).join("\n")}\n\n---` : "",
       unsupported
         ? `## This conversation needs Waypoint\n\nIts interface changed. ${interactionUrl ? "Open it in Waypoint to continue." : "Add a frontend URL in Manage Servers to open it in Waypoint."}`
-        : exchanges.length
-          ? readingMode === "conversation"
-            ? conversationMarkdown(exchanges, showActivity, waiting, limit)
-            : chatMarkdown(latest, showActivity, waiting, limit)
-          : emptyMarkdown || "",
+        : (exchanges.length
+            ? readingMode === "conversation"
+              ? conversationMarkdown(exchanges, showActivity, waiting, limit)
+              : chatMarkdown(latest, showActivity, waiting, limit)
+            : "") || (session && !turns ? sessionIntro : emptyMarkdown || ""),
       waiting ? "_Working…_" : "",
       // Quick Chat shows the status beside its conversation row; the reader has only the transcript.
       !composer && session ? endedNote(session.status) : "",
