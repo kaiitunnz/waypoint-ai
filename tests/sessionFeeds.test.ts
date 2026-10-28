@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { WaypointClient } from "../src/api/client";
 import { SocketFactory, SocketHandlers, Scheduler, LiveSocket, socketUrl } from "../src/api/liveSocket";
-import { ConversationFeed, SessionsFeed, bridgePages } from "../src/hooks/sessionFeeds";
+import { ConversationFeed, SessionsFeed, bridgePages, turnPages } from "../src/hooks/sessionFeeds";
+import { chatExchanges } from "../src/domain/chatPresentation";
 import { transcript } from "../src/domain/transcript";
 import { eventWire, sessionWire, metadataWire } from "./fixtures/conversation";
 
@@ -74,17 +75,32 @@ test("hydrates only after authenticated snapshot and merges buffered REST/WS ove
 const range = (from: number, to: number) =>
   Array.from({ length: Math.max(0, to - from + 1) }, (_, index) => from + index);
 // A session whose history is served in pages of `size` events, newest first, as Waypoint does.
-function pagedServer(size: number, last: number) {
-  const server = { last, fail: false, queries: [] as string[] };
+// `prompts` are the sequences that are user messages; `hold` delays the next events response.
+function pagedServer(size: number, last: number, prompts: number[] = []) {
+  const server = {
+    last,
+    fail: false,
+    gone: false,
+    queries: [] as string[],
+    hold: undefined as Promise<void> | undefined,
+  };
   const client = new WaypointClient(connection.apiUrl, async (url) => {
     const path = new URL(String(url));
-    if (!path.pathname.endsWith("/events")) return response({ session: sessionWire() });
+    if (!path.pathname.endsWith("/events"))
+      return server.gone ? response({ detail: "session not found" }, 404) : response({ session: sessionWire() });
     server.queries.push(path.search);
+    const hold = server.hold;
+    server.hold = undefined;
+    await hold;
     if (server.fail) return response({ detail: "unavailable" }, 503);
     const end = Number(path.searchParams.get("before_sequence") ?? server.last + 1) - 1;
     const start = Math.max(1, end - size + 1);
     return response({
-      events: range(start, end).map((sequence) => eventWire(sequence, "agent_output", ".", `item-${sequence}`)),
+      events: range(start, end).map((sequence) =>
+        prompts.includes(sequence)
+          ? eventWire(sequence, "user_input", `prompt-${sequence}`, "")
+          : eventWire(sequence, "agent_output", ".", `item-${sequence}`),
+      ),
       has_more: start > 1,
     });
   });
@@ -508,4 +524,122 @@ test("an open conversation notices its session was deleted elsewhere", async () 
   hidden.start();
   hidden.stop();
   assert.equal(idle.jobs.size, 0);
+});
+
+const olderQueries = (server: { queries: string[] }) =>
+  server.queries.filter((query) => query.includes("before_sequence")).length;
+const exchangeIds = (feed: ConversationFeed) =>
+  chatExchanges(transcript(feed.getSnapshot().events), feed.getSnapshot().gaps).map((exchange) => exchange.id);
+function released() {
+  let release = () => undefined as void;
+  const hold = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { hold, release };
+}
+
+test("loading an earlier turn reads past activity whose prompt is on an earlier page", async () => {
+  const f = fixture();
+  const { server, client } = pagedServer(3, 12, [5, 11]);
+  const feed = new ConversationFeed(connection, "demo", client, f);
+  await resume(f, feed);
+  assert.deepEqual(exchangeIds(feed), ["assistant:item-10", "sequence:11"]);
+  assert.equal(await feed.loadOlderTurn(), "loaded");
+  assert.equal(olderQueries(server), 2);
+  assert.deepEqual(exchangeIds(feed), ["assistant:item-4", "sequence:5", "sequence:11"]);
+  assert.equal(feed.getSnapshot().loadingOlder, false);
+  feed.stop();
+});
+
+test("loading an earlier turn stops at the page cap or the start of history", async () => {
+  const f = fixture();
+  const long = pagedServer(3, 30);
+  const feed = new ConversationFeed(connection, "demo", long.client, f);
+  await resume(f, feed);
+  assert.equal(await feed.loadOlderTurn(), "loaded");
+  assert.equal(olderQueries(long.server), turnPages);
+  assert.equal(feed.getSnapshot().hasMore, true);
+  feed.stop();
+
+  const short = pagedServer(3, 6);
+  const shortFeed = new ConversationFeed(connection, "demo", short.client, f);
+  await resume(f, shortFeed);
+  assert.equal(await shortFeed.loadOlderTurn(), "loaded");
+  assert.equal(olderQueries(short.server), 1);
+  assert.equal(shortFeed.getSnapshot().hasMore, false);
+  assert.equal(await shortFeed.loadOlderTurn(), "skipped");
+  shortFeed.stop();
+});
+
+test("a failed page stops loading an earlier turn without retrying", async () => {
+  const f = fixture();
+  const { server, client } = pagedServer(3, 30);
+  const feed = new ConversationFeed(connection, "demo", client, f);
+  await resume(f, feed);
+  server.fail = true;
+  assert.equal(await feed.loadOlderTurn(), "failed");
+  assert.equal(olderQueries(server), 1);
+  assert.equal(feed.getSnapshot().loadingOlder, false);
+  assert.ok(feed.getSnapshot().error);
+  feed.stop();
+});
+
+test("reloading while an earlier turn loads abandons the walk", async () => {
+  const f = fixture();
+  const { server, client } = pagedServer(3, 30);
+  const feed = new ConversationFeed(connection, "demo", client, f);
+  await resume(f, feed);
+  const { hold, release } = released();
+  server.hold = hold;
+  const walk = feed.loadOlderTurn();
+  await tick();
+  feed.reload();
+  release();
+  assert.equal(await walk, "stale");
+  for (let index = 0; index < 20; index++) await tick();
+  assert.equal(olderQueries(server), 1);
+  assert.deepEqual(sequences(feed), [28, 29, 30]);
+  assert.equal(feed.getSnapshot().loadingOlder, false);
+  feed.stop();
+});
+
+test("a session deleted while an earlier turn loads stops loading", async () => {
+  const f = fixture();
+  const watch = fixture();
+  const { server, client } = pagedServer(3, 30);
+  const feed = new ConversationFeed(connection, "demo", client, { ...f, watch: watch.scheduler });
+  await resume(f, feed);
+  const { hold, release } = released();
+  server.hold = hold;
+  const walk = feed.loadOlderTurn();
+  server.gone = true;
+  watch.reconnect();
+  await tick();
+  release();
+  assert.equal(await walk, "stale");
+  assert.equal(feed.getSnapshot().error?.kind, "not-found");
+  assert.equal(feed.getSnapshot().loadingOlder, false);
+  feed.stop();
+});
+
+test("one earlier turn loads at a time and live turns don't end the walk", async () => {
+  const f = fixture();
+  const { server, client } = pagedServer(3, 30);
+  const feed = new ConversationFeed(connection, "demo", client, f);
+  await resume(f, feed);
+  const { hold, release } = released();
+  server.hold = hold;
+  const loading: boolean[] = [];
+  const unsubscribe = feed.subscribe(() => loading.push(feed.getSnapshot().loadingOlder));
+  const walk = feed.loadOlderTurn();
+  assert.equal(feed.loadOlderTurn(), walk);
+  assert.equal(await feed.loadOlder(), "skipped");
+  f.send("event", { event: eventWire(31, "user_input", "live prompt", "") });
+  release();
+  assert.equal(await walk, "loaded");
+  unsubscribe();
+  assert.equal(olderQueries(server), turnPages);
+  assert.deepEqual(loading.slice(0, -1), Array(loading.length - 1).fill(true));
+  assert.equal(loading.at(-1), false);
+  feed.stop();
 });

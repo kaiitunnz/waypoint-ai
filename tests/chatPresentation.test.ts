@@ -1,6 +1,21 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { chatExchanges, chatMarkdown, conversationMarkdown, previewMessageLimit } from "../src/domain/chatPresentation";
+import {
+  ChatItems,
+  chatExchanges,
+  chatMarkdown,
+  chatSelectedId,
+  chatSelectionChange,
+  conversationItem,
+  conversationMarkdown,
+  loadEarlierItem,
+  previewMessageLimit,
+  resolveTurnId,
+  selectLoadedTurn,
+  turnItem,
+  turnPreview,
+  turnTitle,
+} from "../src/domain/chatPresentation";
 import { transcript } from "../src/domain/transcript";
 import { parseEvent } from "../src/api/sessions";
 import { eventWire } from "./fixtures/conversation";
@@ -140,4 +155,109 @@ test("activity after a gap starts its own exchange with a marker", () => {
     [false, true, true],
     "each gap is marked",
   );
+});
+
+const exchangesOf = (...events: ReturnType<typeof event>[]) => chatExchanges(transcript(events));
+const items = (exchanges: ReturnType<typeof chatExchanges>, extra: Partial<ChatItems> = {}): ChatItems => ({
+  exchanges,
+  loadEarlier: false,
+  auxiliary: [],
+  ...extra,
+});
+
+test("turn titles show the prompt's first line as plain text", () => {
+  const [multiline, blank, empty, activity] = [
+    exchangesOf(event(1, "user_input", "\n  **Fix**   the   build \nand more")),
+    exchangesOf(event(1, "user_input", "   \n\n")),
+    exchangesOf(event(1, "user_input", "")),
+    exchangesOf(event(1, "agent_output", "Resumed work")),
+  ].map((exchanges) => exchanges[0]);
+  assert.equal(turnTitle(multiline), "**Fix** the build");
+  assert.equal(turnTitle(blank), "Message");
+  assert.equal(turnTitle(empty), "Message");
+  assert.equal(turnTitle(activity), "Activity");
+});
+
+test("turn previews clip the prompt and the first reply", () => {
+  const [turn] = exchangesOf(
+    event(1, "user_input", "Question ".repeat(100)),
+    event(2, "agent_output", "```ts\n" + "code();\n".repeat(100)),
+  );
+  const preview = turnPreview(turn);
+  assert.ok(preview.length < 900);
+  assert.ok(preview.startsWith("**You**"));
+  assert.ok(preview.includes("**Waypoint**"));
+  assert.ok(preview.trimEnd().endsWith("```"));
+  assert.equal(turnPreview(exchangesOf(event(1, "tool_call", "ls"))[0]), "_Activity_");
+});
+
+test("a turn id merged into an earlier prompt's exchange resolves to it", () => {
+  const before = exchangesOf(event(3, "agent_output", "tail"), event(4, "user_input", "Next"));
+  const activity = before[0].id;
+  const after = exchangesOf(
+    event(1, "user_input", "First"),
+    event(3, "agent_output", "tail"),
+    event(4, "user_input", "Next"),
+  );
+  assert.equal(resolveTurnId(after, activity), after[0].id);
+  assert.equal(resolveTurnId(after, after[1].id), after[1].id);
+  assert.equal(resolveTurnId(after, "missing"), undefined);
+  assert.equal(
+    chatSelectedId({ following: false, selection: turnItem(activity) }, items(after)),
+    turnItem(after[0].id),
+  );
+});
+
+test("the chat follows the newest turn until another row is chosen", () => {
+  const two = exchangesOf(event(1, "user_input", "One"), event(2, "user_input", "Two"));
+  const three = exchangesOf(
+    event(1, "user_input", "One"),
+    event(2, "user_input", "Two"),
+    event(3, "user_input", "Three"),
+  );
+  const following = { following: true };
+  assert.equal(chatSelectedId(following, items([])), conversationItem);
+  assert.equal(chatSelectedId(following, items(two)), turnItem(two[1].id));
+  assert.equal(chatSelectedId(following, items(three)), turnItem(three[2].id));
+  // Raycast echoing the chat's own choice, or naming a row that isn't listed, changes nothing.
+  assert.equal(chatSelectionChange(following, turnItem(two[1].id), items(two)), undefined);
+  assert.equal(chatSelectionChange(following, "turn:gone", items(two)), undefined);
+  assert.equal(chatSelectionChange(following, undefined, items(two)), undefined);
+  const older = chatSelectionChange(following, turnItem(two[0].id), items(two))!;
+  assert.deepEqual(older, { following: false, selection: turnItem(two[0].id) });
+  assert.equal(chatSelectedId(older, items(three)), turnItem(three[0].id));
+  assert.deepEqual(chatSelectionChange(older, turnItem(two[1].id), items(two)), { following: true });
+  assert.deepEqual(chatSelectionChange(older, conversationItem, items(two)), {
+    following: false,
+    selection: conversationItem,
+  });
+});
+
+test("rows that disappear fall back to a listed row", () => {
+  const turns = exchangesOf(event(1, "user_input", "One"), event(2, "user_input", "Two"));
+  const loadEarlier = { following: false, selection: loadEarlierItem };
+  assert.equal(chatSelectedId(loadEarlier, items(turns, { loadEarlier: true })), loadEarlierItem);
+  assert.equal(chatSelectedId(loadEarlier, items(turns)), turnItem(turns[0].id));
+  const interaction = { following: false, selection: "interaction:approval" };
+  assert.equal(
+    chatSelectedId(interaction, items(turns, { auxiliary: ["interaction:approval"] })),
+    interaction.selection,
+  );
+  assert.equal(chatSelectedId(interaction, items(turns)), turnItem(turns[1].id));
+  // An unsupported session lists no turns, so the selection settles on the conversation.
+  assert.equal(chatSelectedId({ following: false, selection: turnItem(turns[0].id) }, items([])), conversationItem);
+});
+
+test("loaded earlier turns take the selection only from the Load Earlier row", () => {
+  const turns = exchangesOf(event(1, "user_input", "One"), event(2, "user_input", "Two"));
+  assert.deepEqual(selectLoadedTurn({ following: false, selection: loadEarlierItem }, turns), {
+    following: false,
+    selection: turnItem(turns[0].id),
+  });
+  const [only] = exchangesOf(event(1, "agent_output", "Activity"));
+  assert.deepEqual(selectLoadedTurn({ following: false, selection: loadEarlierItem }, [only]), { following: true });
+  const moved = { following: false, selection: conversationItem };
+  assert.equal(selectLoadedTurn(moved, turns), moved);
+  const following = { following: true };
+  assert.equal(selectLoadedTurn(following, turns), following);
 });

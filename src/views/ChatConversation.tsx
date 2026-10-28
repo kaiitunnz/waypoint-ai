@@ -2,7 +2,25 @@ import { Action, ActionPanel, Detail, Icon, Keyboard, List, useNavigation } from
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ServerMetadata } from "../api/contracts";
 import { Session } from "../api/sessions";
-import { chatExchanges, chatMarkdown, conversationMarkdown, previewMessageLimit } from "../domain/chatPresentation";
+import {
+  ChatExchange,
+  ChatItems,
+  ChatSelection,
+  chatExchanges,
+  chatSelectedId,
+  chatSelectionChange,
+  conversationItem,
+  conversationMarkdown,
+  exchangeResponse,
+  loadEarlierItem,
+  previewMessageLimit,
+  resolveTurnId,
+  selectLoadedTurn,
+  turnItem,
+  turnMarkdown,
+  turnPreview,
+  turnTitle,
+} from "../domain/chatPresentation";
 import { transcript } from "../domain/transcript";
 import { isStructured } from "../domain/sessions";
 import { useConversationFeed } from "../hooks/useSessionFeeds";
@@ -22,7 +40,6 @@ import { sessionUrl } from "../domain/sessions";
 import { ConversationContent } from "./Conversation";
 import { EditSession, NewChatOption } from "./EditSession";
 
-type ReadingMode = "conversation" | "latest";
 export interface ConversationActionContext {
   setActive: (active: boolean) => void;
   // False on interaction rows, which bring their own Open in Waypoint.
@@ -37,35 +54,41 @@ export interface SessionActionContext {
 
 function FullConversation({
   feed,
-  mode,
+  turnId,
   showActivity,
 }: {
   feed: ConversationFeed;
-  mode: ReadingMode;
+  turnId?: string;
   showActivity: boolean;
 }) {
   const state = useSyncExternalStore(feed.subscribe, feed.getSnapshot);
   const exchanges = chatExchanges(transcript(state.events), state.gaps);
   const waiting = !!state.session && ["starting", "running"].includes(state.session.status);
-  const response = exchanges
-    .at(-1)
-    ?.rows.filter((row) => row.kind === "assistant")
-    .map((row) => row.text)
-    .join("\n\n");
+  const resolved = turnId === undefined ? undefined : resolveTurnId(exchanges, turnId);
+  const exchange = exchanges.find((item) => item.id === resolved);
+  const response = exchangeResponse(turnId === undefined ? exchanges.at(-1) : exchange);
   return (
     <Detail
-      navigationTitle={mode === "conversation" ? "Conversation" : "Latest Response"}
+      navigationTitle={turnId === undefined ? "Conversation" : exchange ? turnTitle(exchange) : "Turn"}
       markdown={
-        mode === "conversation"
+        turnId === undefined
           ? conversationMarkdown(exchanges, showActivity, waiting)
-          : chatMarkdown(exchanges.at(-1), showActivity, waiting)
+          : exchange
+            ? turnMarkdown(exchange, showActivity, waiting && exchange === exchanges.at(-1))
+            : ""
       }
       isLoading={state.loading}
       actions={
         response ? (
           <ActionPanel>
-            <Action.CopyToClipboard title="Copy Latest Response" content={response} />
-            <Action.Paste title="Paste Latest Response" content={response} />
+            <Action.CopyToClipboard
+              title={turnId === undefined ? "Copy Latest Response" : "Copy Response"}
+              content={response}
+            />
+            <Action.Paste
+              title={turnId === undefined ? "Paste Latest Response" : "Paste Response"}
+              content={response}
+            />
           </ActionPanel>
         ) : undefined
       }
@@ -144,8 +167,7 @@ export function ChatConversation({
     if (state.session) onSession?.(state.session);
   }, [state.session?.status, state.session?.transport, busy]);
   const interactionUrl = sessionId ? sessionUrl(connection.frontendUrl, sessionId) : undefined;
-  const [mode, setMode] = useState<ReadingMode>("conversation");
-  const [interactionSelection, setInteractionSelection] = useState<string>();
+  const [selection, setSelection] = useState<ChatSelection>({ following: true });
   const [showActivity, setShowActivity] = useState(false);
   const exchanges = useMemo(() => chatExchanges(transcript(state.events), state.gaps), [state.events, state.gaps]);
   const session = state.session;
@@ -183,22 +205,21 @@ export function ChatConversation({
     .filter(Boolean)
     .join(" · ");
   const latest = exchanges.at(-1);
-  const response = latest?.rows
-    .filter((row) => row.kind === "assistant")
-    .map((row) => row.text)
-    .join("\n\n");
+  const response = exchangeResponse(latest);
   const turns = exchanges.filter((exchange) => exchange.prompt).length;
+  const items: ChatItems = {
+    exchanges: unsupported ? [] : exchanges,
+    loadEarlier: state.hasMore && !unsupported,
+    auxiliary: interactionItemIds(interactionState, sessionId),
+  };
+  const selectedId = chatSelectedId(selection, items);
 
+  // A confirmed send follows the new turn whether its confirmation or its first event arrives first.
   useEffect(() => {
-    setMode("conversation");
-    setInteractionSelection(undefined);
+    setSelection({ following: true });
   }, [sessionId, revision]);
 
-  useEffect(() => {
-    if (interactionSelection && !interactionItemIds(interactionState, sessionId).includes(interactionSelection))
-      setInteractionSelection(undefined);
-  }, [interactionState, interactionSelection, sessionId]);
-  const renderMarkdown = (readingMode: ReadingMode) =>
+  const renderMarkdown = (target: "conversation" | ChatExchange) =>
     [
       problem
         ? `> **Needs attention**\n>\n${problem
@@ -209,12 +230,11 @@ export function ChatConversation({
       attention.length ? `> **Needs attention**\n>\n${attention.map((line) => `> ${line}`).join("\n")}\n\n---` : "",
       unsupported
         ? `## This conversation needs Waypoint\n\nIts interface changed. ${interactionUrl ? "Open it in Waypoint to continue." : "Add a frontend URL in Manage Servers to open it in Waypoint."}`
-        : (exchanges.length
-            ? readingMode === "conversation"
-              ? conversationMarkdown(exchanges, showActivity, waiting, previewMessageLimit)
-              : chatMarkdown(latest, showActivity, waiting, previewMessageLimit)
-            : "") || (session && !turns ? sessionIntro(session, metadata) : emptyMarkdown || ""),
-      waiting ? "_Working…_" : "",
+        : target === "conversation"
+          ? (exchanges.length ? conversationMarkdown(exchanges, showActivity, waiting, previewMessageLimit) : "") ||
+            (session && !turns ? sessionIntro(session, metadata) : emptyMarkdown || "")
+          : turnMarkdown(target, showActivity, waiting && target === latest, previewMessageLimit),
+      waiting && (target === "conversation" || target === latest) ? "_Working…_" : "",
     ]
       .filter(Boolean)
       .join("\n\n");
@@ -236,139 +256,171 @@ export function ChatConversation({
   const sendAction = composer.text.trim() && composer.canSend && !missing && (
     <Action title="Send Message" icon={Icon.ArrowUp} onAction={composer.onSend} />
   );
-  // Interaction rows bring their own review actions, so they omit the Needs Attention section.
-  const otherActions = (withAttention: boolean) => (
-    <>
-      {!composer.text.trim() && !status && response && (
-        <Action.CopyToClipboard title="Copy Latest Response" content={response} />
-      )}
-      {response && (
-        <Action.Paste
-          title="Paste Latest Response"
-          content={response}
-          shortcut={{ modifiers: ["cmd", "shift"], key: "p" }}
-        />
-      )}
-      {actions?.({ setActive, browser: withAttention })}
-      {withAttention && attention.length > 0 && attentionActions}
-      <ActionPanel.Section title="Conversation">
-        {turns > 1 && (
-          <Action
-            title={mode === "conversation" ? "Show Latest Response" : "Show Conversation"}
-            icon={mode === "conversation" ? Icon.ArrowDownCircle : Icon.Message}
-            shortcut={{ modifiers: ["cmd", "shift"], key: "f" }}
-            onAction={() => setMode((current) => (current === "conversation" ? "latest" : "conversation"))}
-          />
-        )}
-        <Action
-          title={showActivity ? "Hide Activity" : "Show Activity"}
-          icon={Icon.Hammer}
-          onAction={() => setShowActivity((value) => !value)}
-        />
-        {exchanges.length > 0 && (
-          <Action.Push
-            title="Read Conversation at Full Width"
-            icon={Icon.Maximize}
-            shortcut={Keyboard.Shortcut.Common.Open}
-            target={<FullConversation feed={feed} mode={mode} showActivity={showActivity} />}
-            onPop={onReturn}
-          />
-        )}
-        {sessionId && (
-          <Action.Push
-            title="Conversation History"
-            icon={Icon.List}
-            shortcut={{ modifiers: ["cmd", "shift"], key: "h" }}
-            target={
-              <ConversationContent
-                connection={connection}
-                sessionId={sessionId}
-                metadata={metadata}
-                refreshConnections={refreshConnections}
-                interactions={interactionController}
-              />
-            }
-            onPush={() => setActive(false)}
-            onPop={() => {
-              setActive(true);
-              onReturn?.();
-            }}
-          />
-        )}
-        {state.hasMore && <Action title="Load Earlier Messages" icon={Icon.Clock} onAction={() => feed.loadOlder()} />}
-        <Action
-          title="Refresh Conversation"
-          icon={Icon.ArrowClockwise}
-          shortcut={Keyboard.Shortcut.Common.Refresh}
-          onAction={() => {
-            feed.retry();
-            void interactionController.refresh();
-          }}
-        />
-        <Action
-          title="Reload Conversation"
-          icon={Icon.RotateClockwise}
-          onAction={() => {
-            feed.reload();
-            void interactionController.refresh();
-          }}
-        />
-        {session && !unsupported && !missing && settings?.available !== false && (
-          <Action.Push
-            title="Edit Current Session"
-            icon={Icon.Gear}
-            shortcut={{ modifiers: ["cmd", "shift"], key: "," }}
-            target={
-              <EditSession
-                connection={connection}
-                sessionId={session.id}
-                newChat={
-                  settings?.newChat && {
-                    ...settings.newChat,
-                    open: (view) => {
-                      handingOff.current = true;
-                      setActive(false);
-                      push(view, () => {
-                        handingOff.current = false;
-                        setActive(true);
-                      });
-                    },
-                  }
-                }
-                onApplied={() => {
-                  feed.retry();
-                  onReturn?.();
-                }}
-              />
-            }
-            onPush={() => setActive(false)}
-            onPop={() => {
-              if (!handingOff.current) setActive(true);
-              onReturn?.();
-            }}
-          />
-        )}
-        {session && (
-          <Action.Push
-            title="Conversation Details"
-            icon={Icon.Info}
-            target={<Detail markdown={sessionSummary(session)} />}
-            onPush={() => setActive(false)}
-            onPop={() => {
-              setActive(true);
-              onReturn?.();
-            }}
-          />
-        )}
-      </ActionPanel.Section>
-      {session && !missing && sessionActions?.({ setActive, session, feed })}
-    </>
+  const loadEarlierTurns = (
+    <Action
+      title="Load Earlier Turns"
+      icon={Icon.Clock}
+      onAction={async () => {
+        if ((await feed.loadOlderTurn()) !== "loaded") return;
+        const snapshot = feed.getSnapshot();
+        const loaded = chatExchanges(transcript(snapshot.events), snapshot.gaps);
+        setSelection((current) => selectLoadedTurn(current, loaded));
+      }}
+    />
   );
-  const actionPanel = (
+  // `row` is the row the panel belongs to: a turn's panel copies and reads that turn; interaction rows bring their
+  // own review actions, so they omit the Needs Attention section.
+  const otherActions = (row: "conversation" | "interaction" | "load-earlier" | ChatExchange) => {
+    const turn = typeof row === "string" ? undefined : row;
+    const withAttention = row !== "interaction";
+    const shown = turn ? exchangeResponse(turn) : response;
+    return (
+      <>
+        {!composer.text.trim() && !status && shown && (
+          <Action.CopyToClipboard title={turn ? "Copy Response" : "Copy Latest Response"} content={shown} />
+        )}
+        {shown && (
+          <Action.Paste
+            title={turn ? "Paste Response" : "Paste Latest Response"}
+            content={shown}
+            shortcut={{ modifiers: ["cmd", "shift"], key: "p" }}
+          />
+        )}
+        {actions?.({ setActive, browser: withAttention })}
+        {withAttention && attention.length > 0 && attentionActions}
+        <ActionPanel.Section title="Conversation">
+          {items.exchanges.length > 0 &&
+            (turn || row === "load-earlier" ? (
+              <Action
+                title="Show Conversation"
+                icon={Icon.Message}
+                shortcut={{ modifiers: ["cmd", "shift"], key: "f" }}
+                onAction={() => setSelection({ following: false, selection: conversationItem })}
+              />
+            ) : (
+              <Action
+                title="Show Latest Turn"
+                icon={Icon.ArrowDownCircle}
+                shortcut={{ modifiers: ["cmd", "shift"], key: "f" }}
+                onAction={() => setSelection({ following: true })}
+              />
+            ))}
+          <Action
+            title={showActivity ? "Hide Activity" : "Show Activity"}
+            icon={Icon.Hammer}
+            onAction={() => setShowActivity((value) => !value)}
+          />
+          {exchanges.length > 0 && (
+            <Action.Push
+              title="Read Conversation at Full Width"
+              icon={Icon.Maximize}
+              shortcut={Keyboard.Shortcut.Common.Open}
+              target={<FullConversation feed={feed} turnId={turn?.id} showActivity={showActivity} />}
+              onPop={onReturn}
+            />
+          )}
+          {sessionId && (
+            <Action.Push
+              title="Conversation History"
+              icon={Icon.List}
+              shortcut={{ modifiers: ["cmd", "shift"], key: "h" }}
+              target={
+                <ConversationContent
+                  connection={connection}
+                  sessionId={sessionId}
+                  metadata={metadata}
+                  refreshConnections={refreshConnections}
+                  interactions={interactionController}
+                />
+              }
+              onPush={() => setActive(false)}
+              onPop={() => {
+                setActive(true);
+                onReturn?.();
+              }}
+            />
+          )}
+          {state.hasMore && row !== "load-earlier" && (
+            <Action title="Load Earlier Messages" icon={Icon.Clock} onAction={() => feed.loadOlder()} />
+          )}
+          <Action
+            title="Refresh Conversation"
+            icon={Icon.ArrowClockwise}
+            shortcut={Keyboard.Shortcut.Common.Refresh}
+            onAction={() => {
+              feed.retry();
+              void interactionController.refresh();
+            }}
+          />
+          <Action
+            title="Reload Conversation"
+            icon={Icon.RotateClockwise}
+            onAction={() => {
+              feed.reload();
+              void interactionController.refresh();
+            }}
+          />
+          {session && !unsupported && !missing && settings?.available !== false && (
+            <Action.Push
+              title="Edit Current Session"
+              icon={Icon.Gear}
+              shortcut={{ modifiers: ["cmd", "shift"], key: "," }}
+              target={
+                <EditSession
+                  connection={connection}
+                  sessionId={session.id}
+                  newChat={
+                    settings?.newChat && {
+                      ...settings.newChat,
+                      open: (view) => {
+                        handingOff.current = true;
+                        setActive(false);
+                        push(view, () => {
+                          handingOff.current = false;
+                          setActive(true);
+                        });
+                      },
+                    }
+                  }
+                  onApplied={() => {
+                    feed.retry();
+                    onReturn?.();
+                  }}
+                />
+              }
+              onPush={() => setActive(false)}
+              onPop={() => {
+                if (!handingOff.current) setActive(true);
+                onReturn?.();
+              }}
+            />
+          )}
+          {session && (
+            <Action.Push
+              title="Conversation Details"
+              icon={Icon.Info}
+              target={<Detail markdown={sessionSummary(session)} />}
+              onPush={() => setActive(false)}
+              onPop={() => {
+                setActive(true);
+                onReturn?.();
+              }}
+            />
+          )}
+        </ActionPanel.Section>
+        {session && !missing && sessionActions?.({ setActive, session, feed })}
+      </>
+    );
+  };
+  const panel = (row: "conversation" | "load-earlier" | ChatExchange) => (
     <ActionPanel>
       {sendAction}
-      {otherActions(true)}
+      {row === "load-earlier" && loadEarlierTurns}
+      {otherActions(row)}
     </ActionPanel>
+  );
+  const detail = (id: string, full: () => string, preview: () => string) => (
+    <List.Item.Detail markdown={id === selectedId ? full() : preview()} />
   );
 
   return (
@@ -380,13 +432,11 @@ export function ChatConversation({
       filtering={false}
       searchBarAccessory={composer.accessory}
       isShowingDetail
-      isLoading={busy || (!!sessionId && state.loading)}
-      selectedItemId={interactionSelection ?? mode}
+      isLoading={busy || (!!sessionId && (state.loading || state.loadingOlder))}
+      selectedItemId={selectedId}
       onSelectionChange={(id) => {
-        if (id === "conversation" || id === "latest") {
-          setInteractionSelection(undefined);
-          setMode(id);
-        } else if (id?.startsWith("interaction:")) setInteractionSelection(id);
+        const next = chatSelectionChange(selection, id ?? undefined, items);
+        if (next) setSelection(next);
       }}
     >
       <InteractionSection
@@ -394,33 +444,63 @@ export function ChatConversation({
         sessionId={sessionId}
         url={interactionUrl}
         leading={sendAction}
-        trailing={otherActions(false)}
+        trailing={otherActions("interaction")}
       />
       <List.Section
         title="Conversation"
         subtitle={session?.status === "running" ? "Working…" : session?.status.replaceAll("_", " ")}
       >
         <List.Item
-          id="conversation"
+          id={conversationItem}
           icon={Icon.Message}
           title={session?.title || (sessionId ? "Conversation" : "New conversation")}
           accessories={[
             ...(hasDraft ? [{ icon: Icon.Pencil, tooltip: "Draft in progress" }] : []),
             ...(turns ? [{ text: `${turns}${state.hasMore ? "+" : ""} ${turns === 1 ? "turn" : "turns"}` }] : []),
           ]}
-          detail={<List.Item.Detail markdown={renderMarkdown("conversation")} />}
-          actions={actionPanel}
+          detail={detail(
+            conversationItem,
+            () => renderMarkdown("conversation"),
+            () => (exchanges.length && !unsupported ? turnPreview(latest) : renderMarkdown("conversation")),
+          )}
+          actions={panel("conversation")}
         />
-        {turns > 1 && (
-          <List.Item
-            id="latest"
-            icon={Icon.ArrowDownCircle}
-            title="Latest response"
-            detail={<List.Item.Detail markdown={renderMarkdown("latest")} />}
-            actions={actionPanel}
-          />
-        )}
       </List.Section>
+      {(items.exchanges.length > 0 || items.loadEarlier) && (
+        <List.Section title="Turns">
+          {items.loadEarlier && (
+            <List.Item
+              id={loadEarlierItem}
+              icon={Icon.Clock}
+              title="Load Earlier Turns"
+              detail={
+                <List.Item.Detail
+                  markdown={state.loadingOlder ? "_Loading earlier turns…_" : "Earlier turns aren't loaded."}
+                />
+              }
+              actions={panel("load-earlier")}
+            />
+          )}
+          {items.exchanges.map((exchange) => (
+            <List.Item
+              key={exchange.id}
+              id={turnItem(exchange.id)}
+              icon={exchange.prompt ? Icon.Person : Icon.Hammer}
+              title={turnTitle(exchange)}
+              accessories={[
+                ...(exchange.afterGap ? [{ icon: Icon.Warning, tooltip: "Earlier activity isn't loaded" }] : []),
+                ...(waiting && exchange === latest ? [{ text: "Working…" }] : []),
+              ]}
+              detail={detail(
+                turnItem(exchange.id),
+                () => renderMarkdown(exchange),
+                () => turnPreview(exchange),
+              )}
+              actions={panel(exchange)}
+            />
+          ))}
+        </List.Section>
+      )}
     </List>
   );
 }

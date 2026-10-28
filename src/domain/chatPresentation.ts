@@ -193,6 +193,13 @@ export function toolMarkdown(row: TranscriptRow, limit?: number, fullView = full
   return `### ${plainText(row.title)}${facts ? `\n\n${facts}` : ""}\n\n${body}${more(row.text, limit, fullView)}`;
 }
 
+// Trailing spaces make hard breaks, so multiline prompts keep their lines inside the quote.
+const promptMarkdown = (prompt: TranscriptRow, limit?: number, footer = more(prompt.text, limit)) =>
+  `**You**\n\n${plainText(clip(prompt.text, limit))
+    .split("\n")
+    .map((line) => `> ${line}  `)
+    .join("\n")}${footer}`;
+
 export function chatMarkdown(
   exchange: ChatExchange | undefined,
   showActivity = false,
@@ -202,13 +209,7 @@ export function chatMarkdown(
   if (!exchange) return "";
   const parts: string[] = [];
   if (exchange.prompt) {
-    parts.push(
-      `**You**\n\n${plainText(clip(exchange.prompt.text, limit))
-        .split("\n")
-        // Trailing spaces make hard breaks, so multiline prompts keep their lines inside the quote.
-        .map((line) => `> ${line}  `)
-        .join("\n")}${more(exchange.prompt.text, limit)}`,
-    );
+    parts.push(promptMarkdown(exchange.prompt, limit));
     parts.push("---");
   }
   let assistant = false;
@@ -241,6 +242,16 @@ export function chatMarkdown(
   return parts.join("\n\n");
 }
 
+// One exchange as the conversation shows it, including the note that activity before it isn't loaded.
+export function turnMarkdown(exchange: ChatExchange, showActivity = false, waiting = false, limit?: number): string {
+  return [
+    exchange.afterGap ? "_Earlier activity isn't loaded._" : "",
+    chatMarkdown(exchange, showActivity, waiting, limit),
+  ]
+    .filter(Boolean)
+    .join("\n\n---\n\n");
+}
+
 export function conversationMarkdown(
   exchanges: ChatExchange[],
   showActivity = false,
@@ -248,14 +259,111 @@ export function conversationMarkdown(
   limit?: number,
 ): string {
   return exchanges
-    .map((exchange, index) =>
-      [
-        exchange.afterGap ? "_Earlier activity isn't loaded._" : "",
-        chatMarkdown(exchange, showActivity, waiting && index === exchanges.length - 1, limit),
-      ]
-        .filter(Boolean)
-        .join("\n\n---\n\n"),
-    )
+    .map((exchange, index) => turnMarkdown(exchange, showActivity, waiting && index === exchanges.length - 1, limit))
     .filter(Boolean)
     .join("\n\n---\n\n");
+}
+
+export function turnTitle(exchange: ChatExchange): string {
+  if (!exchange.prompt) return "Activity";
+  return (
+    exchange.prompt.text
+      .split("\n")
+      .map((line) => line.replace(/\s+/g, " ").trim())
+      .find(Boolean) ?? "Message"
+  );
+}
+
+export function exchangeResponse(exchange: ChatExchange | undefined): string {
+  return (exchange?.rows ?? [])
+    .filter((row) => row.kind === "assistant")
+    .map((row) => row.text)
+    .join("\n\n");
+}
+
+const previewLimit = 280;
+
+// Shown on rows other than the selected one, so a selection the chat hasn't caught up with yet never shows an empty
+// pane while staying cheap to send on every update.
+export function turnPreview(exchange: ChatExchange | undefined): string {
+  if (!exchange) return "";
+  const reply = exchange.rows.find((row) => row.kind === "assistant" && row.text);
+  return (
+    [
+      exchange.prompt ? promptMarkdown(exchange.prompt, previewLimit, "") : "",
+      reply ? `**Waypoint**\n\n${clip(reply.text, previewLimit, true)}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n") || `_${plainText(turnTitle(exchange))}_`
+  );
+}
+
+// An exchange is named after its first row, so loading the page with an "Activity" exchange's prompt merges it into
+// that prompt's exchange; a turn id that no longer names one moves to the exchange now holding its row.
+export function resolveTurnId(exchanges: ChatExchange[], id: string): string | undefined {
+  if (exchanges.some((exchange) => exchange.id === id)) return id;
+  return exchanges.find((exchange) => exchange.rows.some((row) => row.id === id))?.id;
+}
+
+export const conversationItem = "conversation";
+export const loadEarlierItem = "load-earlier";
+export const turnItem = (id: string) => `turn:${id}`;
+
+// `following` keeps the newest turn selected as turns arrive; otherwise `selection` names the chosen row.
+export interface ChatSelection {
+  following: boolean;
+  selection?: string;
+}
+
+export interface ChatItems {
+  exchanges: ChatExchange[];
+  loadEarlier: boolean;
+  // Rows listed before the conversation, such as requests that need attention.
+  auxiliary: string[];
+}
+
+export function chatItemIds(items: ChatItems): string[] {
+  return [
+    ...items.auxiliary,
+    conversationItem,
+    ...(items.loadEarlier ? [loadEarlierItem] : []),
+    ...items.exchanges.map((exchange) => turnItem(exchange.id)),
+  ];
+}
+
+export function chatSelectedId(current: ChatSelection, items: ChatItems): string {
+  const newest = items.exchanges.at(-1);
+  const followed = newest ? turnItem(newest.id) : conversationItem;
+  const { selection } = current;
+  if (current.following || !selection) return followed;
+  if (selection === conversationItem || items.auxiliary.includes(selection)) return selection;
+  if (selection === loadEarlierItem)
+    return items.loadEarlier ? selection : items.exchanges.length ? turnItem(items.exchanges[0].id) : followed;
+  if (selection.startsWith("turn:")) {
+    const id = resolveTurnId(items.exchanges, selection.slice("turn:".length));
+    if (id) return turnItem(id);
+  }
+  return followed;
+}
+
+export function selectChatItem(id: string, exchanges: ChatExchange[]): ChatSelection {
+  const newest = exchanges.at(-1);
+  return newest && id === turnItem(newest.id) ? { following: true } : { following: false, selection: id };
+}
+
+// After earlier turns load, the oldest turn is selected unless another row was chosen while they loaded.
+export function selectLoadedTurn(current: ChatSelection, exchanges: ChatExchange[]): ChatSelection {
+  if (current.selection !== loadEarlierItem || !exchanges.length) return current;
+  return selectChatItem(turnItem(exchanges[0].id), exchanges);
+}
+
+// Raycast reports the row it shows after every update, including the one the chat chose, so only a different known
+// row counts as the user's choice.
+export function chatSelectionChange(
+  current: ChatSelection,
+  id: string | undefined,
+  items: ChatItems,
+): ChatSelection | undefined {
+  if (!id || id === chatSelectedId(current, items) || !chatItemIds(items).includes(id)) return undefined;
+  return selectChatItem(id, items.exchanges);
 }

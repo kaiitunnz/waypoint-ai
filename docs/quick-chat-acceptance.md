@@ -26,7 +26,7 @@ The macOS Raycast pass used the development extension, disposable Waypoint API i
 | Interrupt running work                            | Session status becomes interrupted                                                                               |
 | Reattach an exited session                        | Same session becomes idle without an input event                                                                 |
 
-The native composition field and transcript share one List view. The default transcript contains all loaded user/assistant turns in chronological order. Latest Response is an explicit focused view; tools remain secondary. Server and session browsing retain the existing Raycast design. Native Markdown preserves selectable text; custom bubble styling is unsupported by Raycast. There is no separate default composition page.
+The native composition field and transcript share one List view. The conversation row contains all loaded user/assistant turns in chronological order, and each turn has its own row below it; tools remain secondary. Server and session browsing retain the existing Raycast design. Native Markdown preserves selectable text; custom bubble styling is unsupported by Raycast. There is no separate default composition page.
 
 ## Real-agent multi-turn check
 
