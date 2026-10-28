@@ -40,7 +40,7 @@ Find sessions by title, working directory, repository, branch, agent, or status.
 
 ![Browse Sessions](docs/screenshots/browse-sessions.jpg)
 
-The conversation displays loaded user and assistant turns together in chronological order, with formatted responses at full width. Show Latest Response focuses the newest turn when needed. Copy Latest Response copies the current answer. Conversation Details shows server-reported context and token usage.
+The conversation row shows the loaded turns together in chronological order. Below it, each turn has its own row titled by its prompt, oldest first. The newest turn is selected and stays selected as new turns arrive, until you choose another row. **Load Earlier Turns**, above the oldest turn, loads earlier history until another turn appears; a very long turn can take another press. **Show Conversation** and **Show Latest Turn** (⌘⇧F) switch between the conversation and the newest turn. Copy Response copies the selected turn's answer, and full-width reading shows the selected turn or the whole conversation. Conversation Details shows server-reported context and token usage.
 
 Consecutive tool calls collapse into one line marked ▸ where they happened, such as `▸ 3 commands · 2 files read · 1 file edited (+42 −7)`. **Show Activity** expands each call to its own command, path, or search pattern, with the lines an edit added and removed. Reads and edits count distinct files; the other kinds count calls. An edit that failed or was denied counts as a failed edit, not an edited file. Thinking between calls shows as its own line with a short preview, as in Waypoint, and the calls on either side are summarized separately. Questions and shared files keep their own line. Codex runs file reads as shell commands, so they count as commands.
 
@@ -94,7 +94,7 @@ If Waypoint does not confirm a response, nothing is retried. **Check Previous Ou
 
 ## Quick Chat
 
-Type in the top message field and press Enter to send. Follow-ups continue the same Waypoint session. The transcript keeps loaded turns together in chronological order, alongside the draft. Consecutive tool calls collapse into one line, as in session chats; **Show Activity** expands them. The conversation row shows its turn count; Latest Response is an optional focused view. Sending returns to the continuous conversation. Activity details, copying or pasting the latest response, full-width reading, and session information are available in Actions. The side panel shows the first 4,000 characters of a very long message; full-width reading shows all of it.
+Type in the top message field and press Enter to send. Follow-ups continue the same Waypoint session. The conversation row keeps loaded turns together in chronological order, with its turn count, and each turn has its own row below it, as in session chats. Sending selects the new turn. Consecutive tool calls collapse into one line; **Show Activity** expands them. Activity details, copying or pasting a response, full-width reading, and session information are available in Actions. The side panel shows the first 4,000 characters of a very long message; full-width reading shows all of it.
 
 ![Quick Chat](docs/screenshots/quick-chat.jpg)
 
