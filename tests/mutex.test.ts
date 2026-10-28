@@ -13,6 +13,7 @@ test("a live-pid lock with a stale heartbeat is reclaimed and its fenced holder 
   const values = new Map<string, string>();
   const storage = {
     keys: async () => [...values.keys()],
+    entries: async () => [...values],
     removeItem: async (key: string) => void values.delete(key),
     getItem: async (key: string) => values.get(key),
     setItem: async (key: string, value: string) => void values.set(key, value),

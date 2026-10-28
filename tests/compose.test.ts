@@ -8,7 +8,10 @@ import { ApiError, WaypointClient } from "../src/api/client";
 import { parseMetadata } from "../src/api/contracts";
 import {
   attachmentPolicy,
+  clipboardChoice,
+  clipboardImageName,
   composeMessage,
+  composePolicy,
   fileProblem,
   maxUploadBytes,
   mimeType,
@@ -16,9 +19,9 @@ import {
   spilledClipboardText,
 } from "../src/domain/compose";
 import { decodeQuickChat } from "../src/storage/quickChat";
-import { parseEvent } from "../src/api/sessions";
+import { parseEvent, parseSession } from "../src/api/sessions";
 import { transcript } from "../src/domain/transcript";
-import { eventWire, metadataWire } from "./fixtures/conversation";
+import { eventWire, metadataWire, sessionWire } from "./fixtures/conversation";
 
 test("composed messages keep context verbatim in fences longer than any backtick run", () => {
   assert.equal(composeMessage("  Summarize  ", []), "Summarize");
@@ -190,4 +193,84 @@ test("sent attachments keep only their ID, name and kind, and appear under the m
     "demo",
   );
   assert.equal(transcript([only])[0].text, "Attached: notes.md");
+});
+
+test("copied files beat image data, which beats text, and spilled text stays text", () => {
+  const all = { images: true, files: true };
+  const reading = { files: [], image: "none" as const, text: "" };
+  assert.deepEqual(clipboardChoice({ ...reading, files: ["/a.txt", "/b.png"], image: "present", text: "a.txt" }, all), {
+    kind: "files",
+    paths: ["/a.txt", "/b.png"],
+  });
+  assert.deepEqual(clipboardChoice({ ...reading, image: "saved", text: "A1" }, all), { kind: "image" });
+  assert.deepEqual(clipboardChoice({ ...reading, text: "plain" }, all), { kind: "text", text: "plain" });
+  assert.deepEqual(
+    clipboardChoice({ ...reading, files: ["/store/x.txt"], spilled: "/store/x.txt", text: "long" }, all),
+    {
+      kind: "text",
+      text: "long",
+    },
+  );
+  assert.deepEqual(clipboardChoice({ ...reading, text: "  " }, all), { kind: "empty" });
+  assert.deepEqual(clipboardChoice({ ...reading, failed: true }, all), { kind: "unreadable" });
+  assert.deepEqual(clipboardChoice({ ...reading, image: "present", text: "A1", failed: true }, all), {
+    kind: "text",
+    text: "A1",
+    skipped: "The image couldn't be saved.",
+  });
+  assert.deepEqual(clipboardChoice({ ...reading, image: "present", failed: true }, all), {
+    kind: "refused",
+    reason: "The image couldn't be saved.",
+  });
+});
+
+test("agents that can't take attachments refuse copied files, and copied images give way to their text", () => {
+  const none = attachmentPolicy("codex", true, true);
+  const reading = { files: [], image: "none" as const, text: "" };
+  assert.deepEqual(clipboardChoice({ ...reading, files: ["/report.pdf"], text: "report.pdf" }, none), {
+    kind: "refused",
+    reason: "Attachments don't reach this agent on a remote target.",
+  });
+  assert.deepEqual(clipboardChoice({ ...reading, image: "present", text: "a\tb" }, none), {
+    kind: "text",
+    text: "a\tb",
+    skipped: "Attachments don't reach this agent on a remote target.",
+  });
+  assert.deepEqual(clipboardChoice({ ...reading, image: "present" }, none), {
+    kind: "refused",
+    reason: "Attachments don't reach this agent on a remote target.",
+  });
+  const imagesOnly = attachmentPolicy("claude_code", true, true);
+  assert.deepEqual(clipboardChoice({ ...reading, files: ["/notes.md"] }, imagesOnly), {
+    kind: "files",
+    paths: ["/notes.md"],
+  });
+});
+
+test("clipboard images are named like screenshots, in local time without colons", () => {
+  assert.equal(clipboardImageName(new Date(2026, 9, 29, 9, 3, 7)), "Clipboard image 2026-10-29 at 09.03.07.png");
+});
+
+test("the attachment policy follows the shown session, else the defaults", () => {
+  const metadata = parseMetadata({
+    ...metadataWire,
+    launch_targets: [{ id: "ssh-1", name: "Box", kind: "ssh", auth: "key", connected: true, supported_backends: [] }],
+    backends: metadataWire.backends.map((agent) => ({
+      ...agent,
+      agent_capabilities: { supports_attachments: agent.id === "test-agent" },
+    })),
+  });
+  const defaults = decodeQuickChat().defaults;
+  assert.deepEqual(composePolicy({ defaults }, metadata), { images: true, files: true });
+  assert.equal(composePolicy({ defaults: { ...defaults, target: "ssh-1" } }, metadata).images, false);
+  const terminal = parseSession({ ...sessionWire("t"), backend: "terminal" });
+  assert.equal(composePolicy({ session: terminal, defaults }, metadata).images, false);
+  assert.deepEqual(
+    composePolicy({ session: parseSession(sessionWire("s")), defaults: { ...defaults, target: "ssh-1" } }, metadata),
+    {
+      images: true,
+      files: true,
+    },
+  );
+  assert.equal(composePolicy({ defaults }, undefined).images, false);
 });

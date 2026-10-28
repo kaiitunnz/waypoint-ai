@@ -7,6 +7,8 @@ export interface StorageAdapter {
 }
 export interface KeyedStorage extends StorageAdapter {
   keys(): Promise<string[]>;
+  // Every key with its raw value, read in one pass.
+  entries(): Promise<[string, string][]>;
   removeItem(key: string): Promise<void>;
 }
 

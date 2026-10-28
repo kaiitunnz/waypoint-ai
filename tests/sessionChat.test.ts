@@ -45,6 +45,7 @@ async function fixture() {
   const store = new QuickChatStore(
     {
       keys: async () => [...values.keys()],
+      entries: async () => [...values],
       removeItem: async (key) => void values.delete(key),
       getItem: async (key) => values.get(key),
       setItem: async (key, value) => void values.set(key, value),

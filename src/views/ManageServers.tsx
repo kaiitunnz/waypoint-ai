@@ -2,7 +2,7 @@ import { Action, ActionPanel, Alert, Color, Icon, List, Keyboard, Toast, confirm
 import { useEffect, useState } from "react";
 import { ServerDetail, statusLabel } from "../components/ServerDetail";
 import { useConnections, useConnectionStatus } from "../hooks/useConnections";
-import { connectionStore, quickChatStore } from "../storage/raycast";
+import { clipboardFiles, connectionStore, quickChatStore } from "../storage/raycast";
 import { ServerForm, SignInForm } from "./ServerForm";
 
 export function ManageServers() {
@@ -17,7 +17,10 @@ export function ManageServers() {
   const retry = () => setRevision((value) => value + 1);
   // Also clears data left by servers removed earlier, or written back by a view still open on one.
   useEffect(() => {
-    quickChatStore.sweep().catch(() => undefined);
+    quickChatStore
+      .sweep()
+      .catch(() => undefined)
+      .then(() => clipboardFiles.sweep());
   }, []);
   async function reload() {
     await refresh();

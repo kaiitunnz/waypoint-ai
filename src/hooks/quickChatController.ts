@@ -42,6 +42,7 @@ import {
   setPointer,
 } from "../storage/quickChat";
 import { Workspace } from "../storage/workspace";
+import { ClipboardFiles } from "../storage/clipboardFiles";
 import { ManageOutcome, Released, SessionManager, refused, release } from "./sessionManager";
 import { restartTimeoutMs } from "./sessionSettingsController";
 import {
@@ -79,6 +80,11 @@ export interface QuickChatSnapshot {
   sshTarget?: string;
 }
 type Retry = "send" | "compose" | "reattach";
+// `staged` paths entered the draft and went to be saved; a path not staged never reached storage.
+export interface AddedFiles {
+  problems: string[];
+  staged: string[];
+}
 type FileStats = { size: number; modifiedMs: number };
 
 // Pages read back when checking whether an unconfirmed message was recorded.
@@ -137,6 +143,7 @@ export class QuickChatController {
   private gone = false;
   private forgotten = false;
   private readonly workspace?: Workspace;
+  private readonly clipboardFiles?: ClipboardFiles;
   private draftLoaded = false;
   private queue: Promise<unknown> = Promise.resolve();
   private readonly draftKey: string;
@@ -146,7 +153,7 @@ export class QuickChatController {
     private readonly connection: FeedConnection,
     private readonly store: QuickChatStore,
     private readonly verifyConnection: () => Promise<void>,
-    options: { destination?: ChatDestination; workspace?: Workspace } = {},
+    options: { destination?: ChatDestination; workspace?: Workspace; clipboardFiles?: ClipboardFiles } = {},
     private readonly client = new WaypointClient(connection.apiUrl),
     private readonly now = Date.now,
   ) {
@@ -155,6 +162,7 @@ export class QuickChatController {
     this.resume = destination.kind === "quick" && !!destination.resume;
     this.boundTo = destination.kind === "session" ? destination.sessionId : undefined;
     this.workspace = options.workspace;
+    this.clipboardFiles = options.clipboardFiles;
     this.draftKey = this.boundTo ? sessionChatDraft(this.boundTo) : this.forceNew ? newChatDraft : quickChatDraft;
     this.lineKey = draftKeys.line(connection.id, this.draftKey);
     this.composeKey = draftKeys.compose(connection.id, this.draftKey);
@@ -196,6 +204,7 @@ export class QuickChatController {
   async start() {
     this.active = true;
     const generation = ++this.generation;
+    void this.clipboardFiles?.sweep();
     this.publish({ loading: true, error: undefined });
     try {
       await this.queue;
@@ -590,12 +599,12 @@ export class QuickChatController {
       context: this.state.compose.context.filter((item) => item.id !== id),
     });
   }
-  async addFiles(paths: string[]): Promise<string[]> {
-    if (this.state.busy) return [];
+  async addFiles(paths: string[]): Promise<AddedFiles> {
+    if (this.state.busy) return { problems: [], staged: [] };
     const problems: string[] = [];
-    const files = [...this.state.compose.files];
+    const files: StagedFile[] = [];
     for (const path of paths) {
-      if (files.some((file) => file.path === path)) continue;
+      if ([...this.state.compose.files, ...files].some((file) => file.path === path)) continue;
       const file: StagedFile = {
         id: randomUUID(),
         path,
@@ -611,9 +620,16 @@ export class QuickChatController {
       }
     }
     // A send that started meanwhile owns the draft; saving this snapshot would bring back what it sent.
-    if (this.state.busy) return [...problems, "A message is being sent. Add the files again when it finishes."];
-    await this.persistCompose({ ...this.state.compose, files });
-    return problems;
+    if (this.state.busy)
+      return {
+        problems: [...problems, "A message is being sent. Add the files again when it finishes."],
+        staged: [],
+      };
+    // Added to the parts as they are now, so a file removed while these were checked stays removed.
+    const added = files.filter((file) => !this.state.compose.files.some((current) => current.path === file.path));
+    if (!added.length) return { problems, staged: [] };
+    await this.persistCompose({ ...this.state.compose, files: [...this.state.compose.files, ...added] });
+    return { problems, staged: added.map((file) => file.path) };
   }
   // Resolves whether the files were removed.
   async removeFiles(ids: string[]): Promise<boolean> {
@@ -627,10 +643,12 @@ export class QuickChatController {
     this.publish({ busy: true, error: undefined });
     try {
       await this.queue;
+      let removedPaths: string[] = [];
       const doomed = await this.store.transaction(this.connection.id, async (saved, persist) => {
         if (this.gone) return [];
         const draft = storedParts(saved.compose?.[this.draftKey]) ?? this.state.compose;
         const removed = draft.files.filter((file) => ids.includes(file.id));
+        removedPaths = removed.map((file) => file.path);
         const next = { ...draft, files: draft.files.filter((file) => !ids.includes(file.id)) };
         saved.compose = { ...saved.compose, [this.draftKey]: next };
         await persist();
@@ -648,6 +666,7 @@ export class QuickChatController {
             .catch(() => undefined),
         ),
       );
+      void this.clipboardFiles?.release(removedPaths);
       return true;
     } catch (error) {
       this.publish({ error: error instanceof Error ? error.message : "Could not remove the file." });
@@ -752,6 +771,7 @@ export class QuickChatController {
     }
     const metadata = this.state.metadata;
     let sent = false;
+    let sentPaths: string[] = [];
     this.publish({ busy: true, error: undefined, notice: undefined, sshTarget: undefined });
     try {
       await this.queue;
@@ -906,6 +926,7 @@ export class QuickChatController {
             await this.store.drafts.write(this.composeKey, "");
           }
           // Staging waits for the send, so everything in the saved parts was sent.
+          sentPaths = draft.files.map((file) => file.path);
           delete saved.compose![this.draftKey];
         } else if (this.state.draft.trim() === text) {
           this.publish({ draft: "" });
@@ -922,6 +943,8 @@ export class QuickChatController {
           notice: "Message accepted by Waypoint.",
         });
       });
+      // Only now is the draft that named them gone from storage.
+      void this.clipboardFiles?.release(sentPaths);
     } catch (error) {
       if (error instanceof ApiError && error.kind === "not-found" && this.state.session)
         this.markMissing(this.state.session.id);
