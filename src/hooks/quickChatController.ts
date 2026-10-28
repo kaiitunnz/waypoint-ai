@@ -8,15 +8,14 @@ import {
   canReattach,
   createRequest,
   createTag,
+  customLaunch,
   failedStartAt,
   launchContext,
   launchFingerprint,
   ongoing,
   ownerTag,
   reuseDecision,
-  roleTag,
 } from "../domain/quickChat";
-import { isStructured } from "../domain/sessions";
 import {
   ComposeParts,
   ContextKind,
@@ -33,9 +32,24 @@ import {
   reusableUpload,
 } from "../domain/compose";
 import { draftKeys } from "../storage/drafts";
-import { PendingOperation, QuickChatState, QuickChatStore, lastActivity, setPointer } from "../storage/quickChat";
+import {
+  LaunchOrigin,
+  PendingOperation,
+  QuickChatState,
+  QuickChatStore,
+  lastActivity,
+  setPointer,
+} from "../storage/quickChat";
 import { Workspace } from "../storage/workspace";
 import { ManageOutcome, Released, SessionManager, refused, release } from "./sessionManager";
+import {
+  LaunchDeps,
+  LaunchResult,
+  TargetConnectionRequired,
+  createInTransaction,
+  launchSession,
+  ownershipProblem,
+} from "./sessionLauncher";
 import { FeedConnection } from "./sessionFeeds";
 
 export interface QuickChatSnapshot {
@@ -193,7 +207,14 @@ export class QuickChatController {
       } else if (!this.prepared) {
         this.observedPointer = saved.pointer;
         this.observedDefaults = JSON.stringify(saved.defaults);
-        if (!this.forceNew && (saved.defaults.mode !== "new" || this.resume) && saved.pointer) {
+        // Always New skips the saved destination, except an unused session started from chosen settings.
+        const unused =
+          !this.resume && saved.defaults.mode === "new" && saved.compose?.[this.draftKey]?.sessionId === saved.pointer
+            ? await this.emptyBoundSession(saved, metadata)
+            : undefined;
+        if (unused) {
+          if (this.active && generation === this.generation) this.publish({ session: unused });
+        } else if (!this.forceNew && (saved.defaults.mode !== "new" || this.resume) && saved.pointer) {
           const session = await this.destination(saved, metadata);
           const last = lastActivity(saved, session.id);
           if (this.resume) {
@@ -263,19 +284,11 @@ export class QuickChatController {
     }
   }
   private checkOwned(session: Session, saved: QuickChatState, metadata: ServerMetadata) {
-    const created = session.tags[ownerTag] === saved.installation && session.tags[roleTag] === "quick-chat";
-    if (!created && saved.chosen?.sessionId !== session.id)
-      throw new Error(
-        "The saved destination is not owned by this Quick Chat installation. Choose Start New Chat; your draft is kept.",
-      );
-    if (!isStructured(session, metadata))
-      throw new Error(
-        "This session uses an unsupported interface. Open it in Waypoint or choose Start New Chat; your draft is kept.",
-      );
-    if (["exited", "error"].includes(session.status) && !canReattach(session, metadata))
-      throw new Error(
-        "This conversation cannot be resumed by its current interface. Choose Start New Chat; your draft is kept.",
-      );
+    const problem = ownershipProblem(session, saved, metadata);
+    if (problem) throw new Error(problem);
+  }
+  private launchDeps(metadata: ServerMetadata): LaunchDeps {
+    return { connection: this.connection, client: this.client, now: this.now, metadata, workspace: this.workspace };
   }
   private saveDraft(key: string, text: string) {
     return this.store.drafts
@@ -309,6 +322,23 @@ export class QuickChatController {
           await persist();
         })
         .catch(() => undefined);
+    let error: string | undefined;
+    if (this.state.compose.launch === customLaunch) {
+      this.publish({ compose: { ...this.state.compose, sessionId: undefined, launch: undefined } });
+      await this.queue;
+      // Moving on from an unused session started from chosen settings, so reopening doesn't continue it.
+      await this.store
+        .transaction(this.connection.id, async (saved, persist) => {
+          const draft = saved.compose?.[this.draftKey];
+          if (draft?.launch !== customLaunch) return;
+          const bound = draft.sessionId;
+          draft.sessionId = draft.launch = undefined;
+          if (bound && saved.pointer === bound && saved.sentAt[bound] === undefined && !saved.pending)
+            setPointer(saved, undefined);
+          await persist();
+        })
+        .catch(() => (error = "Could not save the new chat. Reopening may return to the previous session."));
+    }
     this.generation++;
     this.prepared = true;
     this.observedPointer = undefined;
@@ -316,22 +346,60 @@ export class QuickChatController {
     this.publish({
       session: undefined,
       loading: false,
-      error: undefined,
+      error,
       notice: "A new conversation will be created on send. The previous session keeps running.",
       revision: this.state.revision + 1,
     });
   }
-  // Sends build their create request from the published defaults, so they are replaced before the reset.
-  async startNewChatWith(defaults: ChatDefaults) {
+  // Starts a session from chosen settings without a message; it becomes this view's conversation. Refusals before
+  // anything is sent are thrown; a failed attempt is returned and shown.
+  async createSession(settings: ChatDefaults, origin: LaunchOrigin): Promise<LaunchResult> {
+    const metadata = this.state.metadata;
+    if (!metadata || this.state.loading) throw new Error("Quick Chat is still loading. Try again in a moment.");
     if (this.state.busy || this.state.pending)
       throw new Error("A message is being sent or needs checking. Start the new chat when it finishes.");
-    await this.store.defaults(this.connection.id, defaults);
-    this.publish({ defaults });
-    await this.newChat();
+    this.publish({ busy: true, error: undefined, notice: undefined });
+    try {
+      await this.queue;
+      const result = await launchSession(
+        this.launchDeps(metadata),
+        this.store,
+        this.verifyConnection,
+        settings,
+        this.draftKey,
+        origin,
+      );
+      if (result.kind === "created") this.show(result.session, result.compose, "Session started.", result.problem);
+      else {
+        const saved = await this.store.read(this.connection.id).catch(() => undefined);
+        this.publish({ pending: saved?.pending, error: result.message });
+      }
+      return result;
+    } finally {
+      this.publish({ busy: false });
+    }
+  }
+  // Replaces the view's conversation with a session this controller just started or recovered.
+  private show(session: Session, compose: ComposeParts, notice: string, error?: string) {
+    this.generation++;
+    this.prepared = true;
+    this.observedPointer = session.id;
+    this.deadPointer = undefined;
+    this.retry = undefined;
     this.publish({
-      notice:
-        "Quick Chat defaults updated. A new conversation starts on send; the previous one keeps its own settings.",
+      session,
+      compose: composeParts(compose),
+      sshTarget: undefined,
+      loading: false,
+      error,
+      pending: undefined,
+      notice,
+      revision: this.state.revision + 1,
     });
+  }
+  // Connects a password-auth SSH target without retrying anything; the caller starts again with its own values.
+  connectTargetOnly(targetId: string, password: string) {
+    return this.client.connectTarget(this.connection.token, targetId, password);
   }
   // A session a New Chat send created for this draft but never delivered input to is continued, not replaced.
   private boundSession?: Promise<Session | undefined>;
@@ -343,13 +411,15 @@ export class QuickChatController {
         const session = await this.client.session(this.connection.token, bound);
         this.checkOwned(session, saved, metadata);
         // Defaults changed since the session was created: the next send starts a session with the new ones.
+        // A session started from chosen settings is continued whatever the defaults are now.
         const launch = saved.compose?.[this.draftKey]?.launch;
         if (
           !launch ||
-          launch !==
-            launchFingerprint(
-              createRequest(saved.defaults, metadata, saved.installation, "", { workspace: this.workspace?.dir }),
-            )
+          (launch !== customLaunch &&
+            launch !==
+              launchFingerprint(
+                createRequest(saved.defaults, metadata, saved.installation, "", { workspace: this.workspace?.dir }),
+              ))
         )
           return undefined;
         const page = await this.client.events(this.connection.token, bound);
@@ -488,7 +558,10 @@ export class QuickChatController {
   // Resolves whether the whole draft was discarded.
   async discardCompose(): Promise<boolean> {
     if (!(await this.removeFiles(this.state.compose.files.map((file) => file.id)))) return false;
-    if (!(await this.persistCompose(emptyParts()))) return false;
+    // A session started from chosen settings stays bound, so it is still continued until its first message.
+    const { sessionId, launch } = this.state.compose;
+    if (!(await this.persistCompose(launch === customLaunch ? { ...emptyParts(), sessionId, launch } : emptyParts())))
+      return false;
     await this.replaceComposeText("");
     return true;
   }
@@ -503,10 +576,19 @@ export class QuickChatController {
   }
   private sshFailure(error: unknown, targetId: string | undefined, retry: Retry) {
     const target = this.state.metadata?.targets.find((entry) => entry.id === targetId);
-    if (error instanceof ApiError && error.detail === "ssh-master-required" && target?.auth === "password") {
+    if (
+      (error instanceof TargetConnectionRequired ||
+        (error instanceof ApiError && error.detail === "ssh-master-required")) &&
+      target?.auth === "password"
+    ) {
       this.retry = retry;
       this.publish({ sshTarget: target.id });
-      return new ApiError("rejected", `Connect ${target.name} to continue. Your draft is kept.`, error.detail, 409);
+      return new ApiError(
+        "rejected",
+        `Connect ${target.name} to continue. Your draft is kept.`,
+        "ssh-master-required",
+        409,
+      );
     }
     return error;
   }
@@ -608,59 +690,31 @@ export class QuickChatController {
         }
         if (!session) {
           const defaults = this.state.defaults ?? saved.defaults;
-          const workspace = this.workspace?.dir;
-          const context = launchContext(defaults, metadata, workspace);
+          const context = launchContext(defaults, metadata, this.workspace?.dir);
           this.checkPolicy(draft?.files ?? [], context.backend, defaults.target || undefined);
-          const operationId = randomUUID();
-          const request = createRequest(defaults, metadata, saved.installation, operationId, {
-            workspace,
-            createdAt: new Date(this.now()),
-          });
-          if (workspace && context.cwd === workspace)
-            await this.workspace!.ensure().catch((error: Error) => {
-              throw new Error(
-                `Could not create the Quick Chat workspace at ${workspace}: ${error.message}. Your draft is kept.`,
-              );
-            });
-          saved.pending = {
-            kind: "create",
-            operationId,
-            text,
-            draftKey: this.draftKey,
-            startedAt: this.now(),
-            launch: {
-              backend: context.backend,
-              target: defaults.target,
-              cwd: context.cwd,
-              title: String(request.title),
-            },
-          };
-          await persist();
+          let created: { session: Session; problem?: string };
           try {
-            session = await this.client.create(this.connection.token, request);
+            created = await createInTransaction(this.launchDeps(metadata), saved, persist, defaults, {
+              draftKey: this.draftKey,
+              source: "defaults",
+              // A line send leaves no binding, so a session the form created can't be continued in its place.
+              bind: (state, created, request) => {
+                const bound = draft ?? state.compose?.[this.draftKey];
+                if (draft) Object.assign(draft, { sessionId: created.id, launch: launchFingerprint(request) });
+                else if (bound?.launch === customLaunch) bound.sessionId = bound.launch = undefined;
+              },
+              text,
+              onCreated: (created) => this.publish({ session: created }),
+            });
           } catch (error) {
-            if (error instanceof ApiError && error.kind !== "uncertain") {
-              saved.pending = undefined;
-              await persist();
-            }
-            if (error instanceof ApiError && error.detail === "cwd-not-found")
-              throw new ApiError(
-                "rejected",
-                workspace && context.cwd === workspace
-                  ? `This server can't see the Quick Chat workspace at ${workspace}. Set a Working Directory in Quick Chat Defaults.`
-                  : `${error.message} Update Quick Chat Defaults.`,
-                error.detail,
-                error.status,
-                error.serverDetail,
-              );
-            throw this.sshFailure(error, defaults.target || undefined, fromCompose ? "compose" : "send");
+            throw error instanceof TargetConnectionRequired
+              ? this.sshFailure(error, defaults.target, fromCompose ? "compose" : "send")
+              : error;
           }
-          setPointer(saved, session.id);
-          saved.pending = undefined;
-          if (draft) Object.assign(draft, { sessionId: session.id, launch: launchFingerprint(request) });
-          await persist();
-          this.publish({ session });
-          this.checkOwned(session, saved, metadata);
+          if (!draft && this.state.compose.launch === customLaunch)
+            this.publish({ compose: { ...this.state.compose, sessionId: undefined, launch: undefined } });
+          session = created.session;
+          if (created.problem) throw new Error(created.problem);
         } else {
           session = await this.client.session(this.connection.token, session.id);
           this.checkOwned(session, saved, metadata);
@@ -690,6 +744,8 @@ export class QuickChatController {
         }
         if (draft) {
           this.checkPolicy(draft.files, session.backend, session.targetId);
+          // The custom mark belongs to the session the form started, not to another destination.
+          if (draft.launch === customLaunch && draft.sessionId !== session.id) draft.launch = undefined;
           draft.sessionId = session.id;
         }
         let attachments = draft ? await this.upload(session, stats, saved, persist, fence) : [];
@@ -820,15 +876,33 @@ export class QuickChatController {
               session.tags[ownerTag] === saved.installation && session.tags[createTag] === pending.operationId,
           );
           if (matches.length === 1) {
-            this.checkOwned(matches[0], saved, metadata);
-            setPointer(saved, matches[0].id);
+            const session = matches[0];
+            this.checkOwned(session, saved, metadata);
+            // A session started from chosen settings counts as chosen when it was attempted and stays bound to
+            // its draft, as a confirmed create would have left it.
+            setPointer(saved, session.id, pending.origin ? pending.startedAt : undefined);
+            let bound: ComposeParts | undefined;
+            if (pending.origin) {
+              bound = {
+                ...(saved.compose?.[pending.draftKey] ?? emptyParts()),
+                sessionId: session.id,
+                launch: customLaunch,
+              };
+              saved.compose = { ...saved.compose, [pending.draftKey]: bound };
+            }
             saved.pending = undefined;
             await persist();
-            this.publish({
-              session: this.state.session ?? matches[0],
-              pending: undefined,
-              notice: "Recovered the created conversation. The prompt was not resent. Send it when ready.",
-            });
+            if (pending.origin === "launch-form")
+              await this.store.drafts.write(draftKeys.launch(this.connection.id), "");
+            if (bound && pending.draftKey === this.draftKey) this.show(session, bound, "Recovered the new session.");
+            else
+              this.publish({
+                session: this.state.session ?? session,
+                pending: undefined,
+                notice: pending.origin
+                  ? "Recovered the new session."
+                  : "Recovered the created conversation. The prompt was not resent. Send it when ready.",
+              });
           } else if (!matches.length && failedStartAt(pending, sessions, saved.failedStartAt) !== undefined) {
             // No input reaches a session that never started, so clearing the checkpoint cannot duplicate work.
             saved.failedStartAt = failedStartAt(pending, sessions, saved.failedStartAt);
@@ -838,7 +912,11 @@ export class QuickChatController {
             this.publish({
               pending: undefined,
               error:
-                "The new session failed to start on its execution target. Check the working directory and target in Quick Chat Defaults. No message was sent; your draft is kept.",
+                pending.origin === "launch-form"
+                  ? "The new session failed to start on its execution target. Check the working directory and target, then start the session again. Your settings are kept."
+                  : pending.origin === "edit"
+                    ? "The new session failed to start on its execution target. Check the working directory and target, then try again from Edit Current Session."
+                    : "The new session failed to start on its execution target. Check the working directory and target in Quick Chat Defaults. No message was sent; your draft is kept.",
             });
           } else
             this.publish({

@@ -79,7 +79,11 @@ export function quickChatTitle(at: Date): string {
 export interface LaunchOptions {
   workspace?: string;
   createdAt?: Date;
+  // Where the settings came from, so validation errors point at the right place.
+  source?: "defaults" | "form";
 }
+// The `launch` of a draft binding to a session started from chosen settings rather than the defaults.
+export const customLaunch = "custom";
 export function createRequest(
   defaults: ChatDefaults,
   metadata: ServerMetadata,
@@ -88,13 +92,16 @@ export function createRequest(
   options: LaunchOptions = {},
 ): Record<string, unknown> {
   const context = launchContext(defaults, metadata, options.workspace);
+  const form = options.source === "form";
+  const where = form ? "" : " in Quick Chat Defaults";
+  const update = form ? "" : " Update Quick Chat Defaults.";
   if (!context.agent || !context.transport || !context.transports.includes(context.transport))
-    throw new Error("Choose an agent with a structured interface in Quick Chat Defaults.");
+    throw new Error(`Choose an agent with a structured interface${where}.`);
   if (defaults.target && (!context.target || !context.target.agents.includes(context.backend)))
-    throw new Error("This execution target does not support the selected agent. Update Quick Chat Defaults.");
-  if (!context.cwd.trim()) throw new Error("Set a working directory in Quick Chat Defaults.");
+    throw new Error(`This execution target does not support the selected agent.${update}`);
+  if (!context.cwd.trim()) throw new Error(`Set a working directory${where}.`);
   if (!["default", "none"].includes(defaults.preset) && !context.preset)
-    throw new Error("The selected preset was removed. Update Quick Chat Defaults.");
+    throw new Error(`The selected preset was removed.${update}`);
   const request: Record<string, unknown> = {
     cwd: context.cwd,
     launch_target_id: defaults.target || null,

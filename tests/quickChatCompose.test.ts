@@ -563,7 +563,7 @@ test("files picked as a send starts are not saved over what it sent", async () =
   await f.close();
 });
 
-test("starting a new chat with changed settings creates the next session with them", async () => {
+test("starting a session with changed settings creates it at once and leaves the defaults", async () => {
   const f = await fixture();
   const c = f.controller();
   await c.start();
@@ -572,22 +572,24 @@ test("starting a new chat with changed settings creates the next session with th
   const defaults = c.getSnapshot().defaults!;
   let refused: Promise<unknown> | undefined;
   f.server.beforeInput = () => {
-    refused = c.startNewChatWith({ ...defaults, cwd: "/refused" }).catch((error: unknown) => error);
+    refused = c.createSession({ ...defaults, cwd: "/refused" }, "edit").catch((error: unknown) => error);
   };
   c.changeDraft("second");
   assert.equal(await c.send(), true);
   assert.match(String(await refused), /being sent/);
-  assert.equal((await f.store.load(connection.id)).defaults.cwd, defaults.cwd);
   f.server.beforeInput = undefined;
-  await c.startNewChatWith({ ...defaults, cwd: "/elsewhere" });
-  assert.equal(c.getSnapshot().session, undefined);
-  assert.match(c.getSnapshot().notice!, /Quick Chat defaults updated/);
-  assert.equal((await f.store.load(connection.id)).defaults.cwd, "/elsewhere");
+  assert.equal((await c.createSession({ ...defaults, cwd: "/elsewhere" }, "edit")).kind, "created");
+  assert.equal(c.getSnapshot().session?.id, "created-2");
+  assert.equal((await f.store.load(connection.id)).defaults.cwd, defaults.cwd);
   c.changeDraft("third");
   assert.equal(await c.send(), true);
   assert.deepEqual(
     f.server.sessions.map((session) => session.cwd),
     ["/workspace", "/elsewhere"],
+  );
+  assert.deepEqual(
+    f.server.inputs.map((input) => input.session),
+    ["created-1", "created-1", "created-2"],
   );
   await f.close();
 });

@@ -6,8 +6,13 @@ import { decodeState, isRecord } from "../domain/connections";
 import { KeyedStorage, connectionsKey } from "./connections";
 import { DraftStore } from "./drafts";
 
+// Which form started a create from chosen settings: New Session with Settings or Edit Current Session.
+export type LaunchOrigin = "launch-form" | "edit";
+export const launchOrigins: LaunchOrigin[] = ["launch-form", "edit"];
 export interface PendingOperation {
   kind: "create" | "input" | "reattach" | "interrupt" | "interaction";
+  // Absent for a create started by a send.
+  origin?: LaunchOrigin;
   interactionKey?: string;
   interactionAction?: InteractionAction;
   operationId: string;
@@ -49,6 +54,18 @@ export function isInteractionDraft(value: unknown): value is InteractionDraft {
     (value.note === undefined || isText(value.note)) &&
     textRecord(value.selected, (entry) => Array.isArray(entry) && entry.every(isText)) &&
     textRecord(value.notes, isText)
+  );
+}
+// The launch fields of Quick Chat defaults, also used on their own by New Session with Settings.
+export type LaunchSettings = Omit<ChatDefaults, "mode" | "timeoutMinutes">;
+const launchTextFields = ["preset", "target", "cwd", "agent", "transport", "model", "effort", "permission", "profile"];
+export function isLaunchSettings(value: unknown): value is LaunchSettings {
+  return (
+    isRecord(value) &&
+    launchTextFields.every((key) => isText(value[key])) &&
+    ["args", "config"].every(
+      (key) => value[key] === undefined || (Array.isArray(value[key]) && value[key].every(isText)),
+    )
   );
 }
 const isNumber = (value: unknown) => typeof value === "number" && Number.isFinite(value);
@@ -106,17 +123,10 @@ export function decodeQuickChat(raw?: string): QuickChatState {
       !["timed", "continue", "new"].includes(String(defaults.mode)) ||
       typeof defaults.timeoutMinutes !== "number" ||
       !Number.isFinite(defaults.timeoutMinutes) ||
-      defaults.timeoutMinutes <= 0
+      defaults.timeoutMinutes <= 0 ||
+      !isLaunchSettings(defaults)
     )
       throw new Error();
-    for (const key of ["preset", "target", "cwd", "agent", "transport", "model", "effort", "permission", "profile"])
-      if (typeof defaults[key] !== "string") throw new Error();
-    for (const key of ["args", "config"])
-      if (
-        defaults[key] !== undefined &&
-        (!Array.isArray(defaults[key]) || !defaults[key].every((value: unknown) => typeof value === "string"))
-      )
-        throw new Error();
     if (
       !Object.values(data.drafts).every((value) => typeof value === "string") ||
       !Object.values(data.sentAt).every((value) => typeof value === "number" && Number.isFinite(value))
@@ -130,6 +140,7 @@ export function decodeQuickChat(raw?: string): QuickChatState {
         typeof data.pending.text !== "string" ||
         typeof data.pending.draftKey !== "string" ||
         typeof data.pending.startedAt !== "number" ||
+        (data.pending.origin !== undefined && !launchOrigins.includes(data.pending.origin as LaunchOrigin)) ||
         (data.pending.sessionId !== undefined && typeof data.pending.sessionId !== "string"))
     )
       throw new Error();

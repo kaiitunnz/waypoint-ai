@@ -21,6 +21,7 @@ import { sessionUrl } from "../domain/sessions";
 import { deleteMessage, quickChatMovesOn, terminateMessage } from "../domain/sessionActions";
 import { ChatConversation } from "./ChatConversation";
 import { QuickChatController } from "../hooks/quickChatController";
+import { LaunchFailure } from "../hooks/sessionLauncher";
 import { QuickChatDefaults } from "./QuickChatDefaults";
 import { ComposeMessage, includeContext } from "./ComposeMessage";
 import { ConnectTarget } from "./ConnectTarget";
@@ -174,7 +175,12 @@ function QuickChatView({
         settings={{
           available: !state.busy && !state.pending,
           newChat: state.defaults
-            ? { start: (build) => controller.startNewChatWith(build(state.defaults!)) }
+            ? {
+                start: async (build) => {
+                  const result = await controller.createSession(build(state.defaults!), "edit");
+                  if (result.kind !== "created") throw new LaunchFailure(result);
+                },
+              }
             : undefined,
         }}
       />
