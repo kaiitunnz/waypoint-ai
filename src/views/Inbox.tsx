@@ -106,6 +106,20 @@ export function Inbox({ launch }: { launch?: InboxLaunch }) {
   );
 }
 
+// The detail pane leaves rows narrow, so the icon carries both whether an item waits on you and whether it's unread.
+function rowIcon(item: InboxItem) {
+  const unread = !item.readAt;
+  if (item.status === "resolved")
+    return { value: { source: Icon.CheckCircle, tintColor: Color.SecondaryText }, tooltip: "Resolved" };
+  const pending = blockChips(item).length > 0;
+  return {
+    value: {
+      source: unread ? Icon.CircleFilled : Icon.Circle,
+      tintColor: pending ? Color.Orange : unread ? Color.Blue : Color.SecondaryText,
+    },
+    tooltip: `${pending ? "Needs an answer" : "Open"}${unread ? " · Unread" : ""}`,
+  };
+}
 const decisionTitle = (block: InboxApprovalBlock, option: string, several: boolean) => {
   const verb = block.answer ? `Change Decision: ${option}` : option;
   return several ? `${verb} · ${block.prompt.split("\n")[0].slice(0, 40)}` : verb;
@@ -303,13 +317,14 @@ function InboxList({
     const reply =
       item.blocks.length === 1 ? (
         <Action.Push
+          key="reply"
           title="Reply"
           icon={Icon.Reply}
 
           target={answerForm(item.blocks[0], false)}
         />
       ) : item.blocks.length > 1 ? (
-        <ActionPanel.Submenu title="Reply" icon={Icon.Reply}>
+        <ActionPanel.Submenu key="reply" title="Reply" icon={Icon.Reply}>
           {item.blocks.map((block) => (
             <Action.Push key={block.id} title={blockTitle(block)} target={answerForm(block, false)} />
           ))}
@@ -378,16 +393,12 @@ function InboxList({
       id={item.id}
       title={item.subject}
       subtitle={senderName(item)}
-      icon={
-        item.status === "open"
-          ? { source: Icon.CircleFilled, tintColor: blockChips(item).length ? Color.Orange : Color.Blue }
-          : { source: Icon.CheckCircle, tintColor: Color.SecondaryText }
+      icon={rowIcon(item)}
+      accessories={
+        blockChips(item).length
+          ? blockChips(item).map((chip) => ({ tag: { value: chip, color: Color.Orange } }))
+          : [{ date: new Date(item.updatedAt), tooltip: `Updated ${new Date(item.updatedAt).toLocaleString()}` }]
       }
-      accessories={[
-        ...blockChips(item).map((chip) => ({ tag: { value: chip, color: Color.Orange } })),
-        ...(item.readAt ? [] : [{ icon: { source: Icon.Dot, tintColor: Color.Blue }, tooltip: "Unread" }]),
-        { date: new Date(item.updatedAt), tooltip: `Updated ${new Date(item.updatedAt).toLocaleString()}` },
-      ]}
       detail={<List.Item.Detail markdown={selected === item.id ? itemMarkdown(item) : itemSummary(item)} />}
       actions={actions(item)}
     />

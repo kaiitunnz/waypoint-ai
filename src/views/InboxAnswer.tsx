@@ -146,7 +146,11 @@ export function InboxAnswer({
           >
             <Form.Dropdown.Item value="" title="No option" />
             {question.options.map((option) => (
-              <Form.Dropdown.Item key={option.label} value={option.label} title={option.label} />
+              <Form.Dropdown.Item
+                key={option.label}
+                value={option.label}
+                title={option.description ? `${option.label} — ${option.description}` : option.label}
+              />
             ))}
           </Form.Dropdown>
         ))}
