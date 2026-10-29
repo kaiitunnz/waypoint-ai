@@ -148,13 +148,13 @@ Environment values are never shown or stored. Each existing variable can be kept
 
 Raycast reads each agent's capabilities from Waypoint, so the controls follow the server. A current Waypoint server reports:
 
-| Agent       | Interface   | In Raycast          | Model                | Effort               | Attachments |
-| ----------- | ----------- | ------------------- | -------------------- | -------------------- | ----------- |
-| Codex       | App server  | Native conversation | Applies at once      | Applies at once      | Yes         |
-| Claude Code | Claude Code | Native conversation | Applies at once      | Restarts and resumes | Yes         |
-| Claude Code | Claude TUI  | Native conversation | Restarts and resumes | Restarts and resumes | Yes         |
-| OpenCode    | HTTP        | Native conversation | Applies at once      | Applies at once      | Yes         |
-| Any agent   | Terminal    | Open in Waypoint    | In Waypoint          | In Waypoint          | In Waypoint |
+| Agent       | Interface | In Raycast          | Model                | Effort               | Attachments |
+| ----------- | --------- | ------------------- | -------------------- | -------------------- | ----------- |
+| Codex       | Chat      | Native conversation | Applies at once      | Applies at once      | Yes         |
+| Claude Code | Chat      | Native conversation | Applies at once      | Restarts and resumes | Yes         |
+| Claude Code | Emulated  | Native conversation | Restarts and resumes | Restarts and resumes | Yes         |
+| OpenCode    | Chat      | Native conversation | Applies at once      | Applies at once      | Yes         |
+| Any agent   | Terminal  | Open in Waypoint    | In Waypoint          | In Waypoint          | In Waypoint |
 
 On a remote execution target, Raycast sends only the attachments Waypoint can deliver there; see [Composing messages](#composing-messages).
 

@@ -359,6 +359,28 @@ test("an unconfirmed start keeps its checkpoint, and recovery shows and binds th
   await f.close();
 });
 
+test("recovering a create saved by an earlier version's Edit Current Session binds it and keeps the form draft", async () => {
+  const f = await fixture();
+  const c = f.controller();
+  await c.start();
+  f.server.create = "uncertain";
+  await c.createSession(await f.settings());
+  await f.store.transaction(connection.id, async (saved, persist) => {
+    saved.pending = { ...saved.pending!, origin: "edit" };
+    await persist();
+  });
+  await f.store.drafts.write(draftKeys.launch(connection.id), "{}");
+  f.server.create = "ok";
+  await c.reconcile();
+  assert.equal(c.getSnapshot().session?.id, "created-1");
+  assert.equal(c.getSnapshot().notice, "Recovered the new session.");
+  const saved = await f.store.load(connection.id);
+  assert.equal(saved.pending, undefined);
+  assert.equal(saved.compose?.quick?.launch, customLaunch);
+  assert.equal(await f.store.drafts.read(draftKeys.launch(connection.id)), "{}");
+  await f.close();
+});
+
 test("a recovered session times out from its attempt", async () => {
   const f = await fixture();
   const c = f.controller();

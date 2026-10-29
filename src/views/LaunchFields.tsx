@@ -1,7 +1,7 @@
 import { Form } from "@raycast/api";
 import { useEffect, useState } from "react";
 import { customModelValue, defaultsModelChoice, defaultsModelChoices, modelEfforts } from "../domain/modelOptions";
-import { structuredTransport } from "../domain/sessions";
+import { interfaceName, structuredTransport } from "../domain/sessions";
 import { ChatDefaults, launchContext } from "../domain/quickChat";
 import { ServerMetadata } from "../api/contracts";
 import { ModelCatalog } from "../api/models";
@@ -170,11 +170,7 @@ export function useLaunchFields(
               title={`Inherit structured interface${context.transport ? ` · ${context.transport}` : ""}`}
             />
             {context.transports.map((transport) => (
-              <Form.Dropdown.Item
-                key={transport}
-                value={transport}
-                title={metadata.agents.find((agent) => agent.nativeTransport === transport)?.label ?? transport}
-              />
+              <Form.Dropdown.Item key={transport} value={transport} title={interfaceName(metadata, transport)} />
             ))}
           </Form.Dropdown>
           <Form.Dropdown
