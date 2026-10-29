@@ -548,7 +548,7 @@ test("starting, ending, and new chats belong to Quick Chat", async () => {
   const f = await fixture();
   const c = f.chat("other");
   await c.start();
-  await assert.rejects(c.createSession((await f.store.load(connection.id)).defaults, "edit"), /Quick Chat/);
+  await assert.rejects(c.createSession((await f.store.load(connection.id)).defaults), /Quick Chat/);
   await c.newChat();
   assert.equal(c.getSnapshot().session?.id, "other");
   assert.equal(await c.terminate(), undefined);

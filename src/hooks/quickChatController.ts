@@ -33,14 +33,7 @@ import {
 } from "../domain/compose";
 import { sessionProblem } from "../domain/sessionActions";
 import { draftKeys, sessionChatDraft } from "../storage/drafts";
-import {
-  LaunchOrigin,
-  PendingOperation,
-  QuickChatState,
-  QuickChatStore,
-  lastActivity,
-  setPointer,
-} from "../storage/quickChat";
+import { PendingOperation, QuickChatState, QuickChatStore, lastActivity, setPointer } from "../storage/quickChat";
 import { Workspace } from "../storage/workspace";
 import { ClipboardFiles } from "../storage/clipboardFiles";
 import { ManageOutcome, Released, SessionManager, refused, release } from "./sessionManager";
@@ -451,7 +444,7 @@ export class QuickChatController {
   }
   // Starts a session from chosen settings without a message; it becomes this view's conversation. Refusals before
   // anything is sent are thrown; a failed attempt is returned and shown.
-  async createSession(settings: ChatDefaults, origin: LaunchOrigin): Promise<LaunchResult> {
+  async createSession(settings: ChatDefaults): Promise<LaunchResult> {
     const metadata = this.state.metadata;
     if (this.boundTo) throw new Error("Start new sessions from Quick Chat or New Chat.");
     if (!metadata || this.state.loading) throw new Error("Quick Chat is still loading. Try again in a moment.");
@@ -466,7 +459,6 @@ export class QuickChatController {
         this.verifyConnection,
         settings,
         this.draftKey,
-        origin,
       );
       if (result.kind === "created") this.show(result.session, result.compose, "Session started.", result.problem);
       else {
@@ -1054,7 +1046,7 @@ export class QuickChatController {
                 pending.origin === "launch-form"
                   ? "The new session failed to start on its execution target. Check the working directory and target, then start the session again. Your settings are kept."
                   : pending.origin === "edit"
-                    ? "The new session failed to start on its execution target. Check the working directory and target, then try again from Edit Current Session."
+                    ? "The new session failed to start on its execution target. Check the working directory and target, then start it again with New Session with Settings."
                     : "The new session failed to start on its execution target. Check the working directory and target in Quick Chat Defaults. No message was sent; your draft is kept.",
             });
           } else

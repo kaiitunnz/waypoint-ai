@@ -6,7 +6,8 @@ import { decodeState, isRecord } from "../domain/connections";
 import { KeyedStorage, connectionsKey } from "./connections";
 import { DraftStore } from "./drafts";
 
-// Which form started a create from chosen settings: New Session with Settings or Edit Current Session.
+// Which form started a create from chosen settings. Only New Session with Settings creates them; `"edit"` is read
+// back from checkpoints saved by earlier versions, whose Edit Current Session could start a session.
 export type LaunchOrigin = "launch-form" | "edit";
 export const launchOrigins: LaunchOrigin[] = ["launch-form", "edit"];
 export interface PendingOperation {

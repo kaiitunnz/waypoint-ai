@@ -88,7 +88,7 @@ function SettingsForm({ connection, metadata, defaults, controller, initial }: F
     setBusy(true);
     setConnectTarget(undefined);
     try {
-      const result = await controller.createSession(values, "launch-form");
+      const result = await controller.createSession(values);
       if (!mounted.current) return;
       if (result.kind === "created" || result.kind === "uncertain") {
         if (result.kind === "uncertain")

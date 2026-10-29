@@ -5,28 +5,29 @@ import { parseMetadata } from "../src/api/contracts";
 import { parseModels } from "../src/api/models";
 import { parseSession } from "../src/api/sessions";
 import { parseLaunchSettings } from "../src/api/settings";
-import { createRequest, initialDefaults } from "../src/domain/quickChat";
 import {
   SettingsDraft,
   availability,
   capsFor,
+  contextLine,
   editableEnvKeys,
   effortChoices,
   effortForModel,
   envPatch,
   modelChoice,
   modelChoices,
-  newChatDefaults,
   permissionChoices,
   planSettings,
   profileChoices,
   rebaseDraft,
+  removeLastEnvRow,
   settingsBaseline,
   settingsDraft,
   settingsFingerprint,
   usageChoices,
+  withBlankEnvRow,
 } from "../src/domain/sessionSettings";
-import { isStructured, structuredTransport } from "../src/domain/sessions";
+import { interfaceName, isStructured, structuredTransport } from "../src/domain/sessions";
 import { customModelValue } from "../src/domain/modelOptions";
 import { launchWire, metadataWire, option, sessionRecord } from "./fixtures/settings";
 
@@ -43,6 +44,7 @@ const setup = (session: Record<string, unknown> = {}, launch: Record<string, unk
   return { baseline, caps, plan, draft: settingsDraft(baseline) };
 };
 const ops = (plan: { steps: { op: string }[] }) => plan.steps.map((step) => step.op);
+const blank = { key: "", value: "" };
 
 test("plans Codex changes inline in the server's order", () => {
   const { plan } = setup();
@@ -248,48 +250,49 @@ test("blocks invalid input and launch changes while starting, and gates tuning o
   assert.equal(plan.warnings[0], "Applying these changes starts the session again.");
 });
 
-test("agent, target, or folder changes become a new chat", () => {
-  const { plan } = setup();
-  const result = plan({ cwd: "/work/other", title: "Ignored" });
-  assert.equal(result.kind, "new-chat");
-  assert.deepEqual(result.steps, []);
-  assert.deepEqual(plan({ cwd: " " }).errors, ["Enter a working directory for the new session."]);
+test("the context line names agent, interface, target, and folder as the web app does", () => {
+  assert.equal(contextLine(setup().baseline, metadata), "codex · Chat · Local · /work/garden");
+  assert.equal(
+    contextLine(setup({ backend: "claude_code", transport: "claude_tty", launch_target_id: "box" }).baseline, metadata),
+    "claude_code · Emulated · box · /work/garden",
+  );
+  assert.equal(contextLine(setup({ backend: "gone", cwd: "" }).baseline, metadata), "gone · Chat · Local");
+  assert.equal(interfaceName(metadata, "tmux"), "Terminal");
+  assert.equal(interfaceName(metadata, "opencode_http"), "Chat");
 });
 
-test("new chat defaults keep agent-default meanings and only supported lists", () => {
-  const codex = setup({ model: null, effort: null, account_profile_id: null }, { account_profile_id: null });
-  const same = newChatDefaults(initialDefaults(), codex.baseline, { ...codex.draft, cwd: "/elsewhere" }, metadata);
-  assert.equal(same.cwd, "/elsewhere");
-  assert.equal(same.model, "__default__");
-  assert.equal(same.effort, "__default__");
-  assert.equal(same.profile, "__default__");
-  assert.equal(same.permission, "default");
-  assert.deepEqual(same.args, ["--fast"]);
-  assert.equal(same.config, undefined);
-  const request = createRequest(same, metadata, "install", "op");
-  assert.equal(request.model, null);
-  assert.equal(request.cwd, "/elsewhere");
+test("new variables always end in one blank row that edits never replace", () => {
+  const { draft, plan } = setup();
+  assert.deepEqual(draft.newEnv, [blank]);
+  assert.deepEqual(ops(plan({})), []);
 
-  const claude = setup(
-    { backend: "claude_code", transport: "claude_cli", args: [], permission_mode: null },
-    { backend: "claude_code", transport: "claude_cli", args: [], supports_config_overrides: false },
-  );
-  const claudeDefaults = newChatDefaults(initialDefaults(), claude.baseline, { ...claude.draft, cwd: "/x" }, metadata);
-  assert.equal(claudeDefaults.config, undefined);
-  assert.equal(claudeDefaults.args, undefined);
-  assert.equal(claudeDefaults.permission, "");
-  assert.doesNotThrow(() => createRequest(claudeDefaults, metadata, "install", "op"));
+  const typed = withBlankEnvRow([{ key: " ", value: "" }]);
+  assert.deepEqual(typed, [{ key: " ", value: "" }]);
+  const named = withBlankEnvRow([{ key: "A", value: "" }]);
+  assert.deepEqual(named, [{ key: "A", value: "" }, blank]);
+  const valued = withBlankEnvRow([{ key: "", value: "x" }]);
+  assert.deepEqual(valued, [{ key: "", value: "x" }, blank]);
 
-  const unknown = setup({}, null);
-  assert.equal(
-    newChatDefaults(initialDefaults(), unknown.baseline, { ...unknown.draft, cwd: "/y" }, metadata).args,
-    undefined,
-  );
+  const row = { key: "", value: "" };
+  const cleared = withBlankEnvRow([{ key: "A", value: "1" }, row, { key: "", value: "" }, blank]);
+  assert.equal(cleared.length, 2);
+  assert.equal(cleared[1], row);
+  const middle = withBlankEnvRow([blank, { key: "B", value: "2" }, blank]);
+  assert.equal(middle.length, 3);
 
-  const moved = newChatDefaults(initialDefaults(), codex.baseline, { ...codex.draft, targetId: "box" }, metadata);
-  assert.equal(moved.target, "box");
-  assert.equal(moved.model, "");
-  assert.equal(moved.args, undefined);
+  assert.deepEqual(removeLastEnvRow([{ key: "A", value: "1" }, { key: "B", value: "2" }, blank]), [
+    { key: "A", value: "1" },
+    blank,
+  ]);
+  assert.deepEqual(removeLastEnvRow([{ key: "A", value: "1" }, blank]), [blank]);
+  assert.deepEqual(removeLastEnvRow([blank]), [blank]);
+
+  const result = plan({ newEnv: [{ key: "", value: "orphan" }, { key: "NEW", value: "1" }, blank] });
+  assert.deepEqual(ops(result), ["launch"]);
+  assert.deepEqual(result.steps[0].body.env_set, { NEW: "1" });
+  assert.deepEqual(plan({ newEnv: [{ key: "API_TOKEN", value: "x" }, blank] }).errors, [
+    "API_TOKEN is already set. Replace it instead.",
+  ]);
 });
 
 test("rebases by step so applied environment changes are not sent again", () => {
@@ -307,7 +310,7 @@ test("rebases by step so applied environment changes are not sent again", () => 
   );
   const rebased = rebaseDraft(edited, baseline, next, ["title", "launch"]);
   assert.equal(rebased.model, "other");
-  assert.deepEqual(rebased.newEnv, []);
+  assert.deepEqual(rebased.newEnv, [blank]);
   assert.equal(rebased.env.API_TOKEN.op, "keep");
   const caps = capsFor(metadata, "codex", "codex_app_server");
   const plan = planSettings(next, rebased, caps, availability(next, rebased, caps, metadata, []));
@@ -316,7 +319,7 @@ test("rebases by step so applied environment changes are not sent again", () => 
 
   const uncertain = rebaseDraft(edited, baseline, next, [], true);
   assert.equal(uncertain.env.API_TOKEN.op, "keep");
-  assert.deepEqual(uncertain.newEnv, []);
+  assert.deepEqual(uncertain.newEnv, [blank]);
   assert.equal(uncertain.title, "Mine");
 });
 
@@ -327,6 +330,8 @@ test("rebasing follows the server for untouched fields and keeps the user's edit
   assert.equal(rebased.title, "Renamed elsewhere");
   assert.equal(rebased.effort, "high");
   assert.equal(rebased.model, "mine");
+  const kept = rebaseDraft({ ...draft, newEnv: [{ key: "EXTRA", value: "1" }, blank] }, baseline, next);
+  assert.deepEqual(kept.newEnv, [{ key: "EXTRA", value: "1" }, blank]);
 });
 
 test("the fingerprint ignores status but sees settings and capability changes", () => {

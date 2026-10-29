@@ -42,13 +42,6 @@ export type LaunchResult =
   | { kind: "uncertain"; message: string }
   | { kind: "ssh"; targetId: string; message: string };
 
-// Carries a failed launch through callers that only distinguish success from a thrown error.
-export class LaunchFailure extends Error {
-  constructor(readonly result: Exclude<LaunchResult, { kind: "created" }>) {
-    super(result.message);
-  }
-}
-
 // Why Quick Chat can't continue a session: not created by this installation or chosen for it, an interface Raycast
 // can't show, or an ended session its interface can't resume.
 export function ownershipProblem(
@@ -167,7 +160,6 @@ export async function launchSession(
   verifyConnection: () => Promise<void>,
   settings: ChatDefaults,
   draftKey: string,
-  origin: LaunchOrigin,
 ): Promise<LaunchResult> {
   let attempt: string | undefined;
   try {
@@ -178,7 +170,7 @@ export async function launchSession(
       const result = await createInTransaction(deps, saved, persist, settings, {
         draftKey,
         source: "form",
-        origin,
+        origin: "launch-form",
         onAttempt: (operationId) => (attempt = operationId),
         bind: (state, session) => {
           compose = { ...(state.compose?.[draftKey] ?? emptyParts()), sessionId: session.id, launch: customLaunch };
@@ -188,8 +180,7 @@ export async function launchSession(
       return { ...result, compose };
     });
     // The session exists now, so a failed clear must not turn into a refusal that invites starting it again.
-    if (origin === "launch-form")
-      await store.drafts.write(draftKeys.launch(deps.connection.id), "").catch(() => undefined);
+    await store.drafts.write(draftKeys.launch(deps.connection.id), "").catch(() => undefined);
     return { kind: "created", session: created.session, compose: created.compose, problem: created.problem };
   } catch (error) {
     if (error instanceof TargetConnectionRequired) {

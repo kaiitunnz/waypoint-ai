@@ -46,7 +46,7 @@ Consecutive tool calls collapse into one line marked ▸ where they happened, su
 
 **Conversation History** opens the detailed event inspector with paired tool activity, filtering, older history, and follow-latest controls. It collapses the same runs into one row, which expands to the individual calls; searching still matches a command or path inside a collapsed run.
 
-Type in the message field and press Enter to send to that session. **Compose Message**, **Include Selected Text**, **Include Clipboard**, attachments, approvals and questions, **Connect SSH Target**, and **Edit Current Session** work as in Quick Chat. An exited session reattaches before the send when its interface can resume it. A session that can't take messages, because it ended and its interface can't resume it or it uses a terminal interface, stays readable and says why. Each session keeps its own message and compose drafts on each server. They are removed when the session is deleted in Raycast, or when its chat finds it deleted elsewhere.
+Type in the message field and press Enter to send to that session. **Compose Message**, **Include Selected Text**, **Include Clipboard**, attachments, approvals and questions, **Connect SSH Target**, and **Change Session Settings** work as in Quick Chat. An exited session reattaches before the send when its interface can resume it. A session that can't take messages, because it ended and its interface can't resume it or it uses a terminal interface, stays readable and says why. Each session keeps its own message and compose drafts on each server. They are removed when the session is deleted in Raycast, or when its chat finds it deleted elsewhere.
 
 Chatting with a session never changes Quick Chat's destination; **Use for Quick Chat** does (see [Managing sessions](#managing-sessions)). Session chats and Quick Chat share each server's unconfirmed-operation check, so a send waits until it is resolved. Any of them can check or clear it; only the chat that started an operation can allow a retry, and checking never switches another chat's conversation.
 
@@ -132,19 +132,17 @@ Files and images can be attached when the agent accepts attachments. They upload
 
 When a send needs a password-auth SSH target that is not connected, **Connect SSH Target** asks for its password. Waypoint uses it once to connect, then the send or reattach continues. The password is not saved.
 
-## Editing a session
+## Changing session settings
 
-**Edit Current Session** (⌘⇧,) changes the open conversation's own settings, separate from Quick Chat Defaults, which shape future chats. It opens from Quick Chat, New Chat, and session chats, and loads the session's current settings and capabilities from Waypoint each time.
+**Change Session Settings** (⌘⇧,) changes the open conversation's own settings, separate from Quick Chat Defaults, which shape future chats. It opens from Quick Chat, New Chat, and session chats, and loads the session's current settings and capabilities from Waypoint each time.
 
-The form shows only what the session's agent and interface support: title, model, effort, permission mode, account profile, interface, custom arguments, configuration overrides, environment variables, and usage source. Terminal interfaces stay in Waypoint, since Raycast shows structured conversations only.
+The form offers what can change on the running session, as the Waypoint web app's Session Settings does. The top line shows the agent, interface, execution target, and working directory, which stay fixed for a session; **New Session with Settings** starts a session with different ones. Below it come the interface, account profile, title, permission mode, model, and effort, then an Advanced group: usage source, custom arguments, configuration overrides, and environment variables. Each field appears only when the session's agent and interface support it. Interface switching offers structured interfaces only, since Raycast shows structured conversations; terminal interfaces stay in Waypoint.
 
-The top of the form previews what applying does. Inline changes apply at once. Changes that restart the session list how many restarts they cause, that the conversation resumes, and whether a running turn is interrupted; applying them asks for confirmation. Changes apply in the order Waypoint's web app uses. If a later change fails, the form lists the changes that were applied, shows the failure, and reloads the session's current settings; applying again sends only what is still pending.
+The form previews what applying does. Inline changes apply at once. Changes that restart the session list how many restarts they cause, that the conversation resumes, and whether a running turn is interrupted; applying them asks for confirmation. Changes apply in the order Waypoint's web app uses. If a later change fails, the form lists the changes that were applied, shows the failure, and reloads the session's current settings; applying again sends only what is still pending.
 
-![Edit Current Session](docs/screenshots/edit-session.jpg)
+![Change Session Settings](docs/screenshots/session-settings.jpg)
 
-Environment values are never shown or stored. Each existing variable can be kept, replaced, or removed, and variables Waypoint manages are hidden. Model, effort, and permission changes need a running session: exited sessions offer **Reattach Session**, and starting sessions ask you to wait.
-
-Agent, execution target, and working directory can't change on an existing conversation. Changing them in the form turns the action into **Start New Session with These Settings**, which starts a session with them right away and shows it in Quick Chat. Quick Chat Defaults and the current conversation keep their settings. Environment variables for the new session come from the Quick Chat preset.
+Environment values are never shown or stored. Each existing variable can be kept, replaced, or removed, and variables Waypoint manages are hidden. New variables go in the empty row at the end of the form, and another empty row appears as you type; **Add Environment Variable** (⌘N) jumps to it. A new variable can't reuse a stored name; replace the stored one instead. Model, effort, and permission changes need a running session: exited sessions offer **Reattach Session**, and starting sessions ask you to wait.
 
 ## Agents and interfaces
 

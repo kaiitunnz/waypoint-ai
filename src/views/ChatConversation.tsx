@@ -1,5 +1,5 @@
-import { Action, ActionPanel, Detail, Icon, Keyboard, List, useNavigation } from "@raycast/api";
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Action, ActionPanel, Detail, Icon, Keyboard, List } from "@raycast/api";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { ServerMetadata } from "../api/contracts";
 import { Session } from "../api/sessions";
 import {
@@ -38,7 +38,7 @@ import {
 } from "./SessionInteraction";
 import { sessionUrl } from "../domain/sessions";
 import { ConversationContent } from "./Conversation";
-import { EditSession, NewChatOption } from "./EditSession";
+import { SessionSettings } from "./SessionSettings";
 
 export interface ConversationActionContext {
   setActive: (active: boolean) => void;
@@ -140,13 +140,10 @@ export function ChatConversation({
   onSession?: (session: Session) => void;
   // A view pushed from the conversation closed, after which its checkpoint or session may have changed.
   onReturn?: () => void;
-  // Editing is hidden while a send is unsettled; `newChat` starts a new chat with changed settings.
-  settings?: { available: boolean; newChat?: NewChatOption };
+  // Settings are hidden while a send is unsettled.
+  settings?: { available: boolean };
 }) {
   const [active, setActive] = useState(true);
-  // Set while the new session's view replaces the editor, so the editor's pop doesn't resume the hidden conversation.
-  const handingOff = useRef(false);
-  const { push } = useNavigation();
   const { state, feed } = useConversationFeed(connection, sessionId ?? "", active && !!sessionId);
   const { state: interactionState, controller: interactionController } = useSessionInteractions(
     connection,
@@ -362,26 +359,13 @@ export function ChatConversation({
           />
           {session && !unsupported && !missing && settings?.available !== false && (
             <Action.Push
-              title="Edit Current Session"
+              title="Change Session Settings"
               icon={Icon.Gear}
               shortcut={{ modifiers: ["cmd", "shift"], key: "," }}
               target={
-                <EditSession
+                <SessionSettings
                   connection={connection}
                   sessionId={session.id}
-                  newChat={
-                    settings?.newChat && {
-                      ...settings.newChat,
-                      open: (view) => {
-                        handingOff.current = true;
-                        setActive(false);
-                        push(view, () => {
-                          handingOff.current = false;
-                          setActive(true);
-                        });
-                      },
-                    }
-                  }
                   onApplied={() => {
                     feed.retry();
                     onReturn?.();
@@ -390,7 +374,7 @@ export function ChatConversation({
               }
               onPush={() => setActive(false)}
               onPop={() => {
-                if (!handingOff.current) setActive(true);
+                setActive(true);
                 onReturn?.();
               }}
             />

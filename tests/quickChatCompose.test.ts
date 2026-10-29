@@ -586,13 +586,13 @@ test("starting a session with changed settings creates it at once and leaves the
   const defaults = c.getSnapshot().defaults!;
   let refused: Promise<unknown> | undefined;
   f.server.beforeInput = () => {
-    refused = c.createSession({ ...defaults, cwd: "/refused" }, "edit").catch((error: unknown) => error);
+    refused = c.createSession({ ...defaults, cwd: "/refused" }).catch((error: unknown) => error);
   };
   c.changeDraft("second");
   assert.equal(await c.send(), true);
   assert.match(String(await refused), /being sent/);
   f.server.beforeInput = undefined;
-  assert.equal((await c.createSession({ ...defaults, cwd: "/elsewhere" }, "edit")).kind, "created");
+  assert.equal((await c.createSession({ ...defaults, cwd: "/elsewhere" })).kind, "created");
   assert.equal(c.getSnapshot().session?.id, "created-2");
   assert.equal((await f.store.load(connection.id)).defaults.cwd, defaults.cwd);
   c.changeDraft("third");

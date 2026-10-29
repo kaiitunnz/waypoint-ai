@@ -40,6 +40,19 @@ export function structuredTransport(metadata: ServerMetadata, transport: string)
   return metadata.agents.find((agent) => agent.nativeTransport === transport)?.structured === true;
 }
 
+// The web app's interface names, which describe how the session is presented rather than which agent runs it.
+const interfaceNames: Record<string, string> = {
+  claude_cli: "Chat",
+  claude_tty: "Emulated",
+  codex_app_server: "Chat",
+  opencode_http: "Chat",
+  tmux: "Terminal",
+};
+
+export function interfaceName(metadata: ServerMetadata, transport: string): string {
+  return interfaceNames[transport] ?? (structuredTransport(metadata, transport) ? "Chat" : "Terminal");
+}
+
 export function isStructured(session: Session, metadata?: ServerMetadata): boolean {
   return !!metadata && structuredTransport(metadata, session.transport);
 }
