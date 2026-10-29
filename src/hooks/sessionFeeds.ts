@@ -31,7 +31,7 @@ const safeError = (error: unknown) =>
     ? error
     : new ApiError("unreachable", "Could not refresh Waypoint. Your loaded history has been kept. Retry to reconnect.");
 
-class Observable<State> {
+export class Observable<State> {
   protected listeners = new Set<() => void>();
   constructor(protected state: State) {}
   getSnapshot = () => this.state;
