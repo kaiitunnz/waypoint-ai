@@ -2,9 +2,8 @@ import { PermissionMode, ServerMetadata, TransportCapabilities } from "../api/co
 import { ModelCatalog } from "../api/models";
 import { Session, UsageSource } from "../api/sessions";
 import { LaunchSettings, TransportOption, UsageProvider } from "../api/settings";
-import { ChatDefaults } from "./quickChat";
 import { customModelValue, modelEfforts } from "./modelOptions";
-import { structuredTransport } from "./sessions";
+import { interfaceName, structuredTransport } from "./sessions";
 
 export interface Capabilities extends TransportCapabilities {
   permissions: PermissionMode[];
@@ -73,9 +72,6 @@ export interface SettingsDraft {
   env: Record<string, { op: EnvOp; value: string }>;
   newEnv: { key: string; value: string }[];
   usage: UsageSource;
-  agent: string;
-  targetId: string;
-  cwd: string;
 }
 
 export function settingsDraft(baseline: SettingsBaseline): SettingsDraft {
@@ -89,12 +85,37 @@ export function settingsDraft(baseline: SettingsBaseline): SettingsDraft {
     args: baseline.args.join("\n"),
     config: baseline.config.join("\n"),
     env: Object.fromEntries((baseline.launch?.envKeys ?? []).map((key) => [key, { op: "keep", value: "" }])),
-    newEnv: [],
+    newEnv: withBlankEnvRow([]),
     usage: baseline.usage,
-    agent: baseline.backend,
-    targetId: baseline.targetId,
-    cwd: baseline.cwd,
   };
+}
+
+export type EnvRow = SettingsDraft["newEnv"][number];
+const blankRow = (row: EnvRow) => !row.key.trim() && !row.value;
+
+// New variables end in exactly one blank row to type into. Rows are kept as they are, so a field being edited is
+// never replaced under the cursor; only blank rows after the first trailing one go.
+export function withBlankEnvRow(rows: EnvRow[]): EnvRow[] {
+  let end = rows.length;
+  while (end > 0 && blankRow(rows[end - 1])) end--;
+  return end < rows.length ? rows.slice(0, end + 1) : [...rows, { key: "", value: "" }];
+}
+
+export function removeLastEnvRow(rows: EnvRow[]): EnvRow[] {
+  const index = rows.findLastIndex((row) => !blankRow(row));
+  return index < 0 ? withBlankEnvRow(rows) : withBlankEnvRow([...rows.slice(0, index), ...rows.slice(index + 1)]);
+}
+
+// The session's fixed settings, as the web app's context line shows them.
+export function contextLine(baseline: SettingsBaseline, metadata: ServerMetadata): string {
+  return [
+    metadata.agents.find((agent) => agent.id === baseline.backend)?.label ?? baseline.backend,
+    interfaceName(metadata, baseline.transport),
+    baseline.targetId || "Local",
+    baseline.cwd,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 export const lines = (text: string) =>
@@ -227,7 +248,7 @@ export interface SettingsStep {
 }
 
 export interface SettingsPlan {
-  kind: "none" | "inline" | "restart-resume" | "new-chat";
+  kind: "none" | "inline" | "restart-resume";
   steps: SettingsStep[];
   restartCount: number;
   interruptsTurn: boolean;
@@ -246,10 +267,6 @@ export const stepLabels: Record<StepOp, string> = {
   usage: "usage source",
 };
 
-export function newChatChanged(baseline: SettingsBaseline, draft: SettingsDraft): boolean {
-  return draft.agent !== baseline.backend || draft.targetId !== baseline.targetId || draft.cwd.trim() !== baseline.cwd;
-}
-
 export function planSettings(
   baseline: SettingsBaseline,
   draft: SettingsDraft,
@@ -257,22 +274,6 @@ export function planSettings(
   available: Availability,
 ): SettingsPlan {
   const errors: string[] = [];
-  if (newChatChanged(baseline, draft)) {
-    if (!draft.cwd.trim()) errors.push("Enter a working directory for the new session.");
-    return {
-      kind: "new-chat",
-      steps: [],
-      restartCount: 0,
-      interruptsTurn: false,
-      transportChanged: false,
-      profileChanged: false,
-      warnings: [
-        "These settings can't change on this conversation. A new session starts with them; this conversation and your Quick Chat defaults keep their own settings.",
-        "Environment variables come from your Quick Chat preset.",
-      ],
-      errors,
-    };
-  }
   const steps: SettingsStep[] = [];
   const title = draft.title.trim();
   if (!title) errors.push("Enter a title.");
@@ -513,7 +514,7 @@ export function rebaseDraft(
   const env = done.has("launch") || uncertainLaunch ? fresh.env : { ...fresh.env };
   if (!done.has("launch") && !uncertainLaunch)
     for (const key of Object.keys(fresh.env)) if (draft.env[key]) env[key] = draft.env[key];
-  const newEnv =
+  const newEnv = withBlankEnvRow(
     done.has("launch") || uncertainLaunch
       ? []
       : draft.newEnv.flatMap((row) => {
@@ -523,7 +524,8 @@ export function rebaseDraft(
             return [];
           }
           return [row];
-        });
+        }),
+  );
   return {
     title: pick("title", "title"),
     model: pick("model", "model"),
@@ -536,35 +538,5 @@ export function rebaseDraft(
     env,
     newEnv,
     usage: pick("usage", "usage"),
-    agent: pick("agent"),
-    targetId: pick("targetId"),
-    cwd: pick("cwd"),
   };
-}
-
-// Launch settings, built on the current defaults, that start a new session with the edited agent, target, and folder.
-export function newChatDefaults(
-  current: ChatDefaults,
-  baseline: SettingsBaseline,
-  draft: SettingsDraft,
-  metadata: ServerMetadata,
-): ChatDefaults {
-  const same = draft.agent === baseline.backend && draft.targetId === baseline.targetId;
-  const agent = metadata.agents.find((entry) => entry.id === draft.agent);
-  const listOf = (text: string, supported: boolean, previous: string[]) => {
-    const list = lines(text);
-    return !supported || !baseline.launch || (!list.length && !previous.length) ? undefined : list;
-  };
-  const kept = same
-    ? {
-        model: draft.model === null ? defaultValue : draft.model,
-        effort: draft.effort === null ? defaultValue : draft.effort,
-        permission: draft.permission ?? "",
-        profile: draft.profileId === null ? defaultValue : draft.profileId,
-        transport: structuredTransport(metadata, draft.transport) ? draft.transport : "",
-        args: listOf(draft.args, !!agent?.customArgs, baseline.args),
-        config: listOf(draft.config, !!agent?.configOverrides, baseline.config),
-      }
-    : { model: "", effort: "", permission: "", profile: "", transport: "", args: undefined, config: undefined };
-  return { ...current, agent: draft.agent, target: draft.targetId, cwd: draft.cwd.trim(), ...kept };
 }

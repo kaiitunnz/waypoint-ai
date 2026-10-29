@@ -10,7 +10,6 @@ import { sessionUrl } from "../domain/sessions";
 import { checkpointOffer, deleteMessage, quickChatMovesOn, terminateMessage } from "../domain/sessionActions";
 import { ChatConversation } from "./ChatConversation";
 import { QuickChatController } from "../hooks/quickChatController";
-import { LaunchFailure } from "../hooks/sessionLauncher";
 import { QuickChatDefaults } from "./QuickChatDefaults";
 import { NewSessionSettings } from "./NewSessionSettings";
 import { CheckpointActions, ComposeActions, SessionReattachAction, TargetActions } from "./ChatActions";
@@ -159,17 +158,7 @@ function QuickChatView({
         onReturn={() => void controller.syncPending()}
         onMissing={(id) => controller.markMissing(id)}
         hasDraft={state.hasDraft}
-        settings={{
-          available: !state.busy && !state.pending,
-          newChat: state.defaults
-            ? {
-                start: async (build) => {
-                  const result = await controller.createSession(build(state.defaults!), "edit");
-                  if (result.kind !== "created") throw new LaunchFailure(result);
-                },
-              }
-            : undefined,
-        }}
+        settings={{ available: !state.busy && !state.pending }}
       />
     );
   return (

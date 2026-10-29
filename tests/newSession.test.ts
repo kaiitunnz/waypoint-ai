@@ -152,7 +152,7 @@ test("starting a session from chosen settings creates it without a message and l
   const c = f.controller();
   await c.start();
   await f.store.drafts.write(draftKeys.launch(connection.id), JSON.stringify(await f.settings()));
-  const result = await c.createSession(await f.settings(), "launch-form");
+  const result = await c.createSession(await f.settings());
   assert.equal(result.kind, "created");
   assert.equal(f.server.creates.length, 1);
   assert.equal(f.server.creates[0].model, "chosen-model");
@@ -176,23 +176,13 @@ test("starting a session from chosen settings creates it without a message and l
   await f.close();
 });
 
-test("an edit-started session leaves the New Session with Settings draft alone", async () => {
-  const f = await fixture();
-  const c = f.controller();
-  await c.start();
-  await f.store.drafts.write(draftKeys.launch(connection.id), "{}");
-  assert.equal((await c.createSession(await f.settings(), "edit")).kind, "created");
-  assert.equal(await f.store.drafts.read(draftKeys.launch(connection.id)), "{}");
-  await f.close();
-});
-
 test("an unused session from chosen settings is continued on reopen in every mode until its first message", async () => {
   for (const mode of ["new", "continue", "timed"] as const) {
     const f = await fixture();
     await f.setDefaults({ mode });
     const first = f.controller();
     await first.start();
-    await first.createSession(await f.settings(), "launch-form");
+    await first.createSession(await f.settings());
     first.stop();
     const reopened = f.controller();
     await reopened.start();
@@ -213,7 +203,7 @@ test("timed reuse counts the timeout from when the session was started", async (
   const f = await fixture();
   const c = f.controller();
   await c.start();
-  await c.createSession(await f.settings(), "launch-form");
+  await c.createSession(await f.settings());
   c.stop();
   f.advance(29 * minute);
   const within = f.controller();
@@ -231,7 +221,7 @@ test("New Chat continues the session it started from chosen settings even though
   const f = await fixture();
   const c = f.controller(true);
   await c.start();
-  await c.createSession(await f.settings(), "launch-form");
+  await c.createSession(await f.settings());
   c.stop();
   const reopened = f.controller(true);
   await reopened.start();
@@ -251,7 +241,7 @@ test("Start New Chat moves on from an unused session in every mode, also after r
     await f.setDefaults({ mode });
     const c = f.controller();
     await c.start();
-    await c.createSession(await f.settings(), "launch-form");
+    await c.createSession(await f.settings());
     await c.newChat();
     assert.equal(c.getSnapshot().session, undefined);
     assert.equal(c.getSnapshot().compose.launch, undefined);
@@ -271,7 +261,7 @@ test("the binding never overrides Quick Chat's real destination", async () => {
   await f.setDefaults({ mode: "new" });
   const c = f.controller();
   await c.start();
-  await c.createSession(await f.settings(), "launch-form");
+  await c.createSession(await f.settings());
   c.stop();
   // A New Chat send moves the destination to its own session.
   const other = f.controller(true);
@@ -299,7 +289,7 @@ test("a line send that creates a session drops a custom binding to the previous 
   await f.setDefaults({ mode: "new" });
   const c = f.controller();
   await c.start();
-  await c.createSession(await f.settings(), "launch-form");
+  await c.createSession(await f.settings());
   await c.newChat();
   c.changeDraft("fresh");
   assert.equal(await c.send(), true);
@@ -313,7 +303,7 @@ test("staging context and discarding a compose draft keep the binding", async ()
   await f.setDefaults({ mode: "new" });
   const c = f.controller();
   await c.start();
-  await c.createSession(await f.settings(), "launch-form");
+  await c.createSession(await f.settings());
   assert.equal(await c.stageContext("selection", "picked"), true);
   assert.equal((await f.store.load(connection.id)).compose?.quick?.launch, customLaunch);
   assert.equal(await c.discardCompose(), true);
@@ -332,7 +322,7 @@ test("a rejected start keeps nothing and shows Waypoint's reason without blaming
   const c = f.controller();
   await c.start();
   f.server.create = "reject";
-  const result = await c.createSession(await f.settings(), "launch-form");
+  const result = await c.createSession(await f.settings());
   assert.deepEqual(result, { kind: "rejected", message: "Waypoint: preset blocked by policy" });
   const saved = await f.store.load(connection.id);
   assert.equal(saved.pending, undefined);
@@ -351,11 +341,11 @@ test("an unconfirmed start keeps its checkpoint, and recovery shows and binds th
   assert.equal(c.getSnapshot().session?.id, "created-1");
   await f.store.drafts.write(draftKeys.launch(connection.id), "{}");
   f.server.create = "uncertain";
-  const result = await c.createSession(await f.settings(), "launch-form");
+  const result = await c.createSession(await f.settings());
   assert.equal(result.kind, "uncertain");
   assert.equal(c.getSnapshot().pending?.origin, "launch-form");
   assert.equal(await f.store.drafts.read(draftKeys.launch(connection.id)), "{}");
-  await assert.rejects(c.createSession(await f.settings(), "launch-form"), /needs checking/);
+  await assert.rejects(c.createSession(await f.settings()), /needs checking/);
   f.server.create = "ok";
   await c.reconcile();
   const state = c.getSnapshot();
@@ -369,12 +359,34 @@ test("an unconfirmed start keeps its checkpoint, and recovery shows and binds th
   await f.close();
 });
 
+test("recovering a create saved by an earlier version's Edit Current Session binds it and keeps the form draft", async () => {
+  const f = await fixture();
+  const c = f.controller();
+  await c.start();
+  f.server.create = "uncertain";
+  await c.createSession(await f.settings());
+  await f.store.transaction(connection.id, async (saved, persist) => {
+    saved.pending = { ...saved.pending!, origin: "edit" };
+    await persist();
+  });
+  await f.store.drafts.write(draftKeys.launch(connection.id), "{}");
+  f.server.create = "ok";
+  await c.reconcile();
+  assert.equal(c.getSnapshot().session?.id, "created-1");
+  assert.equal(c.getSnapshot().notice, "Recovered the new session.");
+  const saved = await f.store.load(connection.id);
+  assert.equal(saved.pending, undefined);
+  assert.equal(saved.compose?.quick?.launch, customLaunch);
+  assert.equal(await f.store.drafts.read(draftKeys.launch(connection.id)), "{}");
+  await f.close();
+});
+
 test("a recovered session times out from its attempt", async () => {
   const f = await fixture();
   const c = f.controller();
   await c.start();
   f.server.create = "uncertain";
-  await c.createSession(await f.settings(), "edit");
+  await c.createSession(await f.settings());
   f.server.create = "ok";
   await c.reconcile();
   c.stop();
@@ -390,7 +402,7 @@ test("a failed write after a confirmed create is unconfirmed, not rejected", asy
   const c = f.controller();
   await c.start();
   f.storage.failAfterCreate = true;
-  const result = await c.createSession(await f.settings(), "launch-form");
+  const result = await c.createSession(await f.settings());
   assert.equal(result.kind, "uncertain");
   assert.equal((await f.store.load(connection.id)).pending?.kind, "create");
   await f.close();
@@ -401,7 +413,7 @@ test("a password SSH target asks to connect without retrying, and the next start
   const c = f.controller();
   await c.start();
   f.server.create = "ssh";
-  const result = await c.createSession(await f.settings({ target: "ssh-1", cwd: "/remote" }), "launch-form");
+  const result = await c.createSession(await f.settings({ target: "ssh-1", cwd: "/remote" }));
   assert.deepEqual(result, {
     kind: "ssh",
     targetId: "ssh-1",
@@ -411,10 +423,7 @@ test("a password SSH target asks to connect without retrying, and the next start
   f.server.create = "ok";
   assert.equal((await c.connectTargetOnly("ssh-1", "right")).connected, true);
   assert.equal(f.server.creates.length, 0);
-  assert.equal(
-    (await c.createSession(await f.settings({ target: "ssh-1", cwd: "/remote" }), "launch-form")).kind,
-    "created",
-  );
+  assert.equal((await c.createSession(await f.settings({ target: "ssh-1", cwd: "/remote" }))).kind, "created");
   assert.equal(f.server.creates.length, 1);
   await f.close();
 });
@@ -429,10 +438,7 @@ test("starting a session clears a send's stale SSH retry", async () => {
   assert.equal(await c.send(), false);
   assert.equal(c.getSnapshot().sshTarget, "ssh-1");
   f.server.create = "ok";
-  assert.equal(
-    (await c.createSession(await f.settings({ target: "", cwd: "/chosen" }), "launch-form")).kind,
-    "created",
-  );
+  assert.equal((await c.createSession(await f.settings({ target: "", cwd: "/chosen" }))).kind, "created");
   assert.equal(c.getSnapshot().sshTarget, undefined);
   assert.deepEqual(await c.connectTarget("right"), {
     connected: false,
@@ -447,7 +453,7 @@ test("a failed draft clear after a confirmed start still shows the session", asy
   const c = f.controller();
   await c.start();
   f.storage.failLaunchDraft = true;
-  const result = await c.createSession(await f.settings(), "launch-form");
+  const result = await c.createSession(await f.settings());
   assert.equal(result.kind, "created");
   assert.equal(c.getSnapshot().session?.id, "created-1");
   assert.equal(f.server.creates.length, 1);
@@ -459,7 +465,7 @@ test("Always New doesn't continue a session a send created and left unused", asy
   await f.setDefaults({ mode: "new" });
   const c = f.controller();
   await c.start();
-  await c.createSession(await f.settings(), "launch-form");
+  await c.createSession(await f.settings());
   c.stop();
   // As a compose send leaves it when the create succeeded but the message didn't go through.
   await f.store.transaction(connection.id, async (saved, persist) => {
@@ -475,7 +481,7 @@ test("Always New doesn't continue a session a send created and left unused", asy
 test("starting a session is refused while busy, loading, or unconfirmed, and allowed when the destination is gone", async () => {
   const f = await fixture();
   const loading = f.controller();
-  await assert.rejects(loading.createSession(await f.settings(), "launch-form"), /still loading/);
+  await assert.rejects(loading.createSession(await f.settings()), /still loading/);
   await f.store.transaction(connection.id, async (saved, persist) => {
     saved.pointer = "deleted-session";
     await persist();
@@ -483,7 +489,7 @@ test("starting a session is refused while busy, loading, or unconfirmed, and all
   const c = f.controller();
   await c.start();
   assert.match(c.getSnapshot().error ?? "", /no longer on this server/);
-  assert.equal((await c.createSession(await f.settings(), "launch-form")).kind, "created");
+  assert.equal((await c.createSession(await f.settings())).kind, "created");
   assert.equal(c.getSnapshot().error, undefined);
   await c.newChat();
   assert.equal((await f.store.load(connection.id)).pointer, undefined);
@@ -496,18 +502,18 @@ test("an empty working directory on this Mac's server starts in the Quick Chat w
   const workspace = { dir: "/Users/me/.waypoint-ai/workspace", ensure: async () => void ensured++ } as Workspace;
   const c = f.controller(false, false, workspace);
   await c.start();
-  assert.equal((await c.createSession(await f.settings({ cwd: "" }), "launch-form")).kind, "created");
+  assert.equal((await c.createSession(await f.settings({ cwd: "" }))).kind, "created");
   assert.equal(ensured, 1);
   assert.equal(f.server.creates[0].cwd, workspace.dir);
   await f.close();
 });
 
-test("the browser path binds Quick Chat's draft and refuses while an operation is unconfirmed", async () => {
+test("a launch binds the draft and refuses while an operation is unconfirmed", async () => {
   const f = await fixture();
   await f.setDefaults({ mode: "new" });
   const deps = { connection, client: f.client, now: () => 1_000_000, metadata: f.metadata };
   const settings = await f.settings();
-  const result = await launchSession(deps, f.store, async () => undefined, settings, "quick", "edit");
+  const result = await launchSession(deps, f.store, async () => undefined, settings, "quick");
   assert.equal(result.kind, "created");
   assert.equal((await f.store.load(connection.id)).compose?.quick?.launch, customLaunch);
   const c = f.controller();
@@ -525,7 +531,7 @@ test("the browser path binds Quick Chat's draft and refuses while an operation i
     await persist();
   });
   await assert.rejects(
-    launchSession(deps, f.store, async () => undefined, settings, "quick", "edit"),
+    launchSession(deps, f.store, async () => undefined, settings, "quick"),
     /outcome/,
   );
   await f.close();
@@ -536,7 +542,7 @@ test("terminating a custom-bound session releases its binding", async () => {
   await f.setDefaults({ mode: "new" });
   const c = f.controller();
   await c.start();
-  await c.createSession(await f.settings(), "launch-form");
+  await c.createSession(await f.settings());
   const result = await c.terminate();
   assert.equal(result?.ended, true);
   const saved = await f.store.load(connection.id);
@@ -576,6 +582,8 @@ test("launch settings and create origins are validated when read back", () => {
       pending: { kind: "create", operationId: "o", text: "", draftKey: "quick", startedAt: 1, origin },
     });
   assert.equal(decodeQuickChat(state("launch-form")).pending?.origin, "launch-form");
+  // Earlier versions saved this origin for a session started from Edit Current Session.
+  assert.equal(decodeQuickChat(state("edit")).pending?.origin, "edit");
   assert.throws(() => decodeQuickChat(state("elsewhere")));
 });
 

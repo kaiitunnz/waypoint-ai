@@ -1105,6 +1105,32 @@ test("Start New Chat clears a destination that is gone, but never a live one", a
   }
 });
 
+test("a failed start saved by Edit Current Session in an earlier version points to New Session with Settings", async () => {
+  const f = await fixture();
+  try {
+    const c = f.controller();
+    await c.start();
+    f.setUncertainCreate(true);
+    await c.changeDraft("Hello there");
+    await c.send();
+    await f.store.transaction(connection.id, async (saved, persist) => {
+      saved.pending = { ...saved.pending!, origin: "edit" };
+      await persist();
+    });
+    Object.assign(f.sessions[0], {
+      tags: {},
+      title: (await f.store.read(connection.id)).pending!.launch!.title,
+      status: "error",
+      created_at: "2026-10-26T00:00:00Z",
+    });
+    await c.reconcile();
+    assert.equal(c.getSnapshot().pending, undefined);
+    assert.match(c.getSnapshot().error!, /start it again with New Session with Settings\.$/);
+  } finally {
+    await f.close();
+  }
+});
+
 test("a create whose session failed to start is recognized, cleared, and keeps the draft", async () => {
   const f = await fixture();
   try {

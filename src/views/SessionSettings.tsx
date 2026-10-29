@@ -11,60 +11,49 @@ import {
   useNavigation,
 } from "@raycast/api";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { ChatDefaults, createRequest } from "../domain/quickChat";
 import {
+  EnvRow,
   SettingsDraft,
   SettingsPlan,
   availability,
+  contextLine,
   editableEnvKeys,
   effortChoices,
   effortForModel,
   fromChoice,
   modelChoice,
   modelChoices,
-  newChatDefaults,
   permissionChoices,
   profileChoices,
   rebaseDraft,
+  removeLastEnvRow,
   settingsDraft,
   toChoice,
   usageChoices,
   usageFromValue,
   usageValue,
+  withBlankEnvRow,
 } from "../domain/sessionSettings";
 import { customModelValue } from "../domain/modelOptions";
-import { structuredTransport } from "../domain/sessions";
+import { interfaceName } from "../domain/sessions";
 import { FeedConnection } from "../hooks/sessionFeeds";
 import { SessionSettingsController } from "../hooks/sessionSettingsController";
 import { ConnectTarget } from "./ConnectTarget";
-import { LaunchFailure } from "../hooks/sessionLauncher";
-import { localWorkspace } from "../storage/workspace";
-
-// Starts a session from settings built on the current defaults, which stay unchanged. Throws `LaunchFailure` when
-// the session wasn't started; returns a view to open when the new session isn't already on screen.
-export interface NewChatOption {
-  start: (build: (current: ChatDefaults) => ChatDefaults) => Promise<React.ReactElement | void>;
-  // Opens the returned view in place of the editor, letting the conversation underneath pause.
-  open?: (view: React.ReactElement) => void;
-}
 
 function planText(plan: SettingsPlan | undefined): string {
   if (!plan) return "";
   if (plan.kind === "none") return "No changes yet.";
-  if (plan.kind === "new-chat") return plan.warnings.join("\n");
   const labels = plan.steps.map((step) => step.label).join(", ");
   return [plan.kind === "inline" ? `Applies now: ${labels}.` : `Applies ${labels}.`, ...plan.warnings].join("\n");
 }
 
-export function EditSession({
+export function SessionSettings({
   connection,
   sessionId,
-  newChat,
   onApplied,
 }: {
   connection: FeedConnection;
   sessionId: string;
-  newChat?: NewChatOption;
   onApplied?: () => void;
 }) {
   // Callers rebuild the connection object on every render, so the controller is created once per form.
@@ -72,12 +61,12 @@ export function EditSession({
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const [draft, setDraft] = useState<SettingsDraft>();
   const [problem, setProblem] = useState<string>();
-  // A password-auth SSH target the new session's start asked to connect.
-  const [launchTarget, setLaunchTarget] = useState<string>();
   const [effortReset, setEffortReset] = useState(false);
   const [busy, setBusy] = useState(false);
-  const { pop, push } = useNavigation();
+  const { pop } = useNavigation();
   const mounted = useRef(true);
+  // The trailing blank variable row, which is always the last one.
+  const blankKey = useRef<Form.TextField>(null);
   // The effort last chosen in the form; a custom model typed through a listed ID mustn't drop it for good.
   const effortIntent = useRef<string | null | undefined>(undefined);
   const { baseline, metadata, caps } = state;
@@ -102,7 +91,7 @@ export function EditSession({
   if (!baseline || !metadata || !draft)
     return (
       <Form
-        navigationTitle="Edit Current Session"
+        navigationTitle="Change Session Settings"
         isLoading={state.loading}
         actions={
           state.error ? (
@@ -124,7 +113,7 @@ export function EditSession({
   const plan = controller.plan(draft);
   const efforts = effortChoices(state.catalog, baseline, draft);
   const working = busy || state.applying;
-  const connectTarget = state.connectTarget ?? launchTarget;
+  const connectTarget = state.connectTarget;
   const target = metadata.targets.find((entry) => entry.id === connectTarget);
   const reattachable =
     state.reattach ||
@@ -141,6 +130,12 @@ export function EditSession({
     setProblem(undefined);
     setDraft((current) => current && { ...current, ...patch });
   };
+  const updateRows = (change: (rows: EnvRow[]) => EnvRow[]) => {
+    setProblem(undefined);
+    setDraft((current) => current && { ...current, newEnv: change(current.newEnv) });
+  };
+  const updateRow = (index: number, patch: Partial<EnvRow>) =>
+    updateRows((rows) => withBlankEnvRow(rows.map((row, i) => (i === index ? { ...row, ...patch } : row))));
 
   async function submit() {
     if (!draft || !plan || working) return;
@@ -148,23 +143,6 @@ export function EditSession({
     if (plan.kind === "none") return setProblem("Change a setting first.");
     setBusy(true);
     try {
-      if (plan.kind === "new-chat") {
-        if (!newChat) return;
-        const view = await newChat.start((current) => {
-          const defaults = newChatDefaults(current, baseline!, draft, metadata!);
-          // Checked before starting so an unusable combination stays in the form.
-          createRequest(defaults, metadata!, "check", "check", {
-            workspace: localWorkspace(connection.apiUrl)?.dir,
-            source: "form",
-          });
-          return defaults;
-        });
-        await showToast({ style: Toast.Style.Success, title: "Session started" });
-        if (!mounted.current) return;
-        pop();
-        if (view) (newChat.open ?? push)(view);
-        return;
-      }
       const prepared = await controller.prepare(draft, plan);
       if (prepared.status !== "ready") {
         replaceDraft(prepared.draft);
@@ -206,13 +184,6 @@ export function EditSession({
       });
       if (mounted.current) pop();
     } catch (error) {
-      if (error instanceof LaunchFailure && error.result.kind === "uncertain") {
-        await showToast({ style: Toast.Style.Failure, title: "New session unconfirmed", message: error.message });
-        if (mounted.current) pop();
-        return;
-      }
-      if (error instanceof LaunchFailure && error.result.kind === "ssh" && mounted.current)
-        setLaunchTarget(error.result.targetId);
       const message = error instanceof Error ? error.message : "Could not apply the changes.";
       if (mounted.current) setProblem(message);
       else await showToast({ style: Toast.Style.Failure, title: "Changes not applied", message });
@@ -230,27 +201,15 @@ export function EditSession({
     }
   }
 
-  const submitTitle =
-    plan?.kind === "new-chat"
-      ? "Start New Session with These Settings"
-      : plan?.kind === "restart-resume"
-        ? "Apply and Restart"
-        : "Apply Changes";
-  const agents = metadata.agents.filter(
-    (agent) =>
-      (!draft.targetId || metadata.targets.find((entry) => entry.id === draft.targetId)?.agents.includes(agent.id)) &&
-      agent.transports.some((transport) => structuredTransport(metadata, transport)),
-  );
+  const submitTitle = plan?.kind === "restart-resume" ? "Apply and Restart" : "Apply Changes";
   const result = state.result;
   return (
     <Form
-      navigationTitle="Edit Current Session"
+      navigationTitle="Change Session Settings"
       isLoading={state.loading || working}
       actions={
         <ActionPanel>
-          {(plan?.kind !== "new-chat" || newChat) && (
-            <Action.SubmitForm title={submitTitle} icon={Icon.Checkmark} onSubmit={submit} />
-          )}
+          <Action.SubmitForm title={submitTitle} icon={Icon.Checkmark} onSubmit={submit} />
           {connectTarget && (
             <Action.Push
               title="Connect SSH Target"
@@ -260,10 +219,7 @@ export function EditSession({
                   target={target}
                   connect={async (password) => {
                     const result = await controller.connectTarget(connectTarget, password);
-                    if (result.connected && mounted.current) {
-                      setLaunchTarget(undefined);
-                      setProblem(undefined);
-                    }
+                    if (result.connected && mounted.current) setProblem(undefined);
                     return result;
                   }}
                 />
@@ -278,15 +234,11 @@ export function EditSession({
               title="Add Environment Variable"
               icon={Icon.Plus}
               shortcut={Keyboard.Shortcut.Common.New}
-              onAction={() => update({ newEnv: [...draft.newEnv, { key: "", value: "" }] })}
+              onAction={() => blankKey.current?.focus()}
             />
           )}
-          {draft.newEnv.length > 0 && (
-            <Action
-              title="Remove New Variable"
-              icon={Icon.Minus}
-              onAction={() => update({ newEnv: draft.newEnv.slice(0, -1) })}
-            />
+          {available.launch && draft.newEnv.length > 1 && (
+            <Action title="Remove New Variable" icon={Icon.Minus} onAction={() => updateRows(removeLastEnvRow)} />
           )}
           <Action
             title="Reload Settings"
@@ -297,6 +249,7 @@ export function EditSession({
         </ActionPanel>
       }
     >
+      <Form.Description text={contextLine(baseline, metadata)} />
       <Form.Description
         title={plan?.kind === "restart-resume" ? "Restart" : "Changes"}
         text={state.restarting ? "Restarting session…" : planText(plan)}
@@ -310,9 +263,52 @@ export function EditSession({
       )}
       {state.error && <Form.Description title="Not reloaded" text={state.error} />}
       {state.notices.length > 0 && <Form.Description title="Note" text={state.notices.join("\n")} />}
+      {available.transports.length > 0 && (
+        <Form.Dropdown
+          id="transport"
+          title="Interface"
+          value={draft.transport}
+          info={available.terminalHidden ? "Terminal interfaces are available in Waypoint." : undefined}
+          onChange={(transport) => update({ transport })}
+        >
+          {available.transports.map((transport) => (
+            <Form.Dropdown.Item key={transport} value={transport} title={interfaceName(metadata, transport)} />
+          ))}
+        </Form.Dropdown>
+      )}
+      {available.launch && !available.transports.length && available.terminalHidden && (
+        <Form.Description
+          title="Interface"
+          text={`${interfaceName(metadata, baseline.transport)}. Terminal interfaces are available in Waypoint.`}
+        />
+      )}
+      {available.profile && (
+        <Form.Dropdown
+          id="profile"
+          title="Account Profile"
+          value={toChoice(draft.profileId)}
+          onChange={(value) => update({ profileId: fromChoice(value) })}
+        >
+          {profileChoices(baseline).map((choice) => (
+            <Form.Dropdown.Item key={choice.value} value={choice.value} title={choice.title} />
+          ))}
+        </Form.Dropdown>
+      )}
       <Form.TextField id="title" title="Title" value={draft.title} onChange={(title) => update({ title })} />
       <Form.Separator />
       {available.tuningNote && <Form.Description title="Model" text={available.tuningNote} />}
+      {available.permission && (
+        <Form.Dropdown
+          id="permission"
+          title="Permission Mode"
+          value={toChoice(draft.permission)}
+          onChange={(value) => update({ permission: fromChoice(value) })}
+        >
+          {permissionChoices(caps, baseline).map((choice) => (
+            <Form.Dropdown.Item key={choice.value} value={choice.value} title={choice.title} />
+          ))}
+        </Form.Dropdown>
+      )}
       {available.model && (
         <Form.Dropdown
           id="model"
@@ -355,54 +351,22 @@ export function EditSession({
           ))}
         </Form.Dropdown>
       )}
-      {available.permission && (
-        <Form.Dropdown
-          id="permission"
-          title="Permission Mode"
-          value={toChoice(draft.permission)}
-          onChange={(value) => update({ permission: fromChoice(value) })}
-        >
-          {permissionChoices(caps, baseline).map((choice) => (
-            <Form.Dropdown.Item key={choice.value} value={choice.value} title={choice.title} />
-          ))}
-        </Form.Dropdown>
-      )}
       <Form.Separator />
-      {available.launchNote && <Form.Description title="Launch" text={available.launchNote} />}
-      {available.profile && (
+      <Form.Description
+        title="Advanced"
+        text={available.launchNote ?? "Launch changes restart the session and keep its conversation."}
+      />
+      {available.usage && (
         <Form.Dropdown
-          id="profile"
-          title="Account Profile"
-          value={toChoice(draft.profileId)}
-          onChange={(value) => update({ profileId: fromChoice(value) })}
+          id="usage"
+          title="Usage Source"
+          value={usageValue(draft.usage)}
+          onChange={(value) => update({ usage: usageFromValue(value) })}
         >
-          {profileChoices(baseline).map((choice) => (
+          {usageChoices(state.providers, baseline).map((choice) => (
             <Form.Dropdown.Item key={choice.value} value={choice.value} title={choice.title} />
           ))}
         </Form.Dropdown>
-      )}
-      {available.transports.length > 0 && (
-        <Form.Dropdown
-          id="transport"
-          title="Interface"
-          value={draft.transport}
-          info={available.terminalHidden ? "Terminal interfaces are available in Waypoint." : undefined}
-          onChange={(transport) => update({ transport })}
-        >
-          {available.transports.map((transport) => (
-            <Form.Dropdown.Item
-              key={transport}
-              value={transport}
-              title={metadata.agents.find((agent) => agent.nativeTransport === transport)?.label ?? transport}
-            />
-          ))}
-        </Form.Dropdown>
-      )}
-      {available.launch && !available.transports.length && available.terminalHidden && (
-        <Form.Description
-          title="Interface"
-          text={`${metadata.agents.find((agent) => agent.nativeTransport === baseline.transport)?.label ?? baseline.transport}. Terminal interfaces are available in Waypoint.`}
-        />
       )}
       {available.args && (
         <Form.TextArea
@@ -449,84 +413,26 @@ export function EditSession({
             ),
           ];
         })}
-      {draft.newEnv.map((row, index) => [
-        <Form.TextField
-          key={`new-key-${index}`}
-          id={`new-key-${index}`}
-          title="New Variable"
-          placeholder="NAME"
-          value={row.key}
-          onChange={(key) =>
-            update({ newEnv: draft.newEnv.map((entry, i) => (i === index ? { ...entry, key } : entry)) })
-          }
-        />,
-        <Form.PasswordField
-          key={`new-value-${index}`}
-          id={`new-value-${index}`}
-          title=""
-          placeholder="Value"
-          value={row.value}
-          onChange={(value) =>
-            update({ newEnv: draft.newEnv.map((entry, i) => (i === index ? { ...entry, value } : entry)) })
-          }
-        />,
-      ])}
-      {available.usage && (
-        <>
-          <Form.Separator />
-          <Form.Dropdown
-            id="usage"
-            title="Usage Source"
-            value={usageValue(draft.usage)}
-            onChange={(value) => update({ usage: usageFromValue(value) })}
-          >
-            {usageChoices(state.providers, baseline).map((choice) => (
-              <Form.Dropdown.Item key={choice.value} value={choice.value} title={choice.title} />
-            ))}
-          </Form.Dropdown>
-        </>
-      )}
-      <Form.Separator />
-      {newChat ? (
-        <>
-          <Form.Dropdown
-            id="agent"
-            title="Agent"
-            value={draft.agent}
-            info="Changing the agent, target, or folder starts a new session. This conversation keeps its settings."
-            onChange={(agent) => update({ agent })}
-          >
-            {!agents.some((agent) => agent.id === baseline.backend) && (
-              <Form.Dropdown.Item value={baseline.backend} title={baseline.backend} />
-            )}
-            {agents.map((agent) => (
-              <Form.Dropdown.Item key={agent.id} value={agent.id} title={agent.label} />
-            ))}
-          </Form.Dropdown>
-          <Form.Dropdown
-            id="target"
-            title="Execution Target"
-            value={draft.targetId}
-            onChange={(targetId) => update({ targetId })}
-          >
-            <Form.Dropdown.Item value="" title="Local · API server" />
-            {metadata.targets.map((entry) => (
-              <Form.Dropdown.Item key={entry.id} value={entry.id} title={`${entry.name} · SSH`} />
-            ))}
-            {baseline.targetId && !metadata.targets.some((entry) => entry.id === baseline.targetId) && (
-              <Form.Dropdown.Item value={baseline.targetId} title={baseline.targetId} />
-            )}
-          </Form.Dropdown>
-          <Form.TextField id="cwd" title="Working Directory" value={draft.cwd} onChange={(cwd) => update({ cwd })} />
-        </>
-      ) : (
-        <Form.Description
-          title="Runs In"
-          text={`${metadata.agents.find((agent) => agent.id === baseline.backend)?.label ?? baseline.backend} · ${
-            metadata.targets.find((entry) => entry.id === baseline.targetId)?.name ?? "Local server"
-          }\n${baseline.cwd}\nStart a new chat from Quick Chat to change these.`}
-        />
-      )}
+      {available.launch &&
+        draft.newEnv.map((row, index) => [
+          <Form.TextField
+            key={`new-key-${index}`}
+            id={`new-key-${index}`}
+            ref={index === draft.newEnv.length - 1 ? blankKey : undefined}
+            title="New Variable"
+            placeholder="NAME"
+            value={row.key}
+            onChange={(key) => updateRow(index, { key })}
+          />,
+          <Form.PasswordField
+            key={`new-value-${index}`}
+            id={`new-value-${index}`}
+            title=""
+            placeholder="Value"
+            value={row.value}
+            onChange={(value) => updateRow(index, { value })}
+          />,
+        ])}
     </Form>
   );
 }

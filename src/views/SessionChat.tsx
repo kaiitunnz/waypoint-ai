@@ -12,7 +12,6 @@ import { quickChatStore } from "../storage/raycast";
 import { LoadingView } from "../components/SessionPresentation";
 import { ChatConversation, SessionActionContext } from "./ChatConversation";
 import { CheckpointActions, ComposeActions, SessionReattachAction, TargetActions } from "./ChatActions";
-import { NewChatOption } from "./EditSession";
 import { ManageServers } from "./ManageServers";
 import { SignInForm } from "./ServerForm";
 import { SessionActions } from "./SessionActions";
@@ -21,13 +20,11 @@ export function ConversationScreen({
   connectionId,
   sessionId,
   metadata,
-  newChat,
   quickChat,
 }: {
   connectionId: string;
   sessionId: string;
   metadata: ServerMetadata;
-  newChat?: NewChatOption;
   // Quick Chat opened on this server's chosen session.
   quickChat?: () => React.ReactElement;
 }) {
@@ -57,7 +54,6 @@ export function ConversationScreen({
       connection={{ ...connection, token: connection.token }}
       sessionId={sessionId}
       metadata={metadata}
-      newChat={newChat}
       quickChat={quickChat}
       refreshConnections={refresh}
     />
@@ -69,14 +65,12 @@ function SessionChat({
   connection,
   sessionId,
   metadata,
-  newChat,
   quickChat,
   refreshConnections,
 }: {
   connection: FeedConnection;
   sessionId: string;
   metadata: ServerMetadata;
-  newChat?: NewChatOption;
   quickChat?: () => React.ReactElement;
   refreshConnections: () => Promise<void>;
 }) {
@@ -116,7 +110,7 @@ function SessionChat({
       onSession={() => void controller.refreshSession()}
       onReturn={refresh}
       hasDraft={state.hasDraft}
-      settings={{ available: !state.busy && state.pending?.sessionId !== sessionId, newChat }}
+      settings={{ available: !state.busy && state.pending?.sessionId !== sessionId }}
       actions={({ setActive, browser }) => (
         <SessionChatActions
           controller={controller}
