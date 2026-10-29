@@ -58,6 +58,21 @@
       "subtitle": "Waypoint AI",
       "description": "Start a fresh Waypoint conversation without stopping earlier work.",
       "mode": "view"
+    },
+    {
+      "name": "inbox",
+      "title": "Waypoint Inbox",
+      "subtitle": "Waypoint AI",
+      "description": "Answer questions and approvals that sessions post to the Waypoint inbox.",
+      "mode": "view"
+    },
+    {
+      "name": "inbox-menu-bar",
+      "title": "Waypoint Inbox Count",
+      "subtitle": "Waypoint AI",
+      "description": "Show how many Waypoint inbox items are open and open one.",
+      "mode": "menu-bar",
+      "interval": "5m"
     }
   ],
   "tools": [],

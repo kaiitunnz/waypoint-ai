@@ -4,10 +4,12 @@ import { Connection, ConnectionState } from "../domain/connections";
 
 export const menuBarItems = 10;
 
+// The server is named without its token, so nothing here carries a credential.
+type Server = { id: string; name: string };
 export type MenuBarData =
-  | { kind: "items"; server: Connection; count: number; items: InboxItem[] }
-  | { kind: "sign-in"; server: Connection }
-  | { kind: "unreachable"; server: Connection; message: string }
+  | { kind: "items"; server: Server; count: number; items: InboxItem[] }
+  | { kind: "sign-in"; server: Server }
+  | { kind: "unreachable"; server: Server; message: string }
   | { kind: "no-server" };
 
 export function activeConnection(state: ConnectionState): Connection | undefined {
@@ -18,14 +20,15 @@ export async function loadMenuBar(
   state: ConnectionState,
   makeClient = (apiUrl: string) => new WaypointClient(apiUrl),
 ): Promise<MenuBarData> {
-  const server = activeConnection(state);
-  if (!server) return { kind: "no-server" };
-  if (!server.token) return { kind: "sign-in", server };
-  const client = makeClient(server.apiUrl);
+  const connection = activeConnection(state);
+  if (!connection) return { kind: "no-server" };
+  const server = { id: connection.id, name: connection.name };
+  if (!connection.token) return { kind: "sign-in", server };
+  const client = makeClient(connection.apiUrl);
   try {
     const [count, page] = await Promise.all([
-      client.inboxCount(server.token),
-      client.inbox(server.token, { status: "open", limit: menuBarItems }),
+      client.inboxCount(connection.token),
+      client.inbox(connection.token, { status: "open", limit: menuBarItems }),
     ]);
     return { kind: "items", server, count, items: page.items };
   } catch (error) {

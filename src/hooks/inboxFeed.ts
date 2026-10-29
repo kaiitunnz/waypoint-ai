@@ -24,7 +24,8 @@ export interface InboxSnapshot {
   error?: ApiError;
   query: string;
 }
-type Options = { factory?: SocketFactory; scheduler?: Scheduler };
+// `onDeleted` hears of items deleted elsewhere, so their drafts can go too.
+type Options = { factory?: SocketFactory; scheduler?: Scheduler; onDeleted?: (id: string) => void };
 
 const emptySections = (): InboxSections => ({ open: emptySection(), resolved: emptySection() });
 const safeError = (error: unknown) =>
@@ -41,12 +42,14 @@ export class InboxFeed extends Observable<InboxSnapshot> {
   private paging?: AbortController;
   // Items deleted since the current pages were requested; a page read before the delete still lists them.
   private deleted = new Set<string>();
+  private readonly onDeleted?: (id: string) => void;
   constructor(
     private readonly connection: FeedConnection,
     private readonly client = new WaypointClient(connection.apiUrl),
     options: Options = {},
   ) {
     super({ sections: emptySections(), loading: true, stream: "connecting", query: "" });
+    this.onDeleted = options.onDeleted;
     // Waypoint sends inbox changes on the global session socket, which starts with a session list snapshot.
     this.socket = new LiveSocket(
       socketUrl(connection.apiUrl, connection.token),
@@ -188,7 +191,10 @@ export class InboxFeed extends Observable<InboxSnapshot> {
       // An update this version can't read shouldn't drop the connection; the next reload shows the item.
       return;
     }
-    if (frame.deleted) this.deleted.add(frame.itemId);
+    if (frame.deleted) {
+      this.deleted.add(frame.itemId);
+      this.onDeleted?.(frame.itemId);
+    }
     this.publish({
       sections: applyFrame(this.state.sections, frame, this.state.query),
       unresolvedCount: frame.unresolvedCount,
