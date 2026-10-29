@@ -167,7 +167,7 @@ export function useLaunchFields(
           >
             <Form.Dropdown.Item
               value=""
-              title={`Inherit structured interface${context.transport ? ` · ${context.transport}` : ""}`}
+              title={`Inherit structured interface${context.transport ? ` · ${interfaceName(metadata, context.transport)}` : ""}`}
             />
             {context.transports.map((transport) => (
               <Form.Dropdown.Item key={transport} value={transport} title={interfaceName(metadata, transport)} />
