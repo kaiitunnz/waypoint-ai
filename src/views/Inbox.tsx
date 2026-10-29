@@ -15,7 +15,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, WaypointClient } from "../api/client";
 import { InboxApprovalBlock, InboxBlock, InboxItem } from "../api/inbox";
-import { blockChips, findItem, itemMarkdown, itemSummary, itemText, senderName } from "../domain/inbox";
+import { blockChips, findItem, inboxPageSize, itemMarkdown, itemSummary, itemText, senderName } from "../domain/inbox";
 import { ReadPolicy } from "../hooks/inboxRead";
 import { submitBlock } from "../hooks/inboxSubmit";
 import { FeedConnection } from "../hooks/sessionFeeds";
@@ -316,13 +316,7 @@ function InboxList({
     ));
     const reply =
       item.blocks.length === 1 ? (
-        <Action.Push
-          key="reply"
-          title="Reply"
-          icon={Icon.Reply}
-
-          target={answerForm(item.blocks[0], false)}
-        />
+        <Action.Push key="reply" title="Reply" icon={Icon.Reply} target={answerForm(item.blocks[0], false)} />
       ) : item.blocks.length > 1 ? (
         <ActionPanel.Submenu key="reply" title="Reply" icon={Icon.Reply}>
           {item.blocks.map((block) => (
@@ -424,10 +418,10 @@ function InboxList({
         const next = id ?? undefined;
         if (controlled && next === controlled) setControlled(undefined);
         setSelected(next);
-        if (next !== "connection-status") reads.select(next);
+        reads.select(next === "connection-status" ? undefined : next);
       }}
       pagination={{
-        pageSize: 30,
+        pageSize: inboxPageSize,
         hasMore: open.hasMore || resolved.hasMore,
         onLoadMore: () => feed.loadMore(),
       }}

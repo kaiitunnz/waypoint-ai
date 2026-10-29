@@ -264,6 +264,10 @@ test("inbox requests use Waypoint's routes and inbox wording", async () => {
   assert.equal(unconfirmed.kind, "uncertain");
   const gone = await failure(respond({ detail: "inbox item not found" }, 404), () => client.inboxItem("token", "a"));
   assert.equal(gone.message, "This inbox item was deleted.");
+  const older = await failure(respond({ detail: "Not Found" }, 404), () =>
+    client.inbox("token", { status: "open", limit: 30 }),
+  );
+  assert.match(older.message, /doesn't have the Waypoint inbox/);
 });
 
 test("a pinned upload sends Waypoint's pin field", async () => {

@@ -28,7 +28,7 @@ Not exercised natively: a submit Waypoint doesn't confirm, an answer Waypoint re
 
 ## Automated coverage
 
-`npm run verify` checks formatting, ESLint, strict types, 362 behavior and integration tests, Raycast validation, and build.
+`npm run verify` checks formatting, ESLint, strict types, 364 behavior and integration tests, Raycast validation, and build.
 
 Inbox tests cover:
 

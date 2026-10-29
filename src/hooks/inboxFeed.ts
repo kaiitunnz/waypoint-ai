@@ -88,6 +88,8 @@ export class InboxFeed extends Observable<InboxSnapshot> {
     this.socket.stop();
   }
   retry() {
+    // The reconnect's first snapshot shouldn't reload a second time.
+    this.connected = false;
     this.socket.retry();
     this.reload();
   }

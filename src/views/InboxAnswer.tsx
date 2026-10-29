@@ -1,5 +1,5 @@
 import { Action, ActionPanel, Form, Icon, Toast, showToast, useNavigation } from "@raycast/api";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { WaypointClient } from "../api/client";
 import { InboxBlock, InboxItem } from "../api/inbox";
 import { InboxForm, initialForm } from "../domain/inbox";
@@ -43,8 +43,10 @@ export function InboxAnswer({
   const [form, setForm] = useState<InboxForm>();
   const [files, setFiles] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  // State updates land after a render, so a second quick submit would still see `busy` unset.
+  const sending = useRef(false);
   const [problem, setProblem] = useState<string>();
-  const [, setFilesAllowed] = useState(submitter.filesAllowed);
+  const [filesAllowed, setFilesAllowed] = useState(submitter.filesAllowed);
   useEffect(() => {
     let current = true;
     submitter.readDraft().then(
@@ -66,7 +68,8 @@ export function InboxAnswer({
   const question = answering && block.type === "question" ? block : undefined;
   const earlier = block.reply?.attachments ?? [];
   async function submit() {
-    if (busy || !form) return;
+    if (sending.current || !form) return;
+    sending.current = true;
     setBusy(true);
     const toast = await showToast({
       style: Toast.Style.Animated,
@@ -100,6 +103,7 @@ export function InboxAnswer({
             : "Couldn't send";
       toast.message = outcome.message;
     } finally {
+      sending.current = false;
       setBusy(false);
     }
   }
@@ -178,7 +182,7 @@ export function InboxAnswer({
           text={earlier.map((ref) => ref.filename ?? "Unavailable attachment").join("\n")}
         />
       )}
-      {submitter.filesAllowed && (
+      {filesAllowed && (
         <Form.FilePicker
           id="files"
           title="Files"

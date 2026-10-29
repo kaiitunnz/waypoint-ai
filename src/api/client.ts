@@ -33,6 +33,7 @@ export class ApiError extends Error {
 }
 
 const inboxDeleted = "This inbox item was deleted.";
+const inboxUnsupported = "This server doesn't have the Waypoint inbox. Update Waypoint to use it.";
 
 export class WaypointClient {
   constructor(
@@ -436,16 +437,18 @@ export class WaypointClient {
       );
     return session;
   }
+  // `missing` explains a 404: a deleted item for one item's path, or a server without the inbox for the others.
   private async inboxRead<T>(
     path: string,
     token: string,
     signal: AbortSignal | undefined,
     parse: (value: unknown) => T,
+    missing = inboxUnsupported,
   ) {
     try {
       return await this.read(path, token, signal, parse);
     } catch (error) {
-      if (error instanceof ApiError && error.kind === "not-found") throw new ApiError("not-found", inboxDeleted);
+      if (error instanceof ApiError && error.kind === "not-found") throw new ApiError("not-found", missing);
       if (error instanceof ApiError && error.kind === "invalid-response")
         throw new ApiError(
           "invalid-response",
@@ -468,12 +471,18 @@ export class WaypointClient {
     return this.inboxRead(`/api/inbox?${params}`, token, signal, parseInboxPage);
   }
   inboxItem(token: string, id: string, signal?: AbortSignal): Promise<InboxItem> {
-    return this.inboxRead(`/api/inbox/${encodeURIComponent(id)}`, token, signal, (value) => {
-      if (!isRecord(value)) throw new Error("Invalid inbox item response");
-      const item = parseInboxItem(value.item);
-      if (item.id !== id) throw new Error("Mismatched inbox item");
-      return item;
-    });
+    return this.inboxRead(
+      `/api/inbox/${encodeURIComponent(id)}`,
+      token,
+      signal,
+      (value) => {
+        if (!isRecord(value)) throw new Error("Invalid inbox item response");
+        const item = parseInboxItem(value.item);
+        if (item.id !== id) throw new Error("Mismatched inbox item");
+        return item;
+      },
+      inboxDeleted,
+    );
   }
   inboxCount(token: string, signal?: AbortSignal): Promise<number> {
     return this.inboxRead("/api/inbox/unresolved-count", token, signal, (value) => {

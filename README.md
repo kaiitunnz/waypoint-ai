@@ -101,13 +101,13 @@ If Waypoint does not confirm a response, nothing is retried. **Check Previous Ou
 ![Waypoint Inbox](docs/screenshots/inbox.jpg)
 
 - **Answer Question** opens a form with the options, an **Other** answer, notes, and files. **Reply** adds notes and files to any part of an item.
-- Approvals offer one action per decision. A resolved item offers **Change Decision**, since Waypoint keeps the latest answer.
+- Approvals offer one action per decision. An answered approval offers **Change Decision**, since Waypoint keeps the latest answer.
 - **Open Session** opens the session that posted the item; **Open in Waypoint** opens the item in the web app.
 - **Delete Item** (⌃X) and **Delete Resolved Items** (⌃⇧X) ask first. Delete Resolved Items removes resolved items on the whole server, including ones not loaded.
 
 Answers and replies wake the session that posted the item, and Waypoint resolves an item once its required questions and approvals are answered. An item with nothing to answer resolves when it's read, which also wakes its session. So Raycast marks an item read only when you act on it, when you move to it and stay for a moment, when you choose **Mark as Read** (⌘⇧R), or when you open it from the menu bar; the row Raycast selects by itself is never marked.
 
-A reply replaces the earlier reply on that part of the item, so the form opens with the earlier notes and keeps the earlier files. Files go to the posting session's attachments, up to 25 MB each; items a person posted take notes only. Drafts are saved per item until sent. If Waypoint doesn't confirm a send, the form reads the item back and says whether the answer was recorded; sending again is safe.
+A reply replaces the earlier reply on that part of the item, so the form opens with the earlier notes and keeps the earlier files. Files go to the posting session's attachments, up to 25 MB each; items a person posted take notes only. Drafts are saved for each part of an item until sent. If Waypoint doesn't confirm a send, the form reads the item back and says whether the answer was recorded; sending again is safe.
 
 ![Answer Question](docs/screenshots/inbox-answer.jpg)
 

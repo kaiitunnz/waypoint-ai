@@ -30,8 +30,7 @@ export async function fileStats(path: string): Promise<FileStats> {
 // across retries and deletes the ones no reply holds.
 export class InboxReplySubmitter {
   private readonly uploads = new Map<string, Upload>();
-  // The reply attachments last sent, which the next reply carries along before Waypoint's update arrives.
-  private sent?: InboxAttachmentRef[];
+  private sending?: Promise<ReplyOutcome>;
   private sessionGone = false;
   constructor(
     private readonly client: WaypointClient,
@@ -109,7 +108,14 @@ export class InboxReplySubmitter {
     }
     return refs;
   }
-  async submit(block: InboxBlock, form: InboxForm, files: string[], answering: boolean): Promise<ReplyOutcome> {
+  submit(block: InboxBlock, form: InboxForm, files: string[], answering: boolean): Promise<ReplyOutcome> {
+    const sending = this.send(block, form, files, answering);
+    this.sending = sending;
+    return sending.finally(() => {
+      if (this.sending === sending) this.sending = undefined;
+    });
+  }
+  private async send(block: InboxBlock, form: InboxForm, files: string[], answering: boolean): Promise<ReplyOutcome> {
     let answer: BlockSubmit["answer"];
     if (answering && block.type === "question") {
       const problem = answerProblem(block, form);
@@ -118,7 +124,7 @@ export class InboxReplySubmitter {
     }
     const added = this.filesAllowed && files.length ? await this.upload(files) : [];
     if (!Array.isArray(added)) return added;
-    const reply = replyBody(form.notes, this.sent ?? block.reply?.attachments ?? [], added);
+    const reply = replyBody(form.notes, block.reply?.attachments ?? [], added);
     if (!answer && !reply) return { kind: "invalid", message: "Add an answer, notes, or files." };
     const outcome = await submitBlock(this.client, this.connection.token, this.item.id, this.blockId, {
       ...(answer ? { answer } : {}),
@@ -126,7 +132,6 @@ export class InboxReplySubmitter {
     });
     const current = [...this.uploads.keys()];
     if (outcome.kind === "saved") {
-      if (reply) this.sent = outcome.item.blocks.find((entry) => entry.id === this.blockId)?.reply?.attachments;
       this.uploads.clear();
       await this.drafts.remove(this.draftKey).catch(() => undefined);
     } else if (outcome.kind === "deleted") await this.remove(current);
@@ -139,6 +144,8 @@ export class InboxReplySubmitter {
   // The form closed without a confirmed send. An unconfirmed reply may hold some uploads, so the item is read
   // first; when that fails too, they are kept, since a stray upload costs less than a reply missing its file.
   async discard() {
+    // A send still in flight decides which uploads its reply holds.
+    await this.sending?.catch(() => undefined);
     const unsettled = [...this.uploads].filter(([, upload]) => upload.unsettled);
     let held = new Set<string>();
     if (unsettled.length) {

@@ -28,7 +28,11 @@ function memoryDrafts() {
 }
 
 // A Waypoint double: `submit` answers block submits, `item` answers re-reads, and uploads get numbered ids.
-function waypoint(options: { submit: () => Response; item?: () => Response; upload?: () => Response }) {
+function waypoint(options: {
+  submit: () => Response | Promise<Response>;
+  item?: () => Response;
+  upload?: () => Response;
+}) {
   const calls: { method: string; url: string; body?: unknown }[] = [];
   let uploads = 0;
   const client = new WaypointClient("http://localhost", async (input, init) => {
@@ -174,6 +178,36 @@ test("closing after an unconfirmed submit keeps the files a saved reply may hold
     ["/api/sessions/poster/attachments/up3"],
     "only the upload the reply doesn't hold is deleted",
   );
+});
+
+test("closing while a reply is sending waits for it before cleaning up", async () => {
+  const { drafts } = memoryDrafts();
+  let finish!: (response: Response) => void;
+  const api = waypoint({
+    submit: () =>
+      new Promise<Response>((resolve) => {
+        finish = resolve;
+      }),
+  });
+  const item = question();
+  const form = new InboxReplySubmitter(api.client, connection, item, "q", drafts, stats);
+  const sending = form.submit(item.blocks[0], { selected: [], other: "", notes: "x" }, [file("a.txt")], false);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const closing = form.discard();
+  finish(
+    respond({
+      item: itemWire("i", {
+        blocks: [
+          questionWire("q", {
+            reply: { notes: "x", attachments: [{ session_id: "poster", attachment_id: "up1" }], created_at: "t" },
+          }),
+        ],
+      }),
+    }),
+  );
+  assert.equal((await sending).kind, "saved");
+  await closing;
+  assert.equal(api.calls.filter((call) => call.method === "DELETE").length, 0, "the sent file is kept");
 });
 
 test("a saved reply removes the draft, and a deleted posting session leaves notes only", async () => {

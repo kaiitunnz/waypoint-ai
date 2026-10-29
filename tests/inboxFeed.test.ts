@@ -155,6 +155,21 @@ test("live updates merge, unreadable updates are skipped, and a reconnect reads 
   feed.stop();
 });
 
+test("Refresh reads the first pages once, even as the connection comes back", async () => {
+  const s = sockets();
+  const api = server({ "open::": [itemWire("a")] });
+  const feed = new InboxFeed(connection, api.client, s);
+  feed.start();
+  s.send("session_list_update", { sessions: [] });
+  await tick();
+  const before = inboxRequests(api.requests).length;
+  feed.retry();
+  s.send("session_list_update", { sessions: [] });
+  await tick();
+  assert.equal(inboxRequests(api.requests).length - before, 2, "one Open and one Resolved page");
+  feed.stop();
+});
+
 test("an item opened from the menu bar loads even when paging hasn't reached it", async () => {
   const s = sockets();
   const api = server({
@@ -231,6 +246,11 @@ test("a move the user made marks the item after the dwell, once", () => {
   elapse();
   assert.deepEqual(marked, ["c"], "an item is marked once");
   reads.acted("a");
+  assert.deepEqual(marked, ["c", "a"]);
+  // Moving to a row that isn't an item, such as the connection status, ends the dwell.
+  reads.select("b");
+  reads.select(undefined);
+  elapse();
   assert.deepEqual(marked, ["c", "a"]);
 });
 

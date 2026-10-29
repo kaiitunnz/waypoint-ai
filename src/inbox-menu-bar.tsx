@@ -39,7 +39,11 @@ export default function InboxMenuBar() {
         />
       )}
       {data?.kind === "unreachable" && (
-        <MenuBarExtra.Item title={`Couldn't reach ${data.server.name}`} icon={Icon.ExclamationMark} />
+        <MenuBarExtra.Item
+          title={`Couldn't reach ${data.server.name}`}
+          tooltip={data.message}
+          icon={Icon.ExclamationMark}
+        />
       )}
       {data?.kind === "no-server" && (
         <MenuBarExtra.Item
