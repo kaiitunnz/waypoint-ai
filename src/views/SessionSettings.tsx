@@ -35,6 +35,7 @@ import {
   withBlankEnvRow,
 } from "../domain/sessionSettings";
 import { customModelValue } from "../domain/modelOptions";
+import { interfaceName } from "../domain/sessions";
 import { FeedConnection } from "../hooks/sessionFeeds";
 import { SessionSettingsController } from "../hooks/sessionSettingsController";
 import { ConnectTarget } from "./ConnectTarget";
@@ -271,18 +272,14 @@ export function SessionSettings({
           onChange={(transport) => update({ transport })}
         >
           {available.transports.map((transport) => (
-            <Form.Dropdown.Item
-              key={transport}
-              value={transport}
-              title={metadata.agents.find((agent) => agent.nativeTransport === transport)?.label ?? transport}
-            />
+            <Form.Dropdown.Item key={transport} value={transport} title={interfaceName(metadata, transport)} />
           ))}
         </Form.Dropdown>
       )}
       {available.launch && !available.transports.length && available.terminalHidden && (
         <Form.Description
           title="Interface"
-          text={`${metadata.agents.find((agent) => agent.nativeTransport === baseline.transport)?.label ?? baseline.transport}. Terminal interfaces are available in Waypoint.`}
+          text={`${interfaceName(metadata, baseline.transport)}. Terminal interfaces are available in Waypoint.`}
         />
       )}
       {available.profile && (
