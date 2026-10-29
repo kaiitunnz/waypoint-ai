@@ -45,16 +45,20 @@ export function InboxAnswer({
   const [busy, setBusy] = useState(false);
   // State updates land after a render, so a second quick submit would still see `busy` unset.
   const sending = useRef(false);
+  // A send can finish after the form closed; popping then would close the view beneath it.
+  const open = useRef(true);
   const [problem, setProblem] = useState<string>();
   const [filesAllowed, setFilesAllowed] = useState(submitter.filesAllowed);
   useEffect(() => {
     let current = true;
+    open.current = true;
     submitter.readDraft().then(
       (draft) => current && setForm(initialForm(block, draft)),
       () => current && setForm(initialForm(block, undefined)),
     );
     return () => {
       current = false;
+      open.current = false;
       void submitter.discard();
     };
   }, [submitter]);
@@ -81,7 +85,7 @@ export function InboxAnswer({
         toast.style = Toast.Style.Success;
         toast.title = answering ? "Answer sent" : "Reply sent";
         onSaved(outcome.item);
-        pop();
+        if (open.current) pop();
         return;
       }
       toast.style = Toast.Style.Failure;
