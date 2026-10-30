@@ -2,12 +2,14 @@
 
 Connect Raycast to your [Waypoint](https://github.com/kaiitunnz/waypoint) servers to chat with coding agents and manage their sessions.
 
-| Command         | What it does                                                                                     |
-| --------------- | ------------------------------------------------------------------------------------------------ |
-| Quick Chat      | Continues your Quick Chat conversation on the active server, or prepares a new one on first send |
-| New Chat        | Prepares a fresh conversation; earlier sessions keep running                                     |
-| Browse Sessions | Finds sessions, chats with them, and manages them                                                |
-| Manage Servers  | Adds, signs in to, and switches between Waypoint servers                                         |
+| Command              | What it does                                                                                     |
+| -------------------- | ------------------------------------------------------------------------------------------------ |
+| Quick Chat           | Continues your Quick Chat conversation on the active server, or prepares a new one on first send |
+| New Chat             | Prepares a fresh conversation; earlier sessions keep running                                     |
+| Browse Sessions      | Finds sessions, chats with them, and manages them                                                |
+| Waypoint Inbox       | Answers the questions, approvals, and notes sessions post to Waypoint's inbox                    |
+| Waypoint Inbox Count | Shows open inbox items in the menu bar                                                           |
+| Manage Servers       | Adds, signs in to, and switches between Waypoint servers                                         |
 
 ![Manage Servers](docs/screenshots/manage-servers.png)
 
@@ -91,6 +93,25 @@ A form stays bound to the request it opened. If the request is answered elsewher
 If Waypoint does not confirm a response, nothing is retried. **Check Previous Outcome** shows whether the request is still pending, or says when the loaded history cannot confirm it. **Clear Checkpoint** continues once it is resolved; **Allow Another Attempt** warns that responding again can repeat its effect. Until then, other responses and Quick Chat sends on that server wait.
 
 ![Approval decisions](docs/screenshots/interaction-approval.jpg)
+
+## Waypoint Inbox
+
+**Waypoint Inbox** lists the items sessions post with `waypoint inbox`. Approvals, plans, and questions raised inside a conversation stay under that chat's Needs Attention. It shows open items; **Show Resolved Items** (⌘⇧E) adds resolved ones below. The list loads more as you scroll and follows changes made anywhere on the server. Search matches subjects and senders. A row's icon is orange when the item waits on you and filled while it's unread; tags count unanswered questions and approvals.
+
+![Waypoint Inbox](docs/screenshots/inbox.jpg)
+
+- **Answer Question** opens a form with the options, an **Other** answer, notes, and files. **Reply** adds notes and files to any part of an item.
+- Each approval decision is its own action; **Change Decision** re-answers an answered approval.
+- **Open Session** opens the session that posted the item; **Open in Waypoint** opens the item in the web app.
+- **Delete Item** (⌃X) and, while resolved items are shown, **Delete Resolved Items** (⌃⇧X). Delete Resolved Items removes resolved items on the whole server, including ones not loaded.
+
+Answering or replying wakes the posting session; an item resolves once its required questions and approvals are answered. An item with nothing to answer resolves, and wakes its session, when it's read. An item is marked read only when you act on it, stay on it after moving to it, choose **Mark as Read** (⌘⇧R), or open it from the menu bar.
+
+A reply replaces the earlier one on that part of the item; the form opens with its notes and keeps its files. Files go to the posting session's attachments, up to 25 MB each; items a person posted take notes only. Drafts are kept per part until sent. If Waypoint doesn't confirm a send, the form checks whether it was recorded; sending again is safe.
+
+![Answer Question](docs/screenshots/inbox-answer.jpg)
+
+**Waypoint Inbox Count** shows the number of open items on the active server in the menu bar. Its icon is blue while items are open and orange when a listed item waits for an answer. The menu lists up to ten open items; choosing one opens it in Waypoint Inbox. It refreshes every five minutes, when opened, and after changes made in Waypoint Inbox.
 
 ## Quick Chat
 

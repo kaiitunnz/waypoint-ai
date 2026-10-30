@@ -20,6 +20,11 @@ export class DraftStore {
     await this.flushing.get(key);
     await this.storage.removeItem(key);
   }
+  // Removes every draft whose key starts with `prefix`.
+  async removePrefix(prefix: string) {
+    await this.forget(prefix);
+    for (const key of await this.storage.keys()) if (key.startsWith(prefix)) await this.storage.removeItem(key);
+  }
   // Resolves once this value or a newer one is stored.
   write(key: string, value: string): Promise<void> {
     this.queued.set(key, value);
@@ -49,4 +54,7 @@ export const draftKeys = {
   interactions: (connectionId: string, sessionId: string) => `waypoint.draft.${connectionId}.interactions.${sessionId}`,
   // One per server, not per conversation.
   launch: (connectionId: string) => `waypoint.draft.${connectionId}.launch`,
+  inbox: (connectionId: string, itemId: string, blockId: string) =>
+    `waypoint.draft.${connectionId}.inbox.${itemId}.${blockId}`,
+  inboxItem: (connectionId: string, itemId: string) => `waypoint.draft.${connectionId}.inbox.${itemId}.`,
 };

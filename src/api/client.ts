@@ -7,6 +7,7 @@ import { isRecord } from "../domain/connections";
 import { parseMetadata, ServerMetadata } from "./contracts";
 import { LaunchSettings, UsageProvider, parseLaunchSettings, parseUsageProviders } from "./settings";
 import { Session, EventsPage, parseAttachment, parseSession, parseSessions, parseEventsPage } from "./sessions";
+import { BlockSubmit, InboxItem, InboxPage, InboxStatus, parseInboxItem, parseInboxPage } from "./inbox";
 
 export type ApiErrorKind =
   | "unreachable"
@@ -30,6 +31,9 @@ export class ApiError extends Error {
     this.name = "ApiError";
   }
 }
+
+const inboxDeleted = "This inbox item was deleted.";
+const inboxUnsupported = "This server doesn't have the Waypoint inbox. Update Waypoint to use it.";
 
 export class WaypointClient {
   constructor(
@@ -191,7 +195,13 @@ export class WaypointClient {
             "attachment-missing",
             404,
           );
-        throw new ApiError("not-found", "This session is unavailable. Start an explicit New Chat; your draft is kept.");
+        throw new ApiError(
+          "not-found",
+          "This session is unavailable. Start an explicit New Chat; your draft is kept.",
+          undefined,
+          404,
+          isRecord(value) && typeof value.detail === "string" ? value.detail : undefined,
+        );
       }
       if (response.status >= 400 && response.status < 500) {
         let detail = "";
@@ -245,9 +255,11 @@ export class WaypointClient {
     });
   }
   // Uploads are not inputs: an unconfirmed upload can only leave an orphan, so failures stay retryable.
-  async uploadAttachment(token: string, id: string, path: string, size: number, signal?: AbortSignal) {
+  // Waypoint never sweeps a pinned upload, so whoever pins one deletes it when nothing references it.
+  async uploadAttachment(token: string, id: string, path: string, size: number, signal?: AbortSignal, pin = false) {
     const form = new FormData();
     form.append("file", await openAsBlob(path, { type: mimeType(path) }), basename(path));
+    if (pin) form.append("pin", "true");
     const timeout = AbortSignal.timeout(30000 + Math.ceil(size / 262144) * 1000);
     let response: Response;
     try {
@@ -424,6 +436,128 @@ export class WaypointClient {
         "Waypoint did not confirm this response. It may have reached the agent. Check the outcome before trying again.",
       );
     return session;
+  }
+  private async inboxRead<T>(
+    path: string,
+    token: string,
+    signal: AbortSignal | undefined,
+    parse: (value: unknown) => T,
+    missing = inboxUnsupported,
+  ) {
+    try {
+      return await this.read(path, token, signal, parse);
+    } catch (error) {
+      if (error instanceof ApiError && error.kind === "not-found") throw new ApiError("not-found", missing);
+      if (error instanceof ApiError && error.kind === "invalid-response")
+        throw new ApiError(
+          "invalid-response",
+          "The server returned incompatible inbox information. Check the Waypoint version and retry.",
+        );
+      throw error;
+    }
+  }
+  inbox(
+    token: string,
+    query: { status: InboxStatus; q?: string; cursor?: string; limit: number },
+    signal?: AbortSignal,
+  ): Promise<InboxPage> {
+    const params = new URLSearchParams({
+      status: query.status,
+      limit: String(query.limit),
+      ...(query.q ? { q: query.q } : {}),
+      ...(query.cursor ? { cursor: query.cursor } : {}),
+    });
+    return this.inboxRead(`/api/inbox?${params}`, token, signal, parseInboxPage);
+  }
+  inboxItem(token: string, id: string, signal?: AbortSignal): Promise<InboxItem> {
+    return this.inboxRead(
+      `/api/inbox/${encodeURIComponent(id)}`,
+      token,
+      signal,
+      (value) => {
+        if (!isRecord(value)) throw new Error("Invalid inbox item response");
+        const item = parseInboxItem(value.item);
+        if (item.id !== id) throw new Error("Mismatched inbox item");
+        return item;
+      },
+      inboxDeleted,
+    );
+  }
+  inboxCount(token: string, signal?: AbortSignal): Promise<number> {
+    return this.inboxRead("/api/inbox/unresolved-count", token, signal, (value) => {
+      if (!isRecord(value) || typeof value.unresolved_count !== "number") throw new Error("Invalid inbox count");
+      return value.unresolved_count;
+    });
+  }
+  private async inboxSend<T>(
+    token: string,
+    path: string,
+    body: Record<string, unknown> | undefined,
+    method: "POST" | "DELETE",
+    parse: (value: unknown) => T,
+  ): Promise<T> {
+    try {
+      return await this.send(token, path, body, { method }, parse);
+    } catch (error) {
+      if (!(error instanceof ApiError)) throw error;
+      if (error.kind === "expired-token") throw new ApiError("expired-token", "Your sign-in expired. Sign in again.");
+      if (error.kind === "not-found")
+        throw new ApiError(
+          "not-found",
+          error.serverDetail === "inbox block not found"
+            ? "This part of the item is no longer available. Refresh the inbox."
+            : inboxDeleted,
+          error.serverDetail === "inbox block not found" ? "block" : "item",
+          404,
+        );
+      if (error.kind === "rejected" && error.status === 422)
+        throw new ApiError(
+          "rejected",
+          `Waypoint did not accept this answer${error.serverDetail && error.serverDetail !== "invalid value" ? `: ${error.serverDetail}` : "."}`,
+          undefined,
+          422,
+          error.serverDetail,
+        );
+      if (error.kind === "rejected")
+        throw new ApiError(
+          "rejected",
+          `Waypoint rejected this inbox change${error.serverDetail ? `: ${error.serverDetail}` : "."}`,
+          undefined,
+          error.status,
+          error.serverDetail,
+        );
+      throw error;
+    }
+  }
+  answerInboxBlock(token: string, itemId: string, blockId: string, body: BlockSubmit): Promise<InboxItem> {
+    return this.inboxSend(
+      token,
+      `/api/inbox/${encodeURIComponent(itemId)}/blocks/${encodeURIComponent(blockId)}`,
+      body,
+      "POST",
+      (value) => {
+        if (!isRecord(value)) throw new Error("Invalid inbox response");
+        return parseInboxItem(value.item);
+      },
+    );
+  }
+  markInboxRead(token: string, id: string): Promise<InboxItem> {
+    return this.inboxSend(token, `/api/inbox/${encodeURIComponent(id)}/read`, undefined, "POST", (value) => {
+      if (!isRecord(value)) throw new Error("Invalid inbox response");
+      return parseInboxItem(value.item);
+    });
+  }
+  deleteInboxItem(token: string, id: string): Promise<string> {
+    return this.inboxSend(token, `/api/inbox/${encodeURIComponent(id)}`, undefined, "DELETE", (value) => {
+      if (!isRecord(value) || value.deleted !== true) throw new Error("Invalid delete response");
+      return id;
+    });
+  }
+  deleteResolvedInbox(token: string): Promise<string[]> {
+    return this.inboxSend(token, "/api/inbox/delete-resolved", undefined, "POST", (value) => {
+      if (!isRecord(value) || !Array.isArray(value.deleted_ids)) throw new Error("Invalid delete response");
+      return value.deleted_ids.filter((id): id is string => typeof id === "string");
+    });
   }
   models(token: string, backend: string, target: string, profile: string, signal?: AbortSignal): Promise<ModelCatalog> {
     const query = new URLSearchParams({
