@@ -123,6 +123,7 @@ function SettingsForm({ connection, metadata, defaults, controller, initial }: F
                     if (result.connected && mounted.current) {
                       setConnectTarget(undefined);
                       setProblem(undefined);
+                      launch.reloadModels();
                     }
                     return result;
                   }}

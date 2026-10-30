@@ -14,8 +14,7 @@ export function launchSettingsDisplay(
   const context = launchContext(values, metadata, workspace);
   const preset = context.preset;
   const profiles = context.target?.profilesByAgent[context.backend] ?? context.agent?.profiles ?? [];
-  // Waypoint falls back to local discovery for an unconnected password target; it isn't its remote default.
-  const models = context.target?.auth === "password" && !context.target.connected ? undefined : catalog;
+  const models = catalog;
   const model =
     values.model === "__default__" ? models?.defaultModel : values.model || preset?.model || models?.defaultModel;
   const profile = values.profile === "__default__" ? "" : values.profile || preset?.profile || "";

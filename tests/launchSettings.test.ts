@@ -5,6 +5,7 @@ import { parseModels } from "../src/api/models";
 import { launchSettingsDisplay } from "../src/domain/launchSettings";
 import { defaultEffort, defaultsModelChoices } from "../src/domain/modelOptions";
 import { createRequest, initialDefaults } from "../src/domain/quickChat";
+import { discoverLaunchModels } from "../src/hooks/launchModels";
 import { metadataWire } from "./fixtures/settings";
 
 const catalog = parseModels({
@@ -140,19 +141,43 @@ test("profile labels and cwd resolve in the selected target context", () => {
   );
 });
 
-test("disconnected password targets do not claim local discovery defaults are remote ones", () => {
-  const targets = [{ ...metadata.targets[0], auth: "password" as const, connected: false }];
-  const values = { ...initialDefaults(), preset: "none", target: "box" };
-  const display = launchSettingsDisplay(values, { ...metadata, targets }, catalog);
-  assert.equal(display.model, "Agent default model");
-  assert.equal(display.defaultModel, "Model");
-  assert.equal(display.effort, "Agent default effort");
-  const connected = launchSettingsDisplay(
-    values,
-    { ...metadata, targets: [{ ...targets[0], connected: true }] },
-    catalog,
-  );
-  assert.equal(connected.model, "Agent Model");
+test("password target discovery refreshes connection state and recovers on retry", async () => {
+  let connected = false;
+  const calls: string[][] = [];
+  const client = {
+    me: async () => ({ ...metadata, targets: [{ ...metadata.targets[0], connected }] }),
+    models: async (...args: [string, string, string, string]) => {
+      calls.push(args);
+      return catalog;
+    },
+  };
+  const blocked = await discoverLaunchModels(client, "synthetic-token", "codex", "box", "work", true);
+  assert.equal(blocked.blocked, true);
+  assert.equal(blocked.catalog, undefined);
+  assert.equal(calls.length, 0);
+  connected = true;
+  const retry = await discoverLaunchModels(client, "synthetic-token", "codex", "box", "work", true);
+  assert.equal(retry.catalog, catalog);
+  assert.deepEqual(calls[0].slice(1), ["codex", "box", "work", undefined]);
+  connected = false;
+  assert.equal((await discoverLaunchModels(client, "synthetic-token", "codex", "box", "work", true)).blocked, true);
+  assert.equal(calls.length, 1);
+});
+
+test("local and key target discovery use the requested profile without a connection probe", async () => {
+  const calls: string[][] = [];
+  const client = {
+    me: async () => {
+      throw new Error("unexpected connection probe");
+    },
+    models: async (...args: [string, string, string, string]) => {
+      calls.push(args);
+      return catalog;
+    },
+  };
+  const result = await discoverLaunchModels(client, "synthetic-token", "codex", "box", "home", false);
+  assert.equal(result.catalog, catalog);
+  assert.deepEqual(calls[0].slice(1), ["codex", "box", "home", undefined]);
 });
 
 test("inherited choices remain independent of explicit overrides and removed presets", () => {

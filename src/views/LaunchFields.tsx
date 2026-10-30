@@ -8,6 +8,7 @@ import { ServerMetadata } from "../api/contracts";
 import { ModelCatalog } from "../api/models";
 import { WaypointClient } from "../api/client";
 import { FeedConnection } from "../hooks/sessionFeeds";
+import { discoverLaunchModels } from "../hooks/launchModels";
 import { localWorkspace } from "../storage/workspace";
 
 type Setter = (update: (current: ChatDefaults) => ChatDefaults) => void;
@@ -23,14 +24,29 @@ export function useLaunchFields(
   const [advanced, setAdvanced] = useState(
     !!(values.transport || values.profile || values.permission || values.args || values.config),
   );
-  const [discovery, setDiscovery] = useState<{ key: string; catalog?: ModelCatalog; error?: string }>();
+  const [discovery, setDiscovery] = useState<{
+    key: string;
+    catalog?: ModelCatalog;
+    error?: string;
+    blocked?: boolean;
+  }>();
   const [modelLoad, setModelLoad] = useState(0);
   const workspace = localWorkspace(connection.apiUrl)?.dir;
   const context = launchContext(values, metadata, workspace);
   const profile = values.profile === "__default__" ? "" : values.profile || context.preset?.profile || "";
-  const discoveryKey = JSON.stringify([connection.apiUrl, connection.token, context.backend, values.target, profile]);
-  const remoteBlocked = context.target?.auth === "password" && !context.target.connected;
-  const models = !remoteBlocked && discovery?.key === discoveryKey ? discovery.catalog : undefined;
+  const passwordTarget = context.target?.auth === "password";
+  const connected = context.target?.connected;
+  const discoveryKey = JSON.stringify([
+    connection.apiUrl,
+    connection.token,
+    context.backend,
+    values.target,
+    profile,
+    passwordTarget,
+    connected,
+  ]);
+  const remoteBlocked = discovery?.key === discoveryKey && discovery.blocked;
+  const models = discovery?.key === discoveryKey ? discovery.catalog : undefined;
   const modelError = discovery?.key === discoveryKey ? discovery.error : undefined;
   const display = launchSettingsDisplay(values, metadata, models, workspace);
   const profiles = display.profiles;
@@ -40,17 +56,33 @@ export function useLaunchFields(
     const controller = new AbortController();
     setDiscovery(undefined);
     if (!context.backend) return;
-    void new WaypointClient(connection.apiUrl)
-      .models(connection.token, context.backend, values.target, profile, controller.signal)
-      .then((catalog) => {
-        if (!controller.signal.aborted) setDiscovery({ key: discoveryKey, catalog });
+    void discoverLaunchModels(
+      new WaypointClient(connection.apiUrl),
+      connection.token,
+      context.backend,
+      values.target,
+      profile,
+      passwordTarget,
+      controller.signal,
+    )
+      .then((result) => {
+        if (!controller.signal.aborted) setDiscovery({ key: discoveryKey, ...result });
       })
       .catch(() => {
         if (!controller.signal.aborted)
           setDiscovery({ key: discoveryKey, error: "Could not load models. Reload them to retry." });
       });
     return () => controller.abort();
-  }, [connection.apiUrl, connection.token, context.backend, values.target, profile, modelLoad]);
+  }, [
+    connection.apiUrl,
+    connection.token,
+    context.backend,
+    values.target,
+    profile,
+    passwordTarget,
+    connected,
+    modelLoad,
+  ]);
   function set<K extends keyof ChatDefaults>(key: K, value: ChatDefaults[K]) {
     setValues((current) => ({ ...current, [key]: value }));
   }
@@ -190,6 +222,7 @@ export function useLaunchFields(
             id="transport"
             title="Interface"
             value={values.transport}
+            info="The first option follows the preset or agent default. Choose an interface to override it."
             onChange={(value) => set("transport", value)}
           >
             <Form.Dropdown.Item value="" title={display.transport} />
@@ -204,6 +237,7 @@ export function useLaunchFields(
             id="profile"
             title="Account Profile"
             value={values.profile}
+            info="The first option follows the preset. No profile uses the agent's default account; named accounts override the preset."
             onChange={(value) => {
               setValues((current) => ({ ...current, profile: value, model: "", effort: "" }));
             }}
@@ -223,6 +257,7 @@ export function useLaunchFields(
             id="permission"
             title="Permission Mode"
             value={values.permission}
+            info="The first option follows the preset or agent default. Choose a permission mode to override it."
             onChange={(value) => set("permission", value)}
           >
             <Form.Dropdown.Item value="" title={display.permission} />
