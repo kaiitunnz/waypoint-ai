@@ -133,7 +133,7 @@ When the server runs on this Mac and no working directory is set, sessions on th
 
 **Terminate and Delete Session** (⌃X) ends the session and deletes it in one step, then moves to a new conversation, keeping the draft. For a session that has already exited, the action is **Delete Session**.
 
-Defaults apply to new conversations. Choose the server preset, execution target, working directory, agent, model, and effort. Advanced settings expose supported transport, account profile, permissions, arguments, and configuration overrides. Inherited settings and private preset values are resolved by Waypoint. Each saved server keeps its own defaults and draft.
+Defaults apply to new conversations. Choose the server preset, execution target, working directory, agent, model, and effort. Advanced settings expose supported transport, account profile, permissions, arguments, and configuration overrides. Fields show the effective inherited values when Waypoint reports them, including the default preset's name. Field help explains which choices follow the preset or server; agent-default choices bypass the preset. Unknown agent defaults remain labeled as such. Private preset values are resolved by Waypoint. Each saved server keeps its own defaults and draft.
 
 Drafts survive closing the command. Reopening catches up with Waypoint without resending. Rejected sends keep the draft and an already-created session. **Interrupt Session** is explicit; exited sessions reattach before sending when their transport supports it.
 
@@ -155,7 +155,7 @@ When a send needs a password-auth SSH target that is not connected, **Connect SS
 
 ## Changing session settings
 
-**Change Session Settings** (⌘⇧,) changes the open conversation's own settings, separate from Quick Chat Defaults, which shape future chats. It opens from Quick Chat, New Chat, and session chats, and loads the session's current settings and capabilities from Waypoint each time.
+**Change Session Settings** (⌘⇧,) changes the open conversation's own settings, separate from Quick Chat Defaults, which shape future chats. It opens from Quick Chat, New Chat, and session chats, and loads the session's current settings and capabilities from Waypoint each time. Default model and effort choices show their reported values when available; opening the form does not stage changes.
 
 The form offers what can change on the running session, as the Waypoint web app's Session Settings does. The top line shows the agent, interface, execution target, and working directory, which stay fixed for a session; **New Session with Settings** starts a session with different ones. Below it come the interface, account profile, title, permission mode, model, and effort, then an Advanced group: usage source, custom arguments, configuration overrides, and environment variables. Each field appears only when the session's agent and interface support it. Interface switching offers structured interfaces only, since Raycast shows structured conversations; terminal interfaces stay in Waypoint.
 
