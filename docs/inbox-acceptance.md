@@ -6,9 +6,11 @@ The macOS Raycast pass used the development extension against an isolated Waypoi
 
 | Scenario                                                                  | Observed result                                                                                                                              |
 | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| Open Waypoint Inbox                                                       | Open items (with the server's open count) above Resolved ones; tags read “1 question” and “1 approval”                                       |
+| Open Waypoint Inbox                                                       | Only open items, with the server's open count; tags read “1 question” and “1 approval”                                                       |
+| Show Resolved Items (⌘⇧E), then hide them again                           | The Resolved section appeared below Open, then went away; Delete Resolved Items was offered only while it was shown                          |
+| Approve an item while resolved items are hidden                           | Waypoint resolved it and it left the list; with them shown, it moved to Resolved and stayed selected                                         |
 | Wait on the row Raycast selects on open, and on the first row of a search | Neither item was marked read                                                                                                                 |
-| Move to an item with nothing to answer and stay                           | Waypoint marked it read and resolved it after the dwell; the row moved to Resolved                                                           |
+| Move to an item with nothing to answer and stay                           | Waypoint marked it read and resolved it after the dwell; the row moved to Resolved, which was shown                                          |
 | Restart the Waypoint API while the inbox is open, then post items         | The list reconnected and reloaded; new items appeared live and the open count followed                                                       |
 | Answer a single-choice question with notes                                | Waypoint stored the option and the notes, resolved and read the item, and woke the posting session                                           |
 | Answer a multiple-choice question with two options and no notes           | Waypoint stored both options and no reply, and woke the session                                                                              |
@@ -20,7 +22,7 @@ The macOS Raycast pass used the development extension against an isolated Waypoi
 | Open the item with an attachment block                                    | The detail named the attachment                                                                                                              |
 | Open Session                                                              | The posting session's conversation opened, showing the wake input                                                                            |
 | Delete Item, and delete another item in Waypoint                          | Both left the server and the list                                                                                                            |
-| Delete Resolved Items                                                     | Waypoint removed every resolved item; only open ones remained                                                                                |
+| With resolved items shown, Delete Resolved Items                          | Waypoint removed every resolved item; only open ones remained                                                                                |
 
 Waypoint wakes a session for a change made while it's busy once it's idle again; wakes for items a person posted go to no session.
 
@@ -35,7 +37,7 @@ Inbox tests cover:
 - **Parsing:** every block kind, unknown blocks kept as unsupported, items a person posted, pages, and live updates.
 - **Presentation:** tags count only unanswered required blocks of open items; the detail shows options, chosen answers, other answers, decisions, replies, and attachment names; search matches subjects and senders.
 - **Answers:** checks that mirror Waypoint's; a reply is sent only with notes or files and carries the earlier files; the form opens on a saved draft, else on the current answer and reply.
-- **Loading:** Resolved loads as soon as Open is exhausted; paging and searches; repeated items and items moved between sections appear once; an item deleted while a page loads stays deleted; live updates insert, move, or wait for paging; a reconnect reads the first pages again; an item opened from the menu bar loads even when paging hasn't reached it.
+- **Loading:** Resolved loads only while shown, then as soon as Open is exhausted; paging and searches; repeated items and items moved between sections appear once; an item deleted while a page loads stays deleted; live updates insert, move, or wait for paging; a reconnect reads the first pages again; an item opened from the menu bar loads even when paging hasn't reached it.
 - **Reading:** Raycast's own selections, including after a delete, a search, or a selection the view makes, never mark an item read; a move the user makes marks it once after the dwell.
 - **Outcomes:** an unconfirmed submit is settled by reading the item back, for answers, replies, and approvals; uploads are reused across retries, deleted when a submit definitely failed, and kept when closing after an unconfirmed reply that can't be checked; drafts are removed after sending and with their item.
 - **Menu bar:** open items, none, sign-in, an unreachable server, and no server.

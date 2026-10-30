@@ -173,13 +173,15 @@ function InboxList({
   );
   useEffect(() => () => reads.stop(), [reads]);
   const { open, resolved } = state.sections;
-  const visibleIds = [...open.items, ...resolved.items].map((item) => item.id);
+  const shownResolved = state.showResolved ? resolved.items : [];
+  const visibleIds = [...open.items, ...shownResolved].map((item) => item.id);
   const visibleKey = visibleIds.join(" ");
   useEffect(() => reads.visible(visibleIds), [reads, visibleKey]);
   useEffect(() => {
     if (!openItem) return;
     void feed.fetchItem(openItem).then(async (outcome) => {
       if (outcome === "found") {
+        if (findItem(feed.getSnapshot().sections, openItem)?.status === "resolved") feed.setShowResolved(true);
         reads.expect(openItem);
         setControlled(openItem);
         setSelected(openItem);
@@ -268,6 +270,12 @@ function InboxList({
           reads.reset();
           feed.retry();
         }}
+      />
+      <Action
+        title={state.showResolved ? "Hide Resolved Items" : "Show Resolved Items"}
+        icon={state.showResolved ? Icon.EyeDisabled : Icon.CheckCircle}
+        shortcut={{ modifiers: ["cmd", "shift"], key: "e" }}
+        onAction={() => feed.setShowResolved(!state.showResolved)}
       />
       {auth && (
         <Action.Push
@@ -369,13 +377,15 @@ function InboxList({
             shortcut={Keyboard.Shortcut.Common.Remove}
             onAction={() => deleteItem(item)}
           />
-          <Action
-            title="Delete Resolved Items"
-            icon={Icon.Trash}
-            style={Action.Style.Destructive}
-            shortcut={Keyboard.Shortcut.Common.RemoveAll}
-            onAction={deleteResolved}
-          />
+          {state.showResolved && (
+            <Action
+              title="Delete Resolved Items"
+              icon={Icon.Trash}
+              style={Action.Style.Destructive}
+              shortcut={Keyboard.Shortcut.Common.RemoveAll}
+              onAction={deleteResolved}
+            />
+          )}
         </ActionPanel.Section>
         <ActionPanel.Section>{shared}</ActionPanel.Section>
       </ActionPanel>
@@ -397,7 +407,7 @@ function InboxList({
       actions={actions(item)}
     />
   );
-  const empty = !open.items.length && !resolved.items.length;
+  const empty = !open.items.length && !shownResolved.length;
   return (
     <List
       navigationTitle={`Waypoint · Inbox · ${connection.name}`}
@@ -422,7 +432,7 @@ function InboxList({
       }}
       pagination={{
         pageSize: inboxPageSize,
-        hasMore: open.hasMore || resolved.hasMore,
+        hasMore: open.hasMore || (state.showResolved && resolved.hasMore),
         onLoadMore: () => feed.loadMore(),
       }}
     >
@@ -450,7 +460,7 @@ function InboxList({
       >
         {open.items.map(row)}
       </List.Section>
-      <List.Section title="Resolved">{resolved.items.map(row)}</List.Section>
+      {state.showResolved && <List.Section title="Resolved">{resolved.items.map(row)}</List.Section>}
       {empty && (
         <List.EmptyView
           title={
@@ -460,11 +470,17 @@ function InboxList({
                 ? "Sign in to reconnect"
                 : query
                   ? "No matching items"
-                  : "The inbox is empty"
+                  : state.showResolved
+                    ? "The inbox is empty"
+                    : "Nothing open"
           }
           description={
             state.error?.message ??
-            (query ? "Try another subject or sender." : "Sessions post here with `waypoint inbox`.")
+            (query
+              ? "Try another subject or sender."
+              : state.showResolved
+                ? "Sessions post here with `waypoint inbox`."
+                : "Show Resolved Items (⌘⇧E) to see answered items.")
           }
           icon={Icon.Tray}
           actions={<ActionPanel>{shared}</ActionPanel>}

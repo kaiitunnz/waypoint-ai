@@ -72,7 +72,7 @@ const ids = (feed: InboxFeed) => ({
 const inboxRequests = (requests: string[]) =>
   requests.filter((url) => url.includes("/api/inbox?")).map((url) => new URL(url).search);
 
-test("Resolved loads as soon as Open is exhausted, and the count is seeded", async () => {
+test("Resolved loads only once shown, then as soon as Open is exhausted; the count is seeded", async () => {
   const s = sockets();
   const api = server({
     "open::": [itemWire("b", { updated_at: at(2) })],
@@ -81,10 +81,20 @@ test("Resolved loads as soon as Open is exhausted, and the count is seeded", asy
   const feed = new InboxFeed(connection, api.client, s);
   feed.start();
   await tick();
-  assert.deepEqual(ids(feed), { open: ["b"], resolved: ["a"] });
-  assert.deepEqual(inboxRequests(api.requests), ["?status=open&limit=30", "?status=resolved&limit=30"]);
+  assert.deepEqual(ids(feed), { open: ["b"], resolved: [] });
+  assert.deepEqual(inboxRequests(api.requests), ["?status=open&limit=30"]);
   assert.equal(feed.getSnapshot().unresolvedCount, 7);
   assert.equal(feed.getSnapshot().loading, false);
+  feed.setShowResolved(true);
+  await tick();
+  assert.deepEqual(ids(feed), { open: ["b"], resolved: ["a"] });
+  // A search reads Resolved again while it's shown.
+  feed.setQuery("x");
+  await tick();
+  assert.deepEqual(inboxRequests(api.requests).slice(-2), [
+    "?status=open&limit=30&q=x",
+    "?status=resolved&limit=30&q=x",
+  ]);
   feed.stop();
 });
 
@@ -97,6 +107,7 @@ test("paging continues Open before Resolved, and a search starts over", async ()
     "open::deploy": [itemWire("d", { subject: "deploy" })],
   });
   const feed = new InboxFeed(connection, api.client, s);
+  feed.setShowResolved(true);
   feed.start();
   await tick();
   assert.deepEqual(ids(feed).open, ["c"]);
@@ -166,7 +177,7 @@ test("Refresh reads the first pages once, even as the connection comes back", as
   feed.retry();
   s.send("session_list_update", { sessions: [] });
   await tick();
-  assert.equal(inboxRequests(api.requests).length - before, 2, "one Open and one Resolved page");
+  assert.equal(inboxRequests(api.requests).length - before, 1, "one Open page");
   feed.stop();
 });
 

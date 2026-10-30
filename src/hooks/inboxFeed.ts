@@ -23,6 +23,8 @@ export interface InboxSnapshot {
   stream: StreamStatus;
   error?: ApiError;
   query: string;
+  // Resolved items load and page only while shown.
+  showResolved: boolean;
 }
 // `onDeleted` hears of items deleted elsewhere, so their drafts can go too.
 type Options = { factory?: SocketFactory; scheduler?: Scheduler; onDeleted?: (id: string) => void };
@@ -48,7 +50,7 @@ export class InboxFeed extends Observable<InboxSnapshot> {
     private readonly client = new WaypointClient(connection.apiUrl),
     options: Options = {},
   ) {
-    super({ sections: emptySections(), loading: true, stream: "connecting", query: "" });
+    super({ sections: emptySections(), loading: true, stream: "connecting", query: "", showResolved: false });
     this.onDeleted = options.onDeleted;
     // Waypoint sends inbox changes on the global session socket, which starts with a session list snapshot.
     this.socket = new LiveSocket(
@@ -109,6 +111,11 @@ export class InboxFeed extends Observable<InboxSnapshot> {
     void this.loadNext();
     void this.refreshCount();
   }
+  setShowResolved(show: boolean) {
+    if (show === this.state.showResolved) return;
+    this.publish({ showResolved: show });
+    this.loadMore();
+  }
   loadMore() {
     if (this.active && !this.paging) void this.loadNext();
   }
@@ -134,7 +141,7 @@ export class InboxFeed extends Observable<InboxSnapshot> {
   private nextStatus(): InboxStatus | undefined {
     const { open, resolved } = this.state.sections;
     if (!open.loaded || open.hasMore) return "open";
-    if (!resolved.loaded || resolved.hasMore) return "resolved";
+    if (this.state.showResolved && (!resolved.loaded || resolved.hasMore)) return "resolved";
   }
   private async loadNext(): Promise<void> {
     const status = this.nextStatus();
@@ -159,7 +166,7 @@ export class InboxFeed extends Observable<InboxSnapshot> {
       this.paging = undefined;
       this.publish({ sections: addPage(this.state.sections, status, page, this.deleted), error: undefined });
       // A short Open list may never reach the end of the list, where Raycast asks for more, so Resolved starts here.
-      if (status === "open" && !page.hasMore) return this.loadNext();
+      if (status === "open" && this.nextStatus() === "resolved") return this.loadNext();
       this.publish({ loading: false });
     } catch (error) {
       if (!current()) return;
