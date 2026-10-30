@@ -1,12 +1,12 @@
-import { Action, ActionPanel, Icon, Keyboard, List, Toast, showToast, useNavigation } from "@raycast/api";
+import { Action, ActionPanel, Icon, Keyboard, List, Toast, useNavigation } from "@raycast/api";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useConnections } from "../hooks/useConnections";
 import { useSessionsFeed } from "../hooks/useSessionFeeds";
 import { FeedConnection } from "../hooks/sessionFeeds";
 import { Session } from "../api/sessions";
-import { connectionStore, quickChatStore } from "../storage/raycast";
+import { quickChatStore } from "../storage/raycast";
 import { SessionFilter, visibleSessions, isStructured, sessionUrl } from "../domain/sessions";
-import { LoadingView, SessionDetail, statusIcon } from "../components/SessionPresentation";
+import { SessionDetail, statusIcon } from "../components/SessionPresentation";
+import { ServerAccessory, ServerGate } from "../components/ServerGate";
 import { SessionActions } from "./SessionActions";
 import { SessionManager } from "../hooks/sessionManager";
 import { ManageServers } from "./ManageServers";
@@ -15,78 +15,23 @@ import { ConversationScreen } from "./SessionChat";
 import { QuickChat } from "./QuickChat";
 
 export function BrowseSessions() {
-  const { state, error, refresh } = useConnections();
-  const [serverId, setServerId] = useState<string>();
   const [query, setQuery] = useState("");
-  if (!state && !error) return <LoadingView title="Loading saved servers…" />;
-  const connection =
-    state?.connections.find((item) => item.id === (serverId ?? state.activeId ?? state.defaultId)) ??
-    state?.connections[0];
-  async function selectServer(id: string) {
-    setServerId(id);
-    try {
-      await connectionStore.select(id);
-      await refresh();
-    } catch {
-      await showToast({
-        style: Toast.Style.Failure,
-        title: "Could not switch server",
-        message: "Open Manage Servers and retry.",
-      });
-    }
-  }
-  const accessory = connection ? (
-    <List.Dropdown tooltip="Waypoint server" value={connection.id} onChange={selectServer}>
-      {state?.connections.map((server) => (
-        <List.Dropdown.Item key={server.id} title={server.name} value={server.id} icon={Icon.Network} />
-      ))}
-    </List.Dropdown>
-  ) : undefined;
-  if (!connection?.token)
-    return (
-      <List navigationTitle="Waypoint · Sessions" searchBarAccessory={accessory}>
-        <List.EmptyView
-          title={
-            error ? "Saved servers need attention" : connection ? "Sign in to browse sessions" : "Connect to Waypoint"
-          }
-          description={
-            error ??
-            (connection
-              ? `Sign in to ${connection.name} to find its sessions.`
-              : "Add a Waypoint API server using Manage Servers.")
-          }
-          actions={
-            <ActionPanel>
-              {connection && (
-                <Action.Push
-                  title="Sign in"
-                  icon={Icon.Lock}
-                  target={<SignInForm connection={connection} onSaved={refresh} />}
-                />
-              )}
-              {error && (
-                <Action
-                  title="Retry Loading"
-                  icon={Icon.ArrowClockwise}
-                  shortcut={Keyboard.Shortcut.Common.Refresh}
-                  onAction={refresh}
-                />
-              )}
-              <Action.Push title="Manage Servers" icon={Icon.Network} target={<ManageServers />} onPop={refresh} />
-            </ActionPanel>
-          }
-        />
-      </List>
-    );
   return (
-    <SessionsBrowser
-      key={connection.id}
-      connection={{ ...connection, token: connection.token }}
-      refreshConnections={refresh}
-      query={query}
-      onQueryChange={setQuery}
-      accessory={accessory}
-    />
+    <ServerGate
+      navigationTitle="Waypoint · Sessions"
+      signInTitle="Sign in to browse sessions"
+      signInDescription={(server) => `Sign in to ${server} to find its sessions.`}
+    >
+      {(connection, accessory, refresh) => (
+        <SessionsBrowser
+          connection={connection}
+          refreshConnections={refresh}
+          query={query}
+          onQueryChange={setQuery}
+          accessory={accessory}
+        />
+      )}
+    </ServerGate>
   );
 }
 
@@ -99,7 +44,7 @@ function SessionsBrowser({
 }: {
   connection: FeedConnection;
   refreshConnections: () => Promise<void>;
-  accessory: React.ComponentProps<typeof List>["searchBarAccessory"];
+  accessory: ServerAccessory;
   query: string;
   onQueryChange: (value: string) => void;
 }) {

@@ -49,6 +49,14 @@ export function normalizeConnection(input: ConnectionInput): ConnectionInput {
   };
 }
 
+// The server a command opens on: the one it chose, else the active one, else the default.
+export function activeConnection(state: ConnectionState, chosenId?: string): Connection | undefined {
+  return (
+    state.connections.find((item) => item.id === (chosenId ?? state.activeId ?? state.defaultId)) ??
+    state.connections[0]
+  );
+}
+
 export function emptyState(): ConnectionState {
   return { version: 1, connections: [] };
 }

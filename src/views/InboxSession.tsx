@@ -8,7 +8,6 @@ import { FeedConnection } from "../hooks/sessionFeeds";
 import { LoadingView } from "../components/SessionPresentation";
 import { ConversationScreen } from "./SessionChat";
 
-// The session that posted an inbox item, opened as a chat when Raycast can show its conversation.
 export function InboxSession({
   connection,
   sessionId,

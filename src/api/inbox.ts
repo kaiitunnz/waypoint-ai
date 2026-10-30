@@ -5,15 +5,13 @@ export type InboxStatus = "open" | "resolved";
 export interface InboxAttachmentRef {
   sessionId: string;
   attachmentId: string;
-  // Waypoint fills these in when the attachment resolves; they are absent for one it can't find.
+  // Absent when Waypoint can't find the attachment.
   filename?: string;
-  kind?: string;
 }
 
 export interface InboxReply {
   notes?: string;
   attachments: InboxAttachmentRef[];
-  createdAt: string;
 }
 
 interface BlockCommon {
@@ -36,7 +34,6 @@ export type InboxBlock = BlockCommon &
         multi: boolean;
         required: boolean;
         answer?: { selected: string[]; other?: string };
-        answeredAt?: string;
       }
     | {
         type: "approval";
@@ -44,7 +41,6 @@ export type InboxBlock = BlockCommon &
         options: string[];
         required: boolean;
         answer?: { decision: string };
-        answeredAt?: string;
       }
     // A block type this version doesn't know, kept so a newer server's items still list.
     | { type: "unsupported"; name: string }
@@ -61,7 +57,6 @@ export interface InboxItem {
   status: InboxStatus;
   readAt?: string;
   version: number;
-  createdAt: string;
   updatedAt: string;
   blocks: InboxBlock[];
 }
@@ -92,7 +87,6 @@ function parseRef(value: unknown): InboxAttachmentRef {
     sessionId: required(value.session_id, "attachment"),
     attachmentId: required(value.attachment_id, "attachment"),
     filename: filled(value.filename),
-    kind: filled(value.kind),
   };
 }
 
@@ -102,7 +96,6 @@ function parseReply(value: unknown): InboxReply | undefined {
   return {
     notes: filled(value.notes),
     attachments: Array.isArray(value.attachments) ? value.attachments.map(parseRef) : [],
-    createdAt: text(value.created_at) ?? "",
   };
 }
 
@@ -135,7 +128,6 @@ function parseBlock(value: unknown): InboxBlock {
         multi: value.multi === true,
         required: value.required !== false,
         answer,
-        answeredAt: filled(value.answered_at),
       };
     }
     case "approval":
@@ -146,7 +138,6 @@ function parseBlock(value: unknown): InboxBlock {
         options: (Array.isArray(value.options) ? value.options : []).map((option) => required(option, "option")),
         required: value.required !== false,
         answer: isRecord(value.answer) ? { decision: required(value.answer.decision, "decision") } : undefined,
-        answeredAt: filled(value.answered_at),
       };
     default:
       return { ...common, type: "unsupported", name: text(value.type) ?? "unknown" };
@@ -164,7 +155,6 @@ export function parseInboxItem(value: unknown): InboxItem {
     status: value.status,
     readAt: filled(value.read_at),
     version: typeof value.version === "number" ? value.version : 0,
-    createdAt: required(value.created_at, "time"),
     updatedAt: required(value.updated_at, "time"),
     blocks: (Array.isArray(value.blocks) ? value.blocks : []).map(parseBlock),
   };
@@ -191,5 +181,9 @@ export function parseInboxFrame(value: Record<string, unknown>): InboxFrame {
   };
 }
 
-// The request body's attachment reference; Waypoint fills in the name and kind.
 export const refWire = (ref: InboxAttachmentRef) => ({ session_id: ref.sessionId, attachment_id: ref.attachmentId });
+
+export type BlockSubmit = {
+  answer?: { selected: string[]; other: string | null } | { decision: string };
+  reply?: { notes: string | null; attachments: ReturnType<typeof refWire>[] };
+};

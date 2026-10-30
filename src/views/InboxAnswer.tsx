@@ -2,23 +2,11 @@ import { Action, ActionPanel, Form, Icon, Toast, showToast, useNavigation } from
 import { useEffect, useMemo, useRef, useState } from "react";
 import { WaypointClient } from "../api/client";
 import { InboxBlock, InboxItem } from "../api/inbox";
-import { InboxForm, initialForm } from "../domain/inbox";
+import { InboxForm, attachmentName, blockText, initialForm } from "../domain/inbox";
 import { InboxReplySubmitter } from "../hooks/inboxReply";
 import { FeedConnection } from "../hooks/sessionFeeds";
 import { quickChatStore } from "../storage/raycast";
 
-const blockText = (block: InboxBlock) =>
-  block.type === "markdown"
-    ? block.text
-    : block.type === "attachment"
-      ? (block.ref.filename ?? "Unavailable attachment")
-      : block.type === "question"
-        ? block.question
-        : block.type === "approval"
-          ? `${block.prompt}${block.answer ? `\n\nDecision: ${block.answer.decision}` : ""}`
-          : "This block needs a newer version of Waypoint AI.";
-
-// Answers a question or replies to any block. A reply replaces the block's earlier one, so the form opens on it.
 export function InboxAnswer({
   connection,
   item,
@@ -180,12 +168,7 @@ export function InboxAnswer({
         error={!question ? problem : undefined}
         onChange={(notes) => update({ notes })}
       />
-      {earlier.length > 0 && (
-        <Form.Description
-          title="Attached"
-          text={earlier.map((ref) => ref.filename ?? "Unavailable attachment").join("\n")}
-        />
-      )}
+      {earlier.length > 0 && <Form.Description title="Attached" text={earlier.map(attachmentName).join("\n")} />}
       {filesAllowed && (
         <Form.FilePicker
           id="files"

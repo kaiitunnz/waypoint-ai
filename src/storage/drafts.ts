@@ -20,7 +20,7 @@ export class DraftStore {
     await this.flushing.get(key);
     await this.storage.removeItem(key);
   }
-  // Removes every draft under a prefix, such as all of one inbox item's blocks.
+  // Removes every draft whose key starts with `prefix`.
   async removePrefix(prefix: string) {
     await this.forget(prefix);
     for (const key of await this.storage.keys()) if (key.startsWith(prefix)) await this.storage.removeItem(key);

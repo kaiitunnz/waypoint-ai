@@ -1,4 +1,6 @@
 import {
+  BlockSubmit,
+  InboxApprovalBlock,
   InboxAttachmentRef,
   InboxBlock,
   InboxFrame,
@@ -13,10 +15,6 @@ export const inboxPageSize = 30;
 
 export function senderName(item: InboxItem): string {
   return item.fromSessionId ? item.fromLabel || "Session" : "You";
-}
-
-export function answered(block: InboxBlock): boolean {
-  return (block.type === "question" || block.type === "approval") && !!block.answer;
 }
 
 // Questions and approvals that still keep the item open.
@@ -64,7 +62,66 @@ export function replyBody(notes: string, carried: InboxAttachmentRef[], added: I
   return { notes: trimmed || null, attachments: [...carried, ...added].map(refWire) };
 }
 
-const attachmentName = (ref: InboxAttachmentRef) => ref.filename ?? "Unavailable attachment";
+const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every((value) => b.includes(value));
+
+// Whether the block already holds what was sent: the answer, and the reply's notes and new attachments.
+export function holds(block: InboxBlock, body: BlockSubmit): boolean {
+  if (body.answer) {
+    if ("decision" in body.answer) {
+      if (block.type !== "approval" || block.answer?.decision !== body.answer.decision) return false;
+    } else if (
+      block.type !== "question" ||
+      !block.answer ||
+      !sameSet(block.answer.selected, body.answer.selected) ||
+      (block.answer.other ?? null) !== body.answer.other
+    )
+      return false;
+  }
+  if (body.reply) {
+    if (!block.reply || (block.reply.notes ?? null) !== body.reply.notes) return false;
+    const held = block.reply.attachments.map((ref) => ref.attachmentId);
+    if (!body.reply.attachments.every((ref) => held.includes(ref.attachment_id))) return false;
+  }
+  return true;
+}
+
+export const attachmentName = (ref: InboxAttachmentRef) => ref.filename ?? "Unavailable attachment";
+const firstLine = (text: string, max: number) => text.trim().split("\n")[0].slice(0, max);
+
+export function blockTitle(block: InboxBlock): string {
+  switch (block.type) {
+    case "markdown":
+      return firstLine(block.text, 60) || "Note";
+    case "attachment":
+      return attachmentName(block.ref);
+    case "question":
+      return block.header ?? firstLine(block.question, 60);
+    case "approval":
+      return firstLine(block.prompt, 60);
+    case "unsupported":
+      return "Unsupported block";
+  }
+}
+
+export function decisionTitle(block: InboxApprovalBlock, option: string, several: boolean): string {
+  const verb = block.answer ? `Change Decision: ${option}` : option;
+  return several ? `${verb} · ${firstLine(block.prompt, 40)}` : verb;
+}
+
+export function blockText(block: InboxBlock): string {
+  switch (block.type) {
+    case "markdown":
+      return block.text;
+    case "attachment":
+      return attachmentName(block.ref);
+    case "question":
+      return block.question;
+    case "approval":
+      return `${block.prompt}${block.answer ? `\n\nDecision: ${block.answer.decision}` : ""}`;
+    case "unsupported":
+      return "This block needs a newer version of Waypoint AI.";
+  }
+}
 // Inbox text comes from agents; this keeps it from adding headings or HTML around the parts Raycast labels.
 const quote = (value: string) =>
   value
@@ -133,7 +190,7 @@ export function itemMarkdown(item: InboxItem): string {
 export function itemSummary(item: InboxItem): string {
   const chips = blockChips(item);
   const first = item.blocks.find((block) => block.type === "markdown");
-  const line = first?.type === "markdown" ? first.text.trim().split("\n")[0] : undefined;
+  const line = first?.type === "markdown" ? firstLine(first.text, Infinity) : undefined;
   return [
     `# ${item.subject.replace(/\n/g, " ")}`,
     `${senderName(item)}${chips.length ? ` · ${chips.join(", ")}` : ""}`,
@@ -171,7 +228,7 @@ const without = (sections: InboxSections, id: string): InboxSections => ({
   open: { ...sections.open, items: sections.open.items.filter((item) => item.id !== id) },
   resolved: { ...sections.resolved, items: sections.resolved.items.filter((item) => item.id !== id) },
 });
-const find = (sections: InboxSections, id: string) =>
+export const findItem = (sections: InboxSections, id: string): InboxItem | undefined =>
   sections.open.items.find((item) => item.id === id) ?? sections.resolved.items.find((item) => item.id === id);
 // A plain read changes neither the version nor the update time, so a read copy is the fresher of two otherwise equal.
 function newer(a: InboxItem, b: InboxItem): boolean {
@@ -206,16 +263,15 @@ export function addPage(
   };
   for (const item of page.items) {
     if (deleted.has(item.id)) continue;
-    const existing = find(next, item.id);
+    const existing = findItem(next, item.id);
     if (existing && newer(existing, item)) continue;
     next = place(without(next, item.id), item, true);
   }
   return next;
 }
 
-// Applies a live update or a local result: the item moves to its status section when it belongs in what's loaded.
 export function applyItem(sections: InboxSections, item: InboxItem, query: string, force = false): InboxSections {
-  const existing = find(sections, item.id);
+  const existing = findItem(sections, item.id);
   if (existing && newer(existing, item)) return sections;
   const next = without(sections, item.id);
   return matchesQuery(item, query) ? place(next, item, force) : next;
@@ -228,10 +284,6 @@ export function applyFrame(sections: InboxSections, frame: InboxFrame, query: st
 
 export function removeItems(sections: InboxSections, ids: string[]): InboxSections {
   return ids.reduce(without, sections);
-}
-
-export function findItem(sections: InboxSections, id: string): InboxItem | undefined {
-  return find(sections, id);
 }
 
 export interface InboxForm {

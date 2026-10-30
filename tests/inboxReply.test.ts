@@ -5,9 +5,9 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 import { WaypointClient } from "../src/api/client";
 import { InboxBlock, parseInboxItem } from "../src/api/inbox";
-import { initialForm } from "../src/domain/inbox";
+import { holds, initialForm } from "../src/domain/inbox";
 import { InboxReplySubmitter } from "../src/hooks/inboxReply";
-import { holds, submitBlock } from "../src/hooks/inboxSubmit";
+import { submitBlock } from "../src/hooks/inboxSubmit";
 import { loadMenuBar, menuBarLamp } from "../src/hooks/inboxMenuBar";
 import { DraftStore, draftKeys } from "../src/storage/drafts";
 import { approvalWire, itemWire, questionWire } from "./fixtures/inbox";
@@ -100,6 +100,9 @@ test("an unconfirmed submit is settled by reading the item back", async () => {
     kind: "rejected",
     message: "Waypoint did not accept this answer: decision not in block options",
   });
+  api = waypoint({ submit: () => respond({ detail: "inbox block not found" }, 404) });
+  const blockGone = await submitBlock(api.client, "token", "i", "p", { answer: { decision: "Approve" } });
+  assert.equal(blockGone.kind, "rejected", "a missing block leaves the item in the list");
   api = waypoint({ submit: () => respond({ detail: "inbox item not found" }, 404) });
   assert.equal(
     (await submitBlock(api.client, "token", "i", "p", { reply: { notes: "x", attachments: [] } })).kind,

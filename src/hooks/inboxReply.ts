@@ -1,13 +1,13 @@
 import { stat } from "node:fs/promises";
 import { basename } from "node:path";
 import { ApiError, WaypointClient } from "../api/client";
-import { InboxAttachmentRef, InboxBlock, InboxItem } from "../api/inbox";
+import { BlockSubmit, InboxAttachmentRef, InboxBlock, InboxItem } from "../api/inbox";
 import { fileProblem } from "../domain/compose";
 import { InboxForm, answerProblem, questionAnswer, replyBody } from "../domain/inbox";
 import { DraftStore, draftKeys } from "../storage/drafts";
-import { BlockSubmit, SubmitOutcome, submitBlock } from "./inboxSubmit";
+import { SubmitOutcome, submitBlock } from "./inboxSubmit";
 
-export interface FileStats {
+interface FileStats {
   size: number;
   modifiedMs: number;
 }
@@ -19,7 +19,7 @@ interface Upload extends FileStats {
 export type ReplyOutcome =
   SubmitOutcome | { kind: "invalid"; message: string } | { kind: "session-gone"; message: string };
 
-export async function fileStats(path: string): Promise<FileStats> {
+async function fileStats(path: string): Promise<FileStats> {
   const stats = await stat(path).catch(() => undefined);
   const problem = fileProblem(stats && { isFile: stats.isFile(), size: stats.size });
   if (problem) throw new Error(`${basename(path)}: ${problem}`);

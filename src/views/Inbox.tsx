@@ -14,16 +14,26 @@ import {
 } from "@raycast/api";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, WaypointClient } from "../api/client";
-import { InboxApprovalBlock, InboxBlock, InboxItem } from "../api/inbox";
-import { blockChips, findItem, inboxPageSize, itemMarkdown, itemSummary, itemText, senderName } from "../domain/inbox";
+import { InboxApprovalBlock, InboxBlock, InboxItem, InboxQuestionBlock } from "../api/inbox";
+import {
+  blockChips,
+  blockTitle,
+  decisionTitle,
+  findItem,
+  inboxPageSize,
+  itemMarkdown,
+  itemSummary,
+  itemText,
+  pendingBlocks,
+  senderName,
+} from "../domain/inbox";
 import { ReadPolicy } from "../hooks/inboxRead";
 import { submitBlock } from "../hooks/inboxSubmit";
 import { FeedConnection } from "../hooks/sessionFeeds";
-import { useConnections } from "../hooks/useConnections";
 import { useInboxFeed } from "../hooks/useInboxFeed";
 import { draftKeys } from "../storage/drafts";
-import { connectionStore, quickChatStore } from "../storage/raycast";
-import { LoadingView } from "../components/SessionPresentation";
+import { quickChatStore } from "../storage/raycast";
+import { ServerAccessory, ServerGate } from "../components/ServerGate";
 import { InboxAnswer } from "./InboxAnswer";
 import { InboxSession } from "./InboxSession";
 import { ManageServers } from "./ManageServers";
@@ -35,74 +45,27 @@ export interface InboxLaunch {
 }
 
 // Raycast updates the menu bar count on its own schedule; this refreshes it after a change made here.
-export function refreshMenuBar() {
+function refreshMenuBar() {
   launchCommand({ name: "inbox-menu-bar", type: LaunchType.Background }).catch(() => undefined);
 }
 
 export function Inbox({ launch }: { launch?: InboxLaunch }) {
-  const { state, error, refresh } = useConnections();
-  const [serverId, setServerId] = useState(launch?.serverId);
-  if (!state && !error) return <LoadingView title="Loading saved servers…" />;
-  const connection =
-    state?.connections.find((item) => item.id === (serverId ?? state.activeId ?? state.defaultId)) ??
-    state?.connections[0];
-  async function selectServer(id: string) {
-    if (id === connection?.id) return;
-    setServerId(id);
-    try {
-      await connectionStore.select(id);
-      await refresh();
-    } catch {
-      await showToast({
-        style: Toast.Style.Failure,
-        title: "Could not switch server",
-        message: "Open Manage Servers and retry.",
-      });
-    }
-  }
-  const accessory = connection ? (
-    <List.Dropdown tooltip="Waypoint server" value={connection.id} onChange={selectServer}>
-      {state?.connections.map((server) => (
-        <List.Dropdown.Item key={server.id} title={server.name} value={server.id} icon={Icon.Network} />
-      ))}
-    </List.Dropdown>
-  ) : undefined;
-  if (!connection?.token)
-    return (
-      <List navigationTitle="Waypoint · Inbox" searchBarAccessory={accessory}>
-        <List.EmptyView
-          title={
-            error ? "Saved servers need attention" : connection ? "Sign in to see the inbox" : "Connect to Waypoint"
-          }
-          description={
-            error ??
-            (connection
-              ? `Sign in to ${connection.name} to answer its inbox.`
-              : "Add a Waypoint API server using Manage Servers.")
-          }
-          actions={
-            <ActionPanel>
-              {connection && (
-                <Action.Push
-                  title="Sign in"
-                  icon={Icon.Lock}
-                  target={<SignInForm connection={connection} onSaved={refresh} />}
-                />
-              )}
-              <Action.Push title="Manage Servers" icon={Icon.Network} target={<ManageServers />} onPop={refresh} />
-            </ActionPanel>
-          }
-        />
-      </List>
-    );
   return (
-    <InboxList
-      key={connection.id}
-      connection={{ ...connection, token: connection.token }}
-      refreshConnections={refresh}
-      accessory={accessory}
-      openItem={!launch?.serverId || launch.serverId === connection.id ? launch?.itemId : undefined}
-    />
+    <ServerGate
+      navigationTitle="Waypoint · Inbox"
+      signInTitle="Sign in to see the inbox"
+      signInDescription={(server) => `Sign in to ${server} to answer its inbox.`}
+      initialServerId={launch?.serverId}
+    >
+      {(connection, accessory, refresh) => (
+        <InboxList
+          connection={connection}
+          refreshConnections={refresh}
+          accessory={accessory}
+          openItem={!launch?.serverId || launch.serverId === connection.id ? launch?.itemId : undefined}
+        />
+      )}
+    </ServerGate>
   );
 }
 
@@ -111,7 +74,7 @@ function rowIcon(item: InboxItem) {
   const unread = !item.readAt;
   if (item.status === "resolved")
     return { value: { source: Icon.CheckCircle, tintColor: Color.SecondaryText }, tooltip: "Resolved" };
-  const pending = blockChips(item).length > 0;
+  const pending = pendingBlocks(item).length > 0;
   return {
     value: {
       source: unread ? Icon.CircleFilled : Icon.Circle,
@@ -120,21 +83,6 @@ function rowIcon(item: InboxItem) {
     tooltip: `${pending ? "Needs an answer" : "Open"}${unread ? " · Unread" : ""}`,
   };
 }
-const decisionTitle = (block: InboxApprovalBlock, option: string, several: boolean) => {
-  const verb = block.answer ? `Change Decision: ${option}` : option;
-  return several ? `${verb} · ${block.prompt.split("\n")[0].slice(0, 40)}` : verb;
-};
-const blockTitle = (block: InboxBlock) =>
-  block.type === "markdown"
-    ? block.text.trim().split("\n")[0].slice(0, 60) || "Note"
-    : block.type === "attachment"
-      ? (block.ref.filename ?? "Attachment")
-      : block.type === "question"
-        ? (block.header ?? block.question.split("\n")[0].slice(0, 60))
-        : block.type === "approval"
-          ? block.prompt.split("\n")[0].slice(0, 60)
-          : "Unsupported block";
-
 function InboxList({
   connection,
   refreshConnections,
@@ -143,7 +91,7 @@ function InboxList({
 }: {
   connection: FeedConnection;
   refreshConnections: () => Promise<void>;
-  accessory: React.ComponentProps<typeof List>["searchBarAccessory"];
+  accessory: ServerAccessory;
   openItem?: string;
 }) {
   const client = useMemo(() => new WaypointClient(connection.apiUrl), [connection.apiUrl]);
@@ -295,9 +243,9 @@ function InboxList({
     </>
   );
   const actions = (item: InboxItem) => {
-    const questions = item.blocks.filter((block) => block.type === "question");
+    const questions = item.blocks.filter((block): block is InboxQuestionBlock => block.type === "question");
     const approvals = item.blocks.filter((block): block is InboxApprovalBlock => block.type === "approval");
-    const pendingQuestion = questions.some((block) => block.type === "question" && !block.answer);
+    const pendingQuestion = questions.some((block) => !block.answer);
     const answerForm = (block: InboxBlock, answering: boolean) => (
       <InboxAnswer
         connection={connection}
@@ -312,11 +260,7 @@ function InboxList({
       <Action.Push
         key={`answer-${block.id}`}
         title={
-          questions.length > 1
-            ? `Answer: ${blockTitle(block)}`
-            : block.type === "question" && block.answer
-              ? "Change Answer"
-              : "Answer Question"
+          questions.length > 1 ? `Answer: ${blockTitle(block)}` : block.answer ? "Change Answer" : "Answer Question"
         }
         icon={Icon.QuestionMarkCircle}
         target={answerForm(block, true)}
@@ -391,22 +335,26 @@ function InboxList({
       </ActionPanel>
     );
   };
-  const row = (item: InboxItem) => (
-    <List.Item
-      key={item.id}
-      id={item.id}
-      title={item.subject}
-      subtitle={senderName(item)}
-      icon={rowIcon(item)}
-      accessories={
-        blockChips(item).length
-          ? blockChips(item).map((chip) => ({ tag: { value: chip, color: Color.Orange } }))
-          : [{ date: new Date(item.updatedAt), tooltip: `Updated ${new Date(item.updatedAt).toLocaleString()}` }]
-      }
-      detail={<List.Item.Detail markdown={selected === item.id ? itemMarkdown(item) : itemSummary(item)} />}
-      actions={actions(item)}
-    />
-  );
+  const row = (item: InboxItem) => {
+    const chips = blockChips(item);
+    const updated = new Date(item.updatedAt);
+    return (
+      <List.Item
+        key={item.id}
+        id={item.id}
+        title={item.subject}
+        subtitle={senderName(item)}
+        icon={rowIcon(item)}
+        accessories={
+          chips.length
+            ? chips.map((chip) => ({ tag: { value: chip, color: Color.Orange } }))
+            : [{ date: updated, tooltip: `Updated ${updated.toLocaleString()}` }]
+        }
+        detail={<List.Item.Detail markdown={selected === item.id ? itemMarkdown(item) : itemSummary(item)} />}
+        actions={actions(item)}
+      />
+    );
+  };
   const empty = !open.items.length && !shownResolved.length;
   return (
     <List

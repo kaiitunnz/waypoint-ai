@@ -1,10 +1,7 @@
 import { ApiError, WaypointClient } from "../api/client";
-import { InboxBlock, InboxItem } from "../api/inbox";
+import { BlockSubmit, InboxItem } from "../api/inbox";
+import { holds } from "../domain/inbox";
 
-export interface BlockSubmit {
-  answer?: { selected: string[]; other: string | null } | { decision: string };
-  reply?: { notes: string | null; attachments: { session_id: string; attachment_id: string }[] };
-}
 export type SubmitOutcome =
   | { kind: "saved"; item: InboxItem }
   | { kind: "rejected"; message: string }
@@ -15,32 +12,15 @@ export type SubmitOutcome =
   // Neither the submit nor a re-read settled whether it was recorded.
   | { kind: "unknown"; message: string };
 
-const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every((value) => b.includes(value));
-
-// Whether the item already holds what was sent: the answer, and the reply's notes and new attachments.
-export function holds(block: InboxBlock, body: BlockSubmit): boolean {
-  if (body.answer) {
-    if ("decision" in body.answer) {
-      if (block.type !== "approval" || block.answer?.decision !== body.answer.decision) return false;
-    } else if (
-      block.type !== "question" ||
-      !block.answer ||
-      !sameSet(block.answer.selected, body.answer.selected) ||
-      (block.answer.other ?? null) !== body.answer.other
-    )
-      return false;
-  }
-  if (body.reply) {
-    if (!block.reply || (block.reply.notes ?? null) !== body.reply.notes) return false;
-    const held = block.reply.attachments.map((ref) => ref.attachmentId);
-    if (!body.reply.attachments.every((ref) => held.includes(ref.attachment_id))) return false;
-  }
-  return true;
-}
+const blockGone = "This part of the item is no longer available. Refresh the inbox.";
 
 function failure(error: unknown): SubmitOutcome | undefined {
   if (!(error instanceof ApiError)) return undefined;
-  if (error.kind === "not-found") return { kind: "deleted", message: error.message };
+  // A missing block leaves the item in place, so only a missing item counts as deleted.
+  if (error.kind === "not-found")
+    return error.detail === "block"
+      ? { kind: "rejected", message: blockGone }
+      : { kind: "deleted", message: error.message };
   if (error.kind === "expired-token") return { kind: "expired", message: error.message };
   if (error.kind === "rejected") return { kind: "rejected", message: error.message };
   return undefined;
@@ -55,7 +35,7 @@ export async function submitBlock(
   body: BlockSubmit,
 ): Promise<SubmitOutcome> {
   try {
-    return { kind: "saved", item: await client.answerInboxBlock(token, itemId, blockId, { ...body }) };
+    return { kind: "saved", item: await client.answerInboxBlock(token, itemId, blockId, body) };
   } catch (error) {
     const definite = failure(error);
     if (definite) return definite;
@@ -63,7 +43,7 @@ export async function submitBlock(
   try {
     const item = await client.inboxItem(token, itemId);
     const block = item.blocks.find((entry) => entry.id === blockId);
-    if (!block) return { kind: "deleted", message: "This part of the item is no longer available. Refresh the inbox." };
+    if (!block) return { kind: "rejected", message: blockGone };
     return holds(block, body)
       ? { kind: "saved", item }
       : { kind: "not-saved", message: "Waypoint didn't record it. Send again." };

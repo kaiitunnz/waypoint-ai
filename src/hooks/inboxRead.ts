@@ -1,6 +1,6 @@
 import { Scheduler, timers } from "../api/liveSocket";
 
-export const dwellMs = 1500;
+const dwellMs = 1500;
 
 // Marking an item read can resolve it and wake its session for good, while Raycast selects a row on its own whenever
 // the list changes. So only a move the user made, held for a moment, or an action on the item marks it read.
@@ -17,7 +17,6 @@ export class ReadPolicy {
     private readonly isUnread: (id: string) => boolean,
     private readonly scheduler: Scheduler = timers,
   ) {}
-  // Called on every render with the rows shown.
   visible(ids: string[]) {
     this.shown = new Set(ids);
     if (this.current !== undefined && !this.shown.has(this.current)) {
@@ -25,13 +24,11 @@ export class ReadPolicy {
       this.cancel();
     }
   }
-  // A new search or reload: whatever Raycast selects next is its own choice.
   reset() {
     this.current = undefined;
     this.pending = undefined;
     this.cancel();
   }
-  // The view is about to select `id` itself.
   expect(id: string) {
     this.pending = id === this.current ? undefined : id;
   }
@@ -49,7 +46,6 @@ export class ReadPolicy {
       if (this.current === id) this.mark(id);
     }, dwellMs);
   }
-  // The user acted on the item.
   acted(id: string) {
     this.mark(id);
   }

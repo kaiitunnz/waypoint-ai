@@ -7,7 +7,7 @@ import { isRecord } from "../domain/connections";
 import { parseMetadata, ServerMetadata } from "./contracts";
 import { LaunchSettings, UsageProvider, parseLaunchSettings, parseUsageProviders } from "./settings";
 import { Session, EventsPage, parseAttachment, parseSession, parseSessions, parseEventsPage } from "./sessions";
-import { InboxItem, InboxPage, InboxStatus, parseInboxItem, parseInboxPage } from "./inbox";
+import { BlockSubmit, InboxItem, InboxPage, InboxStatus, parseInboxItem, parseInboxPage } from "./inbox";
 
 export type ApiErrorKind =
   | "unreachable"
@@ -437,7 +437,6 @@ export class WaypointClient {
       );
     return session;
   }
-  // `missing` explains a 404: a deleted item for one item's path, or a server without the inbox for the others.
   private async inboxRead<T>(
     path: string,
     token: string,
@@ -501,8 +500,7 @@ export class WaypointClient {
       return await this.send(token, path, body, { method }, parse);
     } catch (error) {
       if (!(error instanceof ApiError)) throw error;
-      if (error.kind === "expired-token")
-        throw new ApiError("expired-token", "Your sign-in expired. Sign in again; your answer is kept.");
+      if (error.kind === "expired-token") throw new ApiError("expired-token", "Your sign-in expired. Sign in again.");
       if (error.kind === "not-found")
         throw new ApiError(
           "not-found",
@@ -531,13 +529,7 @@ export class WaypointClient {
       throw error;
     }
   }
-  // Answers and replies overwrite the block's earlier ones, so an unconfirmed submit is safe to send again.
-  answerInboxBlock(
-    token: string,
-    itemId: string,
-    blockId: string,
-    body: { answer?: Record<string, unknown>; reply?: Record<string, unknown> },
-  ): Promise<InboxItem> {
+  answerInboxBlock(token: string, itemId: string, blockId: string, body: BlockSubmit): Promise<InboxItem> {
     return this.inboxSend(
       token,
       `/api/inbox/${encodeURIComponent(itemId)}/blocks/${encodeURIComponent(blockId)}`,

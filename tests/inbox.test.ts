@@ -7,6 +7,8 @@ import {
   answerProblem,
   applyFrame,
   blockChips,
+  blockTitle,
+  decisionTitle,
   emptySection,
   InboxSections,
   itemMarkdown,
@@ -142,6 +144,21 @@ test("markdown shows every block with answers and replies; summaries stay short"
   assert.match(itemText(full), /^Ship it\?\n\nLine one/);
 });
 
+test("action titles name blocks by their first line", () => {
+  const entry = item("a", {
+    blocks: [
+      { id: "m", type: "markdown", text: "\n  First line\nSecond", reply: null },
+      questionWire("q", { header: null, question: "Which suite?\nDetails" }),
+      approvalWire("p", { prompt: "Publish the release notes?\nMore", answer: { decision: "Deny" } }),
+    ],
+  });
+  assert.deepEqual(entry.blocks.map(blockTitle), ["First line", "Which suite?", "Publish the release notes?"]);
+  const approval = entry.blocks[2];
+  assert.ok(approval.type === "approval");
+  assert.equal(decisionTitle(approval, "Approve", false), "Change Decision: Approve");
+  assert.equal(decisionTitle(approval, "Approve", true), "Change Decision: Approve · Publish the release notes?");
+});
+
 test("search matches the subject or sender case-insensitively", () => {
   const entry = item("a", { subject: "Deploy Plan", from_label: "Infra Bot" });
   assert.ok(matchesQuery(entry, "deploy"));
@@ -250,7 +267,7 @@ test("inbox requests use Waypoint's routes and inbox wording", async () => {
     }
     assert.fail("expected a failure");
   };
-  const answer = () => client.answerInboxBlock("token", "a", "q", { answer: { selected: ["Nope"] } });
+  const answer = () => client.answerInboxBlock("token", "a", "q", { answer: { selected: ["Nope"], other: null } });
   const invalid = await failure(respond({ detail: "selected option not in block options" }, 422), answer);
   assert.equal(invalid.message, "Waypoint did not accept this answer: selected option not in block options");
   const deleted = await failure(respond({ detail: "inbox item not found" }, 404), answer);

@@ -1,9 +1,9 @@
 import { ApiError, WaypointClient } from "../api/client";
 import { InboxItem } from "../api/inbox";
-import { Connection, ConnectionState } from "../domain/connections";
+import { ConnectionState, activeConnection } from "../domain/connections";
 import { pendingBlocks } from "../domain/inbox";
 
-export const menuBarItems = 10;
+const menuBarItems = 10;
 
 // The server is named without its token, so nothing here carries a credential.
 type Server = { id: string; name: string };
@@ -17,10 +17,6 @@ export type MenuBarData =
 export function menuBarLamp(data: MenuBarData | undefined): "off" | "open" | "waiting" {
   if (data?.kind !== "items" || !data.count) return "off";
   return data.items.some((item) => pendingBlocks(item).length) ? "waiting" : "open";
-}
-
-export function activeConnection(state: ConnectionState): Connection | undefined {
-  return state.connections.find((item) => item.id === (state.activeId ?? state.defaultId)) ?? state.connections[0];
 }
 
 export async function loadMenuBar(

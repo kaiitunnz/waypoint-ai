@@ -18,15 +18,12 @@ export interface InboxSnapshot {
   sections: InboxSections;
   unresolvedCount?: number;
   metadata?: ServerMetadata;
-  // A page is loading.
   loading: boolean;
   stream: StreamStatus;
   error?: ApiError;
   query: string;
-  // Resolved items load and page only while shown.
   showResolved: boolean;
 }
-// `onDeleted` hears of items deleted elsewhere, so their drafts can go too.
 type Options = { factory?: SocketFactory; scheduler?: Scheduler; onDeleted?: (id: string) => void };
 
 const emptySections = (): InboxSections => ({ open: emptySection(), resolved: emptySection() });
@@ -35,7 +32,6 @@ const safeError = (error: unknown) =>
     ? error
     : new ApiError("unreachable", "Could not refresh the inbox. Loaded items are kept. Retry to reconnect.");
 
-// Open items first, then resolved ones, each paged by Waypoint's cursor and kept current by the live connection.
 export class InboxFeed extends Observable<InboxSnapshot> {
   private readonly socket: LiveSocket;
   private active = false;
@@ -100,7 +96,6 @@ export class InboxFeed extends Observable<InboxSnapshot> {
     this.publish({ query });
     this.reload();
   }
-  // Reads the first pages again, dropping what was loaded.
   reload() {
     if (!this.active) return;
     this.generation++;
@@ -119,7 +114,6 @@ export class InboxFeed extends Observable<InboxSnapshot> {
   loadMore() {
     if (this.active && !this.paging) void this.loadNext();
   }
-  // Shows a mutation's result at once; Waypoint's update follows.
   apply(item: InboxItem) {
     this.publish({ sections: applyItem(this.state.sections, item, this.state.query) });
   }
@@ -127,7 +121,7 @@ export class InboxFeed extends Observable<InboxSnapshot> {
     ids.forEach((id) => this.deleted.add(id));
     this.publish({ sections: removeItems(this.state.sections, ids) });
   }
-  // Loads one item into its section even when paging hasn't reached it, such as one opened from the menu bar.
+  // Loads one item into its section even when paging hasn't reached it.
   async fetchItem(id: string): Promise<"found" | "deleted" | "failed"> {
     try {
       const item = await this.client.inboxItem(this.connection.token, id);
