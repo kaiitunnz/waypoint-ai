@@ -197,7 +197,7 @@ test("model and effort choices keep defaults, custom values, and the effort's th
   const { baseline, draft } = setup({ model: "custom-x", effort: "turbo" });
   assert.deepEqual(
     modelChoices(catalog, baseline, draft).map((choice) => choice.title),
-    ["Default (Model A)", "Custom · custom-x", "Model A", "Model B", "Model C"],
+    ["Model A · Default", "Custom · custom-x", "Model A", "Model B", "Model C"],
   );
   for (const typed of ["t", "typed", "typed-model"]) {
     const typing = { ...draft, model: typed };
@@ -372,5 +372,38 @@ test("Waypoint's own catalog drives restart disclosure per agent and interface",
   assert.equal(structuredTransport(real, "tmux"), false);
   assert.ok(
     ["claude_cli", "claude_tty", "codex_app_server", "opencode_http"].every((t) => structuredTransport(real, t)),
+  );
+});
+
+test("resolved session defaults are display-only and follow the staged context", () => {
+  const { baseline, draft, plan } = setup({ model: null, resolved_model: "session-model", effort: null });
+  const catalog = parseModels({
+    default_model_id: "new-default",
+    default_model_label: "New Default",
+    default_effort: "high",
+    models: [
+      { id: "session-model", label: "Session Model", default_effort: "low", supported_efforts: ["low"] },
+      { id: "new-default", label: "New Default", default_effort: "medium", supported_efforts: ["medium", "high"] },
+    ],
+  });
+  assert.equal(baseline.resolvedModel, "session-model");
+  assert.equal(modelChoices(catalog, baseline, draft)[0].title, "Session Model · Default");
+  assert.equal(modelChoices(undefined, baseline, draft)[0].title, "session-model · Default");
+  assert.equal(effortChoices(catalog, baseline, draft).choices[0].title, "low · Default");
+  assert.deepEqual(effortChoices(catalog, baseline, draft).efforts, ["low"]);
+  assert.equal(modelChoices(catalog, baseline, { ...draft, profileId: "home" })[0].title, "New Default · Default");
+  assert.equal(modelChoices(catalog, baseline, { ...draft, model: "explicit" })[0].title, "New Default · Default");
+  assert.equal(modelChoices(catalog, baseline, { ...draft, transport: "other" })[0].title, "New Default · Default");
+  assert.equal(draft.model, null);
+  assert.equal(draft.effort, null);
+  assert.equal(plan({}).kind, "none");
+  assert.deepEqual(
+    plan({ title: "New title" }).steps.map((step) => step.op),
+    ["title"],
+  );
+  const caps = capsFor(metadata, baseline.backend, baseline.transport);
+  assert.equal(
+    settingsFingerprint(baseline, caps),
+    settingsFingerprint({ ...baseline, resolvedModel: "changed-report" }, caps),
   );
 });

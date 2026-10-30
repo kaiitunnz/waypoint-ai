@@ -1,12 +1,14 @@
 import { Form } from "@raycast/api";
 import { useEffect, useState } from "react";
 import { customModelValue, defaultsModelChoice, defaultsModelChoices, modelEfforts } from "../domain/modelOptions";
+import { launchSettingsDisplay } from "../domain/launchSettings";
 import { interfaceName, structuredTransport } from "../domain/sessions";
 import { ChatDefaults, launchContext } from "../domain/quickChat";
 import { ServerMetadata } from "../api/contracts";
 import { ModelCatalog } from "../api/models";
 import { WaypointClient } from "../api/client";
 import { FeedConnection } from "../hooks/sessionFeeds";
+import { discoverLaunchModels } from "../hooks/launchModels";
 import { localWorkspace } from "../storage/workspace";
 
 type Setter = (update: (current: ChatDefaults) => ChatDefaults) => void;
@@ -22,30 +24,65 @@ export function useLaunchFields(
   const [advanced, setAdvanced] = useState(
     !!(values.transport || values.profile || values.permission || values.args || values.config),
   );
-  const [models, setModels] = useState<ModelCatalog>();
+  const [discovery, setDiscovery] = useState<{
+    key: string;
+    catalog?: ModelCatalog;
+    error?: string;
+    blocked?: boolean;
+  }>();
   const [modelLoad, setModelLoad] = useState(0);
-  const [modelError, setModelError] = useState<string>();
   const workspace = localWorkspace(connection.apiUrl)?.dir;
   const context = launchContext(values, metadata, workspace);
   const profile = values.profile === "__default__" ? "" : values.profile || context.preset?.profile || "";
-  const profiles = context.target?.profilesByAgent[context.backend] ?? context.agent?.profiles ?? [];
+  const passwordTarget = context.target?.auth === "password";
+  const connected = context.target?.connected;
+  const discoveryKey = JSON.stringify([
+    connection.apiUrl,
+    connection.token,
+    context.backend,
+    values.target,
+    profile,
+    passwordTarget,
+    connected,
+  ]);
+  const remoteBlocked = discovery?.key === discoveryKey && discovery.blocked;
+  const models = discovery?.key === discoveryKey ? discovery.catalog : undefined;
+  const modelError = discovery?.key === discoveryKey ? discovery.error : undefined;
+  const display = launchSettingsDisplay(values, metadata, models, workspace);
+  const profiles = display.profiles;
   const efforts = modelEfforts(models, values.model, context.preset?.model);
   const modelChoice = defaultsModelChoice(models, values.model, baselineModel);
   useEffect(() => {
     const controller = new AbortController();
-    setModels(undefined);
-    setModelError(undefined);
+    setDiscovery(undefined);
     if (!context.backend) return;
-    void new WaypointClient(connection.apiUrl)
-      .models(connection.token, context.backend, values.target, profile, controller.signal)
-      .then((catalog) => {
-        if (!controller.signal.aborted) setModels(catalog);
+    void discoverLaunchModels(
+      new WaypointClient(connection.apiUrl),
+      connection.token,
+      context.backend,
+      values.target,
+      profile,
+      passwordTarget,
+      controller.signal,
+    )
+      .then((result) => {
+        if (!controller.signal.aborted) setDiscovery({ key: discoveryKey, ...result });
       })
       .catch(() => {
-        if (!controller.signal.aborted) setModelError("Could not load models. Reload them to retry.");
+        if (!controller.signal.aborted)
+          setDiscovery({ key: discoveryKey, error: "Could not load models. Reload them to retry." });
       });
     return () => controller.abort();
-  }, [connection.apiUrl, connection.token, context.backend, values.target, profile, modelLoad]);
+  }, [
+    connection.apiUrl,
+    connection.token,
+    context.backend,
+    values.target,
+    profile,
+    passwordTarget,
+    connected,
+    modelLoad,
+  ]);
   function set<K extends keyof ChatDefaults>(key: K, value: ChatDefaults[K]) {
     setValues((current) => ({ ...current, [key]: value }));
   }
@@ -81,11 +118,14 @@ export function useLaunchFields(
         value={values.preset}
         onChange={(value) => reset("preset", value)}
       >
-        <Form.Dropdown.Item value="default" title="Server default preset" />
+        <Form.Dropdown.Item value="default" title={display.defaultPreset} />
         <Form.Dropdown.Item value="none" title="No preset" />
         {metadata.presets.map((preset) => (
           <Form.Dropdown.Item key={preset.id} value={preset.id} title={preset.name} />
         ))}
+        {!["default", "none"].includes(values.preset) && !context.preset && (
+          <Form.Dropdown.Item value={values.preset} title={`Unavailable · ${values.preset}`} />
+        )}
       </Form.Dropdown>
       <Form.Dropdown
         id="target"
@@ -110,8 +150,17 @@ export function useLaunchFields(
             : "Leave empty to use the target or server default. This path is on Waypoint's execution target."
         }
       />
-      <Form.Dropdown id="agent" title="Agent" value={values.agent} onChange={(value) => reset("agent", value)}>
-        <Form.Dropdown.Item value="" title={`Inherit · ${context.backend}`} />
+      <Form.Dropdown
+        id="agent"
+        title="Agent"
+        value={values.agent}
+        onChange={(value) => reset("agent", value)}
+        info="The first option follows the preset, target, or server default. Choose an agent to override it."
+      >
+        <Form.Dropdown.Item value="" title={display.agent} />
+        {values.agent && !context.agent && (
+          <Form.Dropdown.Item value={values.agent} title={`Unavailable · ${values.agent}`} />
+        )}
         {metadata.agents
           .filter(
             (agent) =>
@@ -126,12 +175,13 @@ export function useLaunchFields(
         id="model"
         title="Model"
         value={modelChoice}
+        info="The first option follows the preset or server. Agent default bypasses the preset; other models override it."
         onChange={(value) => {
           if (value !== customModelValue && value !== values.model)
             setValues((current) => ({ ...current, model: value, effort: "" }));
         }}
       >
-        {defaultsModelChoices(models, values.model, baselineModel).map((choice) => (
+        {defaultsModelChoices(models, values.model, baselineModel, display.model).map((choice) => (
           <Form.Dropdown.Item key={choice.value} value={choice.value} title={choice.title} />
         ))}
       </Form.Dropdown>
@@ -147,9 +197,18 @@ export function useLaunchFields(
         />
       )}
       {!!efforts.length && (
-        <Form.Dropdown id="effort" title="Effort" value={values.effort} onChange={(value) => set("effort", value)}>
-          <Form.Dropdown.Item value="" title="Inherit from preset or server" />
-          <Form.Dropdown.Item value="__default__" title="Agent default effort" />
+        <Form.Dropdown
+          id="effort"
+          title="Effort"
+          value={values.effort}
+          onChange={(value) => set("effort", value)}
+          info="The first option follows the preset or server. Agent default bypasses the preset effort."
+        >
+          <Form.Dropdown.Item value="" title={display.effort} />
+          <Form.Dropdown.Item value="__default__" title={`${display.defaultEffort} · Agent default`} />
+          {values.effort && values.effort !== "__default__" && !efforts.includes(values.effort) && (
+            <Form.Dropdown.Item value={values.effort} title={values.effort} />
+          )}
           {efforts.map((effort) => (
             <Form.Dropdown.Item key={effort} value={effort} title={effort} />
           ))}
@@ -163,12 +222,13 @@ export function useLaunchFields(
             id="transport"
             title="Interface"
             value={values.transport}
+            info="The first option follows the preset or agent default. Choose an interface to override it."
             onChange={(value) => set("transport", value)}
           >
-            <Form.Dropdown.Item
-              value=""
-              title={`Inherit structured interface${context.transport ? ` · ${interfaceName(metadata, context.transport)}` : ""}`}
-            />
+            <Form.Dropdown.Item value="" title={display.transport} />
+            {values.transport && !context.transports.includes(values.transport) && (
+              <Form.Dropdown.Item value={values.transport} title={`Unavailable · ${values.transport}`} />
+            )}
             {context.transports.map((transport) => (
               <Form.Dropdown.Item key={transport} value={transport} title={interfaceName(metadata, transport)} />
             ))}
@@ -177,12 +237,18 @@ export function useLaunchFields(
             id="profile"
             title="Account Profile"
             value={values.profile}
+            info="The first option follows the preset. No profile uses the agent's default account; named accounts override the preset."
             onChange={(value) => {
               setValues((current) => ({ ...current, profile: value, model: "", effort: "" }));
             }}
           >
-            <Form.Dropdown.Item value="" title="Inherit from preset or server" />
-            <Form.Dropdown.Item value="__default__" title="Agent default profile" />
+            <Form.Dropdown.Item value="" title={display.inheritedProfile} />
+            <Form.Dropdown.Item value="__default__" title="No profile · Agent default" />
+            {values.profile &&
+              values.profile !== "__default__" &&
+              !profiles.some((entry) => entry.id === values.profile) && (
+                <Form.Dropdown.Item value={values.profile} title={`Unavailable · ${values.profile}`} />
+              )}
             {profiles.map((entry) => (
               <Form.Dropdown.Item key={entry.id} value={entry.id} title={entry.label} />
             ))}
@@ -191,9 +257,13 @@ export function useLaunchFields(
             id="permission"
             title="Permission Mode"
             value={values.permission}
+            info="The first option follows the preset or agent default. Choose a permission mode to override it."
             onChange={(value) => set("permission", value)}
           >
-            <Form.Dropdown.Item value="" title="Inherit from preset or server" />
+            <Form.Dropdown.Item value="" title={display.permission} />
+            {values.permission && !context.agent?.permissions.some((entry) => entry.id === values.permission) && (
+              <Form.Dropdown.Item value={values.permission} title={values.permission} />
+            )}
             {context.agent?.permissions.map((permission) => (
               <Form.Dropdown.Item key={permission.id} value={permission.id} title={permission.label} />
             ))}
@@ -241,6 +311,12 @@ export function useLaunchFields(
         </>
       )}
       {modelError && <Form.Description title="Model Discovery" text={modelError} />}
+      {remoteBlocked && (
+        <Form.Description
+          title="Model Discovery"
+          text="Connect this SSH target to discover its default model and effort."
+        />
+      )}
     </>
   );
   return { fields, problem, modelError, reloadModels: () => setModelLoad((value) => value + 1), workspace };

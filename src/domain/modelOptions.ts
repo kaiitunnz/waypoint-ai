@@ -1,5 +1,25 @@
 import { ModelCatalog } from "../api/models";
 
+export function modelLabel(catalog: ModelCatalog | undefined, id: string | undefined): string | undefined {
+  if (!id) return undefined;
+  return (
+    catalog?.models.find((entry) => entry.id === id)?.label ??
+    (id === catalog?.defaultModel ? catalog.defaultLabel : undefined) ??
+    id
+  );
+}
+
+export function defaultModelLabel(catalog: ModelCatalog | undefined): string | undefined {
+  return catalog?.defaultLabel || modelLabel(catalog, catalog?.defaultModel);
+}
+
+// New launches pass the configured effort to the agent before its own model default can apply.
+export function defaultEffort(catalog: ModelCatalog | undefined, model?: string, launch = true): string | undefined {
+  const option = catalog?.models.find((entry) => entry.id === (model || catalog.defaultModel));
+  if (option?.efforts?.length === 0) return undefined;
+  return (launch ? catalog?.defaultEffort : undefined) || option?.defaultEffort;
+}
+
 export function modelEfforts(catalog: ModelCatalog | undefined, selected: string, inherited?: string): string[] {
   if (!catalog) return [];
   const model = selected === "__default__" ? catalog.defaultModel : selected || inherited || catalog.defaultModel;
@@ -26,12 +46,13 @@ export function defaultsModelChoices(
   catalog: ModelCatalog | undefined,
   model: string,
   saved: string,
+  inherited?: string,
 ): { value: string; title: string }[] {
   const choice = defaultsModelChoice(catalog, model, saved);
   const listed = (id: string) => !!catalog?.models.some((entry) => entry.id === id);
   const choices = [
-    { value: "", title: "Inherit from preset or server" },
-    { value: "__default__", title: "Agent default model" },
+    { value: "", title: inherited || defaultModelLabel(catalog) || "Agent default model" },
+    { value: "__default__", title: `${defaultModelLabel(catalog) || "Model"} · Agent default` },
   ];
   if (model && model === saved && model !== "__default__" && !listed(model))
     choices.push({ value: model, title: catalog ? `Custom · ${model}` : model });

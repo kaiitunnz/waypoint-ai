@@ -2,7 +2,7 @@ import { PermissionMode, ServerMetadata, TransportCapabilities } from "../api/co
 import { ModelCatalog } from "../api/models";
 import { Session, UsageSource } from "../api/sessions";
 import { LaunchSettings, TransportOption, UsageProvider } from "../api/settings";
-import { customModelValue, modelEfforts } from "./modelOptions";
+import { customModelValue, defaultEffort, defaultModelLabel, modelEfforts, modelLabel } from "./modelOptions";
 import { interfaceName, structuredTransport } from "./sessions";
 
 export interface Capabilities extends TransportCapabilities {
@@ -25,6 +25,7 @@ export interface SettingsBaseline {
   cwd: string;
   title: string;
   model: string | null;
+  resolvedModel?: string;
   effort: string | null;
   permission: string | null;
   profileId: string | null;
@@ -45,6 +46,7 @@ export function settingsBaseline(session: Session, launch?: LaunchSettings): Set
     cwd: session.cwd,
     title: session.title,
     model: session.modelSelection,
+    resolvedModel: session.model,
     effort: session.effort,
     permission: session.permissionMode ?? null,
     profileId: launch ? (launch.profileId ?? null) : (session.profile?.id ?? null),
@@ -397,9 +399,9 @@ export function modelChoice(catalog: ModelCatalog | undefined, baseline: Setting
 
 // Every option list includes the baseline, so a controlled dropdown never falls back to its first item.
 export function modelChoices(catalog: ModelCatalog | undefined, baseline: SettingsBaseline, draft: SettingsDraft) {
-  const choices: Choice[] = [
-    { value: defaultValue, title: catalog?.defaultLabel ? `Default (${catalog.defaultLabel})` : "Default" },
-  ];
+  const currentDefault = sessionDefaultModel(baseline, draft);
+  const label = modelLabel(catalog, currentDefault) || defaultModelLabel(catalog);
+  const choices: Choice[] = [{ value: defaultValue, title: label ? `${label} · Default` : "Agent default model" }];
   if (baseline.model && !listed(catalog, baseline.model))
     choices.push({ value: baseline.model, title: `Custom · ${baseline.model}` });
   // Kept while free text is allowed, so typing through a listed ID doesn't remove the selected item.
@@ -410,9 +412,21 @@ export function modelChoices(catalog: ModelCatalog | undefined, baseline: Settin
   return choices;
 }
 
+function sessionDefaultModel(baseline: SettingsBaseline, draft: SettingsDraft): string | undefined {
+  return baseline.model === null &&
+    draft.model === null &&
+    draft.profileId === baseline.profileId &&
+    draft.transport === baseline.transport
+    ? baseline.resolvedModel
+    : undefined;
+}
+
 export function effortChoices(catalog: ModelCatalog | undefined, baseline: SettingsBaseline, draft: SettingsDraft) {
-  const efforts = modelEfforts(catalog, draft.model ?? defaultValue);
-  const choices: Choice[] = [{ value: defaultValue, title: "Default" }];
+  const model = draft.model ?? sessionDefaultModel(baseline, draft);
+  const efforts = modelEfforts(catalog, model || defaultValue);
+  // Resetting an existing session clears the adapter's effort; it doesn't reapply launch configuration.
+  const effort = defaultEffort(catalog, model, false);
+  const choices: Choice[] = [{ value: defaultValue, title: effort ? `${effort} · Default` : "Agent default effort" }];
   for (const value of [baseline.effort, draft.effort])
     if (value && !efforts.includes(value) && !choices.some((c) => c.value === value))
       choices.push({ value, title: value });
