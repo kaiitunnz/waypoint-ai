@@ -1,6 +1,7 @@
 import { ApiError, WaypointClient } from "../api/client";
 import { InboxItem } from "../api/inbox";
 import { Connection, ConnectionState } from "../domain/connections";
+import { pendingBlocks } from "../domain/inbox";
 
 export const menuBarItems = 10;
 
@@ -11,6 +12,12 @@ export type MenuBarData =
   | { kind: "sign-in"; server: Server }
   | { kind: "unreachable"; server: Server; message: string }
   | { kind: "no-server" };
+
+// How the menu bar icon lights up. Only the listed items are known, so "waiting" means one of them needs an answer.
+export function menuBarLamp(data: MenuBarData | undefined): "off" | "open" | "waiting" {
+  if (data?.kind !== "items" || !data.count) return "off";
+  return data.items.some((item) => pendingBlocks(item).length) ? "waiting" : "open";
+}
 
 export function activeConnection(state: ConnectionState): Connection | undefined {
   return state.connections.find((item) => item.id === (state.activeId ?? state.defaultId)) ?? state.connections[0];

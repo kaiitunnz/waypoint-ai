@@ -111,7 +111,7 @@ A reply replaces the earlier reply on that part of the item, so the form opens w
 
 ![Answer Question](docs/screenshots/inbox-answer.jpg)
 
-**Waypoint Inbox Count** shows the number of open items on the active server in the menu bar and lists up to ten of them; choosing one opens it in Waypoint Inbox, showing resolved items if it has resolved since. It refreshes every five minutes, when opened, and after changes made in Waypoint Inbox.
+**Waypoint Inbox Count** shows the number of open items on the active server in the menu bar and lists up to ten of them. Its icon turns blue while items are open and orange when a listed item waits for your answer; choosing one opens it in Waypoint Inbox, showing resolved items if it has resolved since. It refreshes every five minutes, when opened, and after changes made in Waypoint Inbox.
 
 ## Quick Chat
 

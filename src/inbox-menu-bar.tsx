@@ -1,7 +1,7 @@
-import { Icon, LaunchType, MenuBarExtra, launchCommand } from "@raycast/api";
+import { Color, Icon, LaunchType, MenuBarExtra, launchCommand } from "@raycast/api";
 import { usePromise } from "@raycast/utils";
 import { senderName } from "./domain/inbox";
-import { loadMenuBar } from "./hooks/inboxMenuBar";
+import { loadMenuBar, menuBarLamp } from "./hooks/inboxMenuBar";
 import { connectionStore } from "./storage/raycast";
 
 const openInbox = (context?: { itemId: string; serverId: string }) =>
@@ -11,12 +11,21 @@ export default function InboxMenuBar() {
   // Raycast keeps a menu bar command loaded only while `isLoading` is set.
   const { data, isLoading } = usePromise(async () => loadMenuBar(await connectionStore.read()));
   const count = data?.kind === "items" ? data.count : 0;
+  const lamp = menuBarLamp(data);
   return (
     <MenuBarExtra
       isLoading={isLoading}
-      icon={Icon.Tray}
+      icon={
+        lamp === "off" ? Icon.Tray : { source: Icon.Tray, tintColor: lamp === "waiting" ? Color.Orange : Color.Blue }
+      }
       title={count ? String(count) : undefined}
-      tooltip={count ? `${count} open in the Waypoint inbox` : "Waypoint inbox"}
+      tooltip={
+        lamp === "waiting"
+          ? `${count} open in the Waypoint inbox, some waiting for your answer`
+          : count
+            ? `${count} open in the Waypoint inbox`
+            : "Waypoint inbox"
+      }
     >
       {data?.kind === "items" && (
         <MenuBarExtra.Section title={`${data.server.name} · ${data.count ? `${data.count} open` : "Nothing open"}`}>

@@ -8,7 +8,7 @@ import { InboxBlock, parseInboxItem } from "../src/api/inbox";
 import { initialForm } from "../src/domain/inbox";
 import { InboxReplySubmitter } from "../src/hooks/inboxReply";
 import { holds, submitBlock } from "../src/hooks/inboxSubmit";
-import { loadMenuBar } from "../src/hooks/inboxMenuBar";
+import { loadMenuBar, menuBarLamp } from "../src/hooks/inboxMenuBar";
 import { DraftStore, draftKeys } from "../src/storage/drafts";
 import { approvalWire, itemWire, questionWire } from "./fixtures/inbox";
 
@@ -270,6 +270,12 @@ test("the menu bar shows the active server's open items or what it needs", async
     client(() => respond({ items: [itemWire("a"), itemWire("b")], has_more: false })),
   );
   assert.ok(some.kind === "items" && some.count === 2 && some.items.length === 2);
+  assert.equal(menuBarLamp(some), "open");
+  const waiting = await loadMenuBar(
+    state,
+    client(() => respond({ items: [itemWire("a"), itemWire("q", { blocks: [questionWire("q")] })], has_more: false })),
+  );
+  assert.equal(menuBarLamp(waiting), "waiting");
   const none = await loadMenuBar(
     state,
     () =>
@@ -280,6 +286,8 @@ test("the menu bar shows the active server's open items or what it needs", async
       ),
   );
   assert.ok(none.kind === "items" && none.count === 0);
+  assert.equal(menuBarLamp(none), "off");
+  assert.equal(menuBarLamp(undefined), "off");
   assert.equal(
     (
       await loadMenuBar(
