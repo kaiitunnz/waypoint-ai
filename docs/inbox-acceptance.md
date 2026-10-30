@@ -26,7 +26,7 @@ The macOS Raycast pass used the development extension against an isolated Waypoi
 
 Waypoint wakes a session for a change made while it's busy once it's idle again; wakes for items a person posted go to no session.
 
-Not exercised natively: a submit Waypoint doesn't confirm, an answer Waypoint rejects, an upload to a deleted posting session, closing a form after an unconfirmed reply, and Open in Waypoint (the temporary server had no frontend URL). Tests cover the first four.
+Not exercised natively: a submit Waypoint doesn't confirm, an answer Waypoint rejects, an upload to a deleted posting session, closing a form after an unconfirmed reply, Open in Waypoint (the temporary server had no frontend URL), and the menu bar icon's tint, which screen capture couldn't read on this machine. Tests cover the first four and which tint applies.
 
 ## Automated coverage
 
