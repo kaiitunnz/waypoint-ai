@@ -19,18 +19,17 @@ The macOS Raycast pass used the development extension against an isolated Waypoi
 | Reply again with new notes                                                | The form opened with the earlier notes and listed the earlier file; Waypoint stored the new notes with the same file                         |
 | Reply to an item a person posted                                          | The form offered notes only                                                                                                                  |
 | Choose an item from the menu bar                                          | The menu read “Inbox E2E · 5 open” with the five subjects and senders; the chosen item opened selected in Waypoint Inbox and was marked read |
+| Menu bar icon with open items                                             | Blue with only notes open, orange while a listed question waits, and plain with nothing open (checked by eye)                                |
 | Open the item with an attachment block                                    | The detail named the attachment                                                                                                              |
 | Open Session                                                              | The posting session's conversation opened, showing the wake input                                                                            |
 | Delete Item, and delete another item in Waypoint                          | Both left the server and the list                                                                                                            |
 | With resolved items shown, Delete Resolved Items                          | Waypoint removed every resolved item; only open ones remained                                                                                |
 
-Waypoint wakes a session for a change made while it's busy once it's idle again; wakes for items a person posted go to no session.
-
-Not exercised natively: a submit Waypoint doesn't confirm, an answer Waypoint rejects, an upload to a deleted posting session, closing a form after an unconfirmed reply, Open in Waypoint (the temporary server had no frontend URL), and the menu bar icon's tint, which screen capture couldn't read on this machine. Tests cover the first four and which tint applies.
+Not exercised natively: a submit Waypoint doesn't confirm, an answer Waypoint rejects, an upload to a deleted posting session, closing a form after an unconfirmed reply, and Open in Waypoint (the temporary server had no frontend URL). Tests cover the first four.
 
 ## Automated coverage
 
-`npm run verify` checks formatting, ESLint, strict types, 364 behavior and integration tests, Raycast validation, and build.
+`npm run verify` checks formatting, ESLint, strict types, 365 behavior and integration tests, Raycast validation, and build.
 
 Inbox tests cover:
 
